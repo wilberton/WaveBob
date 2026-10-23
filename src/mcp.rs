@@ -39,7 +39,7 @@ fn empty_params() -> Value {
 }
 
 enum Target {
-    Headless(Session),
+    Headless(Box<Session>),
     Attached(ipc::Client),
 }
 
@@ -62,7 +62,7 @@ pub struct McpServer {
 
 impl McpServer {
     pub fn headless() -> io::Result<Self> {
-        Self::new(Target::Headless(Session::default()))
+        Self::new(Target::Headless(Box::default()))
     }
 
     pub fn attach(directory: &Path, session_id: &str) -> io::Result<Self> {

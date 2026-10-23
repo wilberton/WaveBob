@@ -8,6 +8,7 @@ pub const GOLD: Color32 = Color32::from_rgb(205, 169, 72);
 #[derive(Clone, Copy)]
 pub enum Icon {
     Play,
+    Pause,
     Start,
     Loop,
     Minus,
@@ -25,7 +26,7 @@ pub fn icon_button(
     ui.add_enabled_ui(enabled, |ui| {
         let (rect, response) = ui.allocate_exact_size(
             Vec2::new(
-                if matches!(icon, Icon::Play) {
+                if matches!(icon, Icon::Play | Icon::Pause) {
                     46.0
                 } else {
                     34.0
@@ -69,6 +70,15 @@ pub fn icon_button(
                     color,
                     Stroke::NONE,
                 ));
+            }
+            Icon::Pause => {
+                for x in [-4.0, 4.0] {
+                    painter.rect_filled(
+                        Rect::from_center_size(c + Vec2::new(x, 0.0), Vec2::new(3.0, 13.0)),
+                        0.0,
+                        color,
+                    );
+                }
             }
             Icon::Start => {
                 painter.line_segment(
@@ -274,7 +284,7 @@ pub fn peaks(painter: &egui::Painter, rect: Rect, values: &[Peak], color: Color3
         && values
             .iter()
             .all(|peak| peak.end_frame - peak.start_frame == 1);
-    let y = |value: f64| rect.center().y - value as f32 * rect.height() * 0.45;
+    let y = |value: f64| rect.center().y - value.clamp(-1.0, 1.0) as f32 * rect.height() * 0.45;
     if individual {
         if values.len() == 1 {
             painter.hline(rect.x_range(), y(values[0].min), Stroke::new(1.0, color));

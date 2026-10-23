@@ -30,3 +30,9 @@ and presentation-only changes.
 
 **Presentation revision**: The version of view state, including active mode and
 panel layout, separate from audio edit history.
+
+**Requested transport**: The latest playback or seek intent accepted by the
+session, which may await the audio output boundary.
+
+**Applied transport**: The playback source and frame position currently adopted
+by the output renderer, identified by its handoff generation.

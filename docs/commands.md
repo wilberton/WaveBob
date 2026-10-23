@@ -1,8 +1,8 @@
 # Shared commands and headless execution
 
-Tickets 01–07 and 22 implement shared session commands, audio import, selection, GUI attachment, presentation
+Tickets 01–08 and 22 implement shared session commands, audio import, selection, playback, GUI attachment, presentation
 commands, actual framebuffer PNG capture and a [stdio MCP adapter](mcp.md).
-Playback and destructive editing arrive in later tickets. All adapters share command
+Destructive editing arrives in later tickets. See [playback commands](transport.md). All adapters share command
 definitions and core behavior. Snapshots are owned read models; views cannot
 change core state directly.
 

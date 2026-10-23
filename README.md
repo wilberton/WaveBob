@@ -5,7 +5,8 @@ The first seven implementation milestones provide shared session commands, a
 GUI-free JSON runner, attachment to named GUI instances, revision-fenced PNG
 screenshots, stdio MCP support, persistent panel layout and status-bar help.
 WAV and MP3 files open as background jobs and display real mono/stereo waveforms.
-Destructive audio editing and playback are not implemented yet.
+Native sample playback supports pause, seek and selection/whole-sample loops;
+see [transport controls and commands](docs/transport.md).
 Precise cursor/selection controls and overview/mouse/trackpad zoom and pan are
 available; see [waveform controls](docs/waveform.md).
 
@@ -30,7 +31,7 @@ Windows needs the MSVC C++ build tools and Windows SDK. macOS needs Xcode comman
 line tools. For Debian/Ubuntu Linux, install:
 
 ```sh
-sudo apt-get install build-essential pkg-config libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+sudo apt-get install build-essential pkg-config libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libasound2-dev
 ```
 
 The renderer is eframe's OpenGL backend, with X11 and Wayland enabled for Linux.
@@ -72,13 +73,14 @@ waveform and arrangement captures at wide, compact, narrow and 150% scale.
 - Clearly labeled synthetic arrangement preview until track editing lands.
 - Resizable/collapsible panels, a remembered library/browser split and bottom status help.
 - Library, browser, effects and transport placeholders with truthful empty-state readouts.
-- No playback, destructive editing, export or project persistence yet.
+- Native sample playback with requested/applied position and recoverable device errors.
+- Destructive editing, export and project persistence arrive in subsequent tickets.
 - The generated design sheet is a visual proposal, not a screenshot of the shell.
 
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
-current execution status. Tickets 01–07 and 22 are complete; derive subsequent
+current execution status. Tickets 01–08 and 22 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 

@@ -189,6 +189,34 @@ impl WaveBob {
     fn toggle_loop(&mut self) {
         self.dispatch(Command::ToggleLoop(EmptyParams {}));
     }
+    fn toggle_playback(&mut self) {
+        if self.host.frozen() {
+            return;
+        }
+        self.gesture = None;
+        if self.host.presentation().mode == ViewMode::Waveform
+            && let Some(document) = self.active_document()
+        {
+            self.dispatch(Command::TogglePlayback(DocumentParams {
+                document_id: document.id,
+            }));
+        } else if self.host.transport().requested.playing {
+            self.dispatch(Command::PausePlayback(EmptyParams {}));
+        }
+    }
+    fn rewind(&mut self) {
+        if self.host.frozen() {
+            return;
+        }
+        self.gesture = None;
+        if self.host.presentation().mode == ViewMode::Waveform
+            && let Some(document) = self.active_document()
+        {
+            self.dispatch(Command::RewindDocument(DocumentParams {
+                document_id: document.id,
+            }));
+        }
+    }
     fn set_mode(&mut self, mode: ViewMode) {
         self.dispatch(Command::SetMode(SetModeParams {
             mode,
@@ -214,7 +242,8 @@ impl WaveBob {
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.text_edit_focused()
+        if self.host.frozen()
+            || ctx.text_edit_focused()
             || self.dialog.is_some()
             || self.open_requested
             || !ctx.input(|input| input.focused)
@@ -256,6 +285,12 @@ impl WaveBob {
         if pressed(egui::Key::Slash) {
             self.toggle_loop();
         }
+        if pressed(egui::Key::Space) {
+            self.toggle_playback();
+        }
+        if pressed(egui::Key::Enter) || pressed(egui::Key::Comma) {
+            self.rewind();
+        }
     }
 
     // Independent of eframe::Frame for real egui pointer/key/focus tests.
@@ -274,7 +309,7 @@ impl WaveBob {
             self.host.set_transient_resources(Vec::new());
         }
         let mut help = Help::default();
-        let error = self.error.clone().or_else(|| match &presentation.preferences {
+        let error = self.error.clone().or(self.host.transport().output.error).or_else(|| match &presentation.preferences {
             PreferenceStatus::Error { .. } => Some("Layout preferences could not be saved or loaded. Check the preferences file and its permissions.".into()),
             _ => None,
         });
@@ -427,14 +462,29 @@ impl WaveBob {
             }
         });
         egui::Panel::bottom("transport").exact_size(48.0).frame(panel_frame()).show(ui,|ui| {
+            let output=self.host.transport();
+            let document=self.active_document();
+            let target=mode==ViewMode::Waveform && document.is_some();
+            let ready=output.output.status==wavebob::transport::OutputStatus::Ready;
+            let playing=output.requested.playing;
             let area=ui.max_rect();
             let group=Rect::from_center_size(area.center(),Vec2::new(340.0,32.0));
             let mut controls=child(ui,group);
             controls.horizontal(|ui| {
-                help.observe(&icon_button(ui,Icon::Start,"Rewind to start",false,false),"Rewind is unavailable until audio playback is implemented. Shortcut: Enter or comma.");
-                help.observe(&icon_button(ui,Icon::Play,"Play",true,false),"Playback is unavailable until ticket 08. Shortcut: Space.");
+                let rewind=icon_button(ui,Icon::Start,"Rewind to start",false,target);
+                help.observe(&rewind,if target {"Rewind to absolute start and preserve playing/paused state and selection. Shortcut: Enter or comma."} else {"Rewind is unavailable: no audio document is open in waveform mode. Shortcut: Enter or comma."});
+                if rewind.clicked() {self.rewind();}
+                if output.output.status==wavebob::transport::OutputStatus::Failed {
+                    let retry=ui.button("Retry output");
+                    help.observe(&retry,"Retry audio output after connecting or restoring a device.");
+                    if retry.clicked() {self.dispatch(Command::RetryOutput(EmptyParams{}));}
+                } else {
+                    let play=icon_button(ui,if playing {Icon::Pause} else {Icon::Play},if playing {"Pause"} else {"Play"},true,ready && (target || playing));
+                    help.observe(&play,if !target && !playing {"Playback is unavailable: no audio document is open in waveform mode. Shortcut: Space."} else if !ready {"Playback is unavailable while audio output initializes or in a session without an output adapter."} else {"Play or pause from the current cursor. Loop follows the selection or whole sample. Shortcut: Space."});
+                    if play.clicked() {self.toggle_playback();}
+                }
                 let response=icon_button(ui,Icon::Loop,"Loop",self.host.snapshot().loop_enabled,true);
-                help.observe(&response,"Toggle looping without starting playback. Shortcut: /.");
+                help.observe(&response,"Toggle looping without starting playback or changing selection. Shortcut: /.");
                 if response.clicked() {self.toggle_loop();}
                 ui.add_space(12.0);
                 let timing=self.active_document().map(|doc|format!("{}  /  {}",time(doc.cursor,doc.sample_rate),time(doc.frames,doc.sample_rate))).unwrap_or_else(||"—  /  —".into());
@@ -460,6 +510,15 @@ impl WaveBob {
             });
         self.status(ui, status, mode, &help, error.as_deref());
         self.host.end_frame(ui.ctx());
+        let transport = self.host.transport();
+        if transport.requested.playing
+            || transport.applied.playing
+            || transport.pending
+            || transport.output.status == wavebob::transport::OutputStatus::Initializing
+        {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(16));
+        }
     }
 
     fn library(&mut self, ui: &mut egui::Ui, area: Rect, help: &mut Help, layout: &PanelLayout) {

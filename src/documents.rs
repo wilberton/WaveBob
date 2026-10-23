@@ -180,6 +180,38 @@ impl Editor {
     pub fn active(&self) -> Option<String> {
         self.active.clone()
     }
+    pub fn playback_audio(
+        &self,
+        id: &str,
+    ) -> Result<(DocumentInfo, Arc<audio::Audio>), CommandError> {
+        let document = self.document(id)?.clone();
+        let audio = self.revisions.get(&document.revision_id).unwrap().clone();
+        Ok((document, audio))
+    }
+    pub fn activate_for_transport(&mut self, id: &str) {
+        self.active = Some(id.into());
+    }
+    pub fn update_playback_cursor(&mut self, id: &str, frame: u64) {
+        if let Some(document) = self.documents.iter_mut().find(|doc| doc.id == id) {
+            document.cursor = frame.min(document.frames);
+        }
+    }
+    pub fn seek(
+        &mut self,
+        id: &str,
+        frame: u64,
+        revision: &mut u64,
+    ) -> Result<DocumentInfo, CommandError> {
+        let document = self.document(id)?;
+        if frame > document.frames {
+            return Err(invalid_range());
+        }
+        if document.cursor != frame {
+            advance(revision)?;
+            self.update_playback_cursor(id, frame);
+        }
+        Ok(self.document(id)?.clone())
+    }
     pub fn set_wake(&mut self, wake: Wake) {
         self.wake = Some(wake);
     }

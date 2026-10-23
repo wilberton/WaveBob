@@ -115,6 +115,55 @@ fn text_shapes(output: &egui::FullOutput) -> Vec<(Rect, String)> {
 }
 
 #[test]
+fn transport_shortcuts_drive_the_shared_output_and_mode_switch_pauses() {
+    let (mut h, directory) = audio_harness();
+    let (session, mut output) = wavebob::Session::with_manual_output(48000).unwrap();
+    h.app.host = DesktopHost::with_session(session);
+    h.app.open_path(directory.path().join("Gestures.wav"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.active_document().is_none() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    let tap = |h: &mut Harness, key| {
+        h.frame(vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        h.frame(vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+    };
+    tap(&mut h, egui::Key::Space);
+    assert!(h.app.host.transport().requested.playing);
+    output.render_into(&mut [[0.0; 2]; 128]);
+    h.frame(vec![]);
+    assert_eq!(h.app.active_document().unwrap().cursor, 128);
+    tap(&mut h, egui::Key::Space);
+    output.render_into(&mut []);
+    h.frame(vec![]);
+    assert!(!h.app.host.transport().applied.playing);
+    assert_eq!(h.app.active_document().unwrap().cursor, 128);
+    tap(&mut h, egui::Key::Comma);
+    output.render_into(&mut []);
+    h.frame(vec![]);
+    assert_eq!(h.app.active_document().unwrap().cursor, 0);
+    tap(&mut h, egui::Key::Space);
+    h.app.set_mode(ViewMode::Multitrack);
+    output.render_into(&mut []);
+    h.frame(vec![]);
+    assert!(!h.app.host.transport().applied.playing);
+}
+
+#[test]
 fn chevrons_restore_independently_and_backtick_preserves_widths_in_both_modes() {
     for mode in [ViewMode::Waveform, ViewMode::Multitrack] {
         let mut h = Harness::new();

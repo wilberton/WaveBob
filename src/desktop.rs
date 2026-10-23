@@ -75,6 +75,14 @@ impl Default for DesktopHost {
 }
 
 impl DesktopHost {
+    pub fn with_session(session: Session) -> Self {
+        let mut host = Self::default();
+        host.session = session;
+        host
+    }
+    pub fn transport(&self) -> crate::transport::TransportSnapshot {
+        self.session.transport_snapshot()
+    }
     pub fn configure_preferences(&mut self, path: PathBuf, ctx: egui::Context) {
         let (preferences, layout, status) =
             crate::preferences::Preferences::open(path, move || {
@@ -97,6 +105,10 @@ impl DesktopHost {
             job_context.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
             job_context.request_repaint();
         }));
+        #[cfg(feature = "audio-output")]
+        if !self.session.audio_output_configured() {
+            self.session.enable_native_output();
+        }
         let (server, incoming) = ipc::Server::start(
             directory,
             &self.session.snapshot().session_id,
@@ -147,11 +159,26 @@ impl DesktopHost {
         }
         let mut presentation = self.presentation.clone();
         let result = match &request.command {
-            Command::GetCapabilities(_) => {
-                CommandResult::Capabilities(commands::capabilities(true))
-            }
+            Command::GetCapabilities(_) => CommandResult::Capabilities(commands::capabilities(
+                true,
+                self.session.audio_output_configured(),
+            )),
             Command::GetPresentation(_) => CommandResult::Presentation(self.presentation()),
             Command::SetMode(params) => {
+                if params.mode != presentation.mode {
+                    if self.presentation.revision == u64::MAX {
+                        return self.session.failure(
+                            Some(request.id),
+                            CommandError::new(
+                                ErrorCode::RevisionExhausted,
+                                "Presentation revision exhausted",
+                            ),
+                        );
+                    }
+                    if let Err(error) = self.session.pause_output() {
+                        return self.session.failure(Some(request.id), error);
+                    }
+                }
                 presentation.mode = params.mode;
                 return self.commit_presentation(request.id, presentation, false);
             }
@@ -408,6 +435,12 @@ impl DesktopHost {
                 .filter(|job| job.status == crate::documents::JobStatus::Running)
                 .map(|job| format!("job:{}", job.id))
                 .chain(self.transient_resources.iter().cloned())
+                .chain(self.session.transport_snapshot().pending.then(|| {
+                    format!(
+                        "transport-handoff:{}",
+                        self.session.transport_snapshot().requested.generation
+                    )
+                }))
                 .collect(),
         };
         let response = self.session.success(

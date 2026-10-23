@@ -110,7 +110,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 16);
+        assert_eq!(tools.len(), 19);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -442,6 +442,170 @@ mod live {
             ],
         )
         .await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI and default audio device"]
+    async fn native_playback_position_pause_loop_and_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "native-playback");
+        let client = named_client(runtime.path(), "native-playback").await;
+        let path = runtime.path().join("Quiet tone.wav");
+        let mut writer = hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: 48000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for frame in 0..240000 {
+            writer
+                .write_sample(
+                    ((frame as f64 * 440.0 * std::f64::consts::TAU / 48000.0).sin() * 1000.0)
+                        as i16,
+                )
+                .unwrap();
+        }
+        writer.finalize().unwrap();
+        let job = response(&call(&client, "documents.open", json!({"params":{"path":path}})).await)
+            ["result"]["id"]
+            .clone();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let id = loop {
+            let job = response(&call(&client, "jobs.get", json!({"params":{"job_id":job}})).await)
+                ["result"]
+                .clone();
+            if job["status"] == "succeeded" {
+                break job["result"]["id"].clone();
+            }
+            assert_ne!(job["status"], "failed", "{job}");
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        loop {
+            let state =
+                response(&call(&client, "transport.get", json!({})).await)["result"].clone();
+            assert_ne!(state["output"]["status"], "failed", "{state}");
+            if state["output"]["status"] == "ready" {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        response(
+            &call(
+                &client,
+                "transport.play",
+                json!({"params":{"document_id":id}}),
+            )
+            .await,
+        );
+        let playing = loop {
+            let state =
+                response(&call(&client, "transport.get", json!({})).await)["result"].clone();
+            if state["applied"]["playing"] == true
+                && state["applied"]["frame"].as_u64().unwrap() > 0
+                && state["peak_level"].as_f64().unwrap() > 0.0
+            {
+                break state;
+            }
+            assert!(Instant::now() < deadline, "{state}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        response(&call(&client, "transport.pause", json!({})).await);
+        let paused = loop {
+            let state =
+                response(&call(&client, "transport.get", json!({})).await)["result"].clone();
+            if state["pending"] == false && state["applied"]["playing"] == false {
+                break state;
+            }
+            assert!(Instant::now() < deadline);
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            response(&call(&client, "transport.get", json!({})).await)["result"]["applied"]["frame"],
+            paused["applied"]["frame"]
+        );
+        response(
+            &call(
+                &client,
+                "documents.selection.set",
+                json!({"params":{"document_id":id,"start_frame":48000,"end_frame":96000}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "transport.loop.set",
+                json!({"params":{"enabled":true}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "transport.rewind",
+                json!({"params":{"document_id":id}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "transport.play",
+                json!({"params":{"document_id":id}}),
+            )
+            .await,
+        );
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let looped = response(&call(&client, "transport.get", json!({})).await)["result"].clone();
+        assert!(
+            (48000..96000).contains(&looped["applied"]["frame"].as_u64().unwrap()),
+            "{looped}"
+        );
+        response(&call(&client, "transport.pause", json!({})).await);
+        while response(&call(&client, "transport.get", json!({})).await)["result"]["pending"]
+            == true
+        {
+            assert!(Instant::now() < deadline);
+        }
+        let capture = call(
+            &client,
+            "capture.png",
+            json!({"params":{"path":runtime.path().join("playback.png")}}),
+        )
+        .await;
+        let metadata = response(&capture);
+        assert_eq!(metadata["status"], "ok");
+        let image = capture
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("native-playback.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                Path::new(&directory).join("native-playback.json"),
+                serde_json::to_vec_pretty(
+                    &json!({"playing":playing,"paused":paused,"looped":looped,"capture":metadata}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
     }
 
     async fn saved_layout(client: &RunningService<RoleClient, ClientConfig>) -> Value {
@@ -1222,7 +1386,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 23);
+        assert_eq!(tools.len(), 30);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);
