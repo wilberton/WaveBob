@@ -19,6 +19,10 @@ required-features = ["gui"]
 name = "wavebob-headless"
 path = "src/bin/headless.rs"
 
+[[bin]]
+name = "wavebob-mcp"
+path = "src/bin/mcp.rs"
+
 [dependencies]
 eframe = { version = "=0.37.0", optional = true, default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 schemars = "1.2"
@@ -29,9 +33,13 @@ interprocess = "2.4"
 directories = "6"
 png = { version = "0.18", optional = true }
 tempfile = { version = "3", optional = true }
+rmcp = { version = "=3.7.0", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["macros", "rt", "sync"] }
+base64 = "0.23"
 
 [dev-dependencies]
 tempfile = "3"
+rmcp = { version = "=3.7.0", default-features = false, features = ["client", "transport-child-process"] }
 
 [profile.release]
 lto = "thin"

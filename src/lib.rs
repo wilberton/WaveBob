@@ -4,6 +4,7 @@ mod commands;
 #[cfg(feature = "gui")]
 pub mod desktop;
 pub mod ipc;
+pub mod mcp;
 pub mod presentation;
 pub mod protocol;
 

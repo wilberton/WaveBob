@@ -20,8 +20,8 @@ jobs:
         run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
       - name: Test headless without a window or audio device
         run: cargo test --locked --no-default-features --all-targets
-      - name: Build standalone headless runner
-        run: cargo build --locked --release --no-default-features --bin wavebob-headless
+      - name: Build standalone headless and MCP runners
+        run: cargo build --locked --release --no-default-features --bin wavebob-headless --bin wavebob-mcp
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked --all-targets
       - run: cargo build --locked --release

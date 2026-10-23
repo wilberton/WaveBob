@@ -5,7 +5,7 @@ attached GUI session, queries results and receives inspectable screenshots.
 
 **Blocked by:** 02 — Attach to the GUI and capture its actual pixels.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Stdio MCP tools expose catalogue, execution, queries, job results and capture;
   diagnostics do not corrupt protocol output.
