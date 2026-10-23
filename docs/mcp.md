@@ -60,7 +60,9 @@ exists in the adapter.
 
 An independent session advertises four tools: `session.capabilities`, `session.get`,
 `transport.loop.set` and `transport.loop.toggle`. An attached GUI also advertises
-`presentation.get`, `presentation.set_mode`, `presentation.barrier` and `capture.png`.
+`presentation.get`, `presentation.set_mode`, `presentation.layout.set`,
+`presentation.panels.toggle`, `presentation.barrier` and `capture.png` (ten tools
+in total). See [panel commands and preferences](layout.md) for layout behavior.
 Use `tools/list` for tool discovery or call `session.capabilities` for the full
 application catalogue. There is one catalogue page and no list-change subscription.
 

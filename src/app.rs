@@ -180,7 +180,7 @@ impl WaveBob {
                 help.observe(&response, "Drag to resize the file panel.");
                 if response.dragged() && let Some(pointer) = response.interact_pointer_pos() {
                     let other = if presentation.layout.right.visible { MIN_PANEL_WIDTH } else { COLLAPSED_WIDTH };
-                    self.layout(SetLayoutParams { left_width: Some((pointer.x - rect.left()).clamp(MIN_PANEL_WIDTH, (full_width - MIN_CENTER_WIDTH - other).max(MIN_PANEL_WIDTH))), ..Default::default() });
+                    self.layout(SetLayoutParams { left_width: Some((pointer.x - rect.left()).clamp(MIN_PANEL_WIDTH, (full_width - MIN_CENTER_WIDTH - other).max(MIN_PANEL_WIDTH)) as f64), ..Default::default() });
                 }
             } else {
                 let response = ui.put(Rect::from_min_size(rect.min+Vec2::new(1.0, 10.0), Vec2::new(22.0, 26.0)), egui::Button::new("›").frame(false));
@@ -197,7 +197,7 @@ impl WaveBob {
                 help.observe(&response, "Drag to resize the effects panel.");
                 if response.dragged() && let Some(pointer) = response.interact_pointer_pos() {
                     let other = if presentation.layout.left.visible { MIN_PANEL_WIDTH } else { COLLAPSED_WIDTH };
-                    self.layout(SetLayoutParams { right_width: Some((rect.right()-pointer.x).clamp(MIN_PANEL_WIDTH, (full_width - MIN_CENTER_WIDTH - other).max(MIN_PANEL_WIDTH))), ..Default::default() });
+                    self.layout(SetLayoutParams { right_width: Some((rect.right()-pointer.x).clamp(MIN_PANEL_WIDTH, (full_width - MIN_CENTER_WIDTH - other).max(MIN_PANEL_WIDTH)) as f64), ..Default::default() });
                 }
             } else {
                 let response = ui.put(Rect::from_min_size(rect.min+Vec2::new(1.0, 10.0), Vec2::new(22.0, 26.0)), egui::Button::new("‹").frame(false));
@@ -208,8 +208,8 @@ impl WaveBob {
         egui::Panel::bottom("transport").exact_size(56.0).frame(panel_frame()).show(ui, |ui| {
             ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
                 ui.add_space(((ui.available_width()-300.0)/2.0).max(0.0));
-                help.observe(&ui.add_enabled(false, egui::Button::new("|◀").min_size(Vec2::new(34.0,28.0))), "Rewind is unavailable until audio playback is implemented. Shortcut: Enter or comma.");
-                help.observe(&ui.add_enabled(false, egui::Button::new("▶").min_size(Vec2::new(44.0,28.0))), "Playback is unavailable: no audio document is open. Shortcut: Space.");
+                help.observe(&ui.add_enabled(false, egui::Button::new("Start").min_size(Vec2::new(40.0,28.0))), "Rewind is unavailable until audio playback is implemented. Shortcut: Enter or comma.");
+                help.observe(&ui.add_enabled(false, egui::Button::new("Play").min_size(Vec2::new(44.0,28.0))), "Playback is unavailable: no audio document is open. Shortcut: Space.");
                 let response = ui.add(egui::Button::new("Loop").selected(self.host.snapshot().loop_enabled).min_size(Vec2::new(44.0,28.0)));
                 help.observe(&response, "Toggle looping without starting playback. Shortcut: /.");
                 if response.clicked() { self.toggle_loop(); }
@@ -235,7 +235,7 @@ impl WaveBob {
     }
 
     fn library(&mut self, ui: &mut egui::Ui, area: Rect, help: &mut Help, layout: &PanelLayout) {
-        let split_y = area.top() + area.height() * layout.library_fraction;
+        let split_y = area.top() + area.height() * layout.library_fraction as f32;
         let upper = Rect::from_min_max(area.min, Pos2::new(area.right(), split_y - 4.0));
         let lower = Rect::from_min_max(Pos2::new(area.left(), split_y + 4.0), area.max);
         let mut library = child(ui, upper);
@@ -301,46 +301,51 @@ impl WaveBob {
         {
             self.layout(SetLayoutParams {
                 library_fraction: Some(
-                    ((pointer.y - area.top()) / area.height()).clamp(0.15, 0.85),
+                    ((pointer.y - area.top()) / area.height()).clamp(0.15, 0.85) as f64,
                 ),
                 ..Default::default()
             });
         }
         let mut browser = child(ui, lower);
-        section(&mut browser, "FILE BROWSER");
-        browser.add_space(6.0);
-        browser.label(
-            RichText::new("Samples  ›  Field recordings")
-                .small()
-                .color(MUTED),
-        );
-        browser.separator();
-        for folder in ["City", "Forest", "Indoor", "Weather"] {
-            help.observe(
-                &browser.add_enabled(
-                    false,
-                    egui::Button::new(format!("▸  {folder}")).frame(false),
-                ),
-                "Filesystem navigation is not implemented yet.",
-            );
-        }
-        browser.add_space(10.0);
-        for name in [
-            "Birds in trees.wav",
-            "Creek close.wav",
-            "Rain ambience.wav",
-            "Wind gusts.wav",
-        ] {
-            help.observe(
-                &browser.add_enabled(false, egui::Button::new(name).frame(false)),
-                "Opening and auditioning filesystem audio are not implemented yet.",
-            );
-        }
-        browser.add_space(12.0);
-        help.observe(
-            &browser.add_enabled(false, egui::Button::new("▶  Audition")),
+        egui::ScrollArea::vertical()
+            .id_salt("file-browser")
+            .auto_shrink([false, false])
+            .show(&mut browser, |browser| {
+                section(browser, "FILE BROWSER");
+                browser.add_space(6.0);
+                browser.label(
+                    RichText::new("Samples  ›  Field recordings")
+                        .small()
+                        .color(MUTED),
+                );
+                browser.separator();
+                for folder in ["City", "Forest", "Indoor", "Weather"] {
+                    help.observe(
+                        &browser.add_enabled(
+                            false,
+                            egui::Button::new(format!("›  {folder}")).frame(false),
+                        ),
+                        "Filesystem navigation is not implemented yet.",
+                    );
+                }
+                browser.add_space(10.0);
+                for name in [
+                    "Birds in trees.wav",
+                    "Creek close.wav",
+                    "Rain ambience.wav",
+                    "Wind gusts.wav",
+                ] {
+                    help.observe(
+                        &browser.add_enabled(false, egui::Button::new(name).frame(false)),
+                        "Opening and auditioning filesystem audio are not implemented yet.",
+                    );
+                }
+                browser.add_space(12.0);
+                help.observe(
+            &browser.add_enabled(false, egui::Button::new("Audition")),
             "Audition is unavailable until filesystem browsing and audio playback are implemented.",
         );
+            });
     }
 
     fn effects(&mut self, ui: &mut egui::Ui, area: Rect, help: &mut Help) {
@@ -364,7 +369,7 @@ impl WaveBob {
         help.observe(
             &content.add_enabled(
                 false,
-                egui::Button::new("No editing target  ▾").min_size(Vec2::new(area.width(), 26.0)),
+                egui::Button::new("No editing target").min_size(Vec2::new(area.width(), 26.0)),
             ),
             "Effects need an audio document or a selected arrangement clip.",
         );
@@ -388,7 +393,7 @@ impl WaveBob {
                     help.observe(
                         &ui.add_enabled(
                             false,
-                            egui::Button::new(label)
+                            centered_button(label)
                                 .min_size(Vec2::new((area.width() - 8.0) / 2.0, 28.0)),
                         ),
                         "This audio effect is not implemented yet; no editing target is open.",
@@ -400,7 +405,7 @@ impl WaveBob {
         help.observe(
             &content.add_enabled(
                 false,
-                egui::Button::new("Apply")
+                centered_button("Apply")
                     .fill(BLUE)
                     .min_size(Vec2::new(area.width(), 30.0)),
             ),
@@ -513,6 +518,9 @@ fn panel_frame() -> egui::Frame {
 }
 fn section(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).size(11.0).strong());
+}
+fn centered_button(text: &str) -> egui::Button<'_> {
+    egui::Button::new((egui::Atom::grow(), text, egui::Atom::grow()))
 }
 fn child(ui: &mut egui::Ui, rect: Rect) -> egui::Ui {
     let mut child = ui.new_child(

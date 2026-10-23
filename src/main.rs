@@ -54,7 +54,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => path,
         None => directories::ProjectDirs::from("org", "WaveBob", "WaveBob")
             .ok_or("User configuration directory is unavailable; pass --preferences FILE")?
-            .config_dir().join("layout.json"),
+            .config_dir()
+            .join("layout.json"),
     };
     eframe::run_native(
         &title,

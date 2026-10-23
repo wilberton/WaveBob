@@ -165,7 +165,7 @@ fn pointer_drags_resize_both_panels_and_the_library_browser_split() {
 #[test]
 fn hover_and_keyboard_focus_help_clear_without_tooltip_popups() {
     let mut h = Harness::new();
-    let play = h.text_rect("▶").center();
+    let play = h.text_rect("Play").center();
     h.frame(vec![egui::Event::PointerMoved(play)]);
     h.time += 3.0;
     let output = h.frame(Vec::new());

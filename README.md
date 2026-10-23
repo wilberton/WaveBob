@@ -1,9 +1,10 @@
 # WaveBob
 
 A native Rust + egui audio editor for Windows, macOS and Linux.
-The first three implementation milestones provide shared session commands, a
+The first four implementation milestones provide shared session commands, a
 GUI-free JSON runner, attachment to named GUI instances, revision-fenced PNG
-screenshots, stdio MCP support and a demo-data egui shell. Audio editing and
+screenshots, stdio MCP support, persistent panel layout and status-bar help.
+The editor still displays synthetic previews. Audio editing and
 playback are not implemented yet.
 
 ## Run
@@ -52,6 +53,8 @@ captures from the running release app.
 See [MCP setup and tools](docs/mcp.md) to configure an AI client and retrieve
 screenshots as image content. The [MCP verification record](docs/verification/ticket03/README.md)
 includes images retrieved from the release app.
+See [panels and status-bar help](docs/layout.md) and the
+[ticket 04 captures](docs/verification/ticket04/README.md) for layout controls.
 
 ## This milestone
 
@@ -61,14 +64,15 @@ includes images retrieved from the release app.
 - Explicit GUI instance discovery/attachment, mode commands and actual PNG captures.
 - Stdio MCP tools generated from the command registry, including PNG image delivery.
 - Synthetic waveform drawings and static multitrack lanes.
-- Library, browser, effects and transport layout placeholders.
-- No real file access, audio decoding, playback, editing, export or persistence.
+- Resizable/collapsible panels, a remembered library/browser split and bottom status help.
+- Library, browser, effects and transport placeholders with truthful empty-state readouts.
+- No audio file access, decoding, playback, editing, export or project persistence yet.
 - The generated design sheet is a visual proposal, not a screenshot of the shell.
 
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
-current execution status. Tickets 01–03 are complete; derive subsequent
+current execution status. Tickets 01–04 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 

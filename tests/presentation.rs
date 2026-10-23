@@ -32,7 +32,7 @@ fn panel_commands_are_atomic_revision_guarded_and_keep_core_state_unchanged() {
             ..Default::default()
         },
         SetLayoutParams {
-            left_width: Some(f32::NAN),
+            left_width: Some(f64::NAN),
             ..Default::default()
         },
         SetLayoutParams {

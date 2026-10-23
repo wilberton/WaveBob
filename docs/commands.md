@@ -1,6 +1,6 @@
 # Shared commands and headless execution
 
-Tickets 01–03 implement shared session commands, GUI attachment, presentation
+Tickets 01–04 implement shared session commands, GUI attachment, presentation
 commands, actual framebuffer PNG capture and a [stdio MCP adapter](mcp.md).
 Playback and file editing arrive in later tickets. All adapters share command
 definitions and core behavior. Snapshots are owned read models; views cannot
@@ -97,6 +97,8 @@ not process failures. There is no persistence across process restarts yet.
 | `transport.loop.toggle` | `{}` | Yes | Session snapshot |
 | `presentation.get` | `{}` | No | Presentation snapshot; GUI only |
 | `presentation.set_mode` | `{"mode":"multitrack"}` | Presentation | Presentation snapshot; GUI only |
+| `presentation.layout.set` | Optional widths, visibility, library fraction and revision guard | Presentation | Presentation snapshot; GUI only |
+| `presentation.panels.toggle` | Optional presentation revision guard | Presentation | Presentation snapshot; GUI only |
 | `presentation.barrier` | Minimum revisions and timeout | No | Render metadata; GUI only |
 | `capture.png` | Destination, overwrite intent, minimum revisions and timeout | No | PNG artifact and render metadata; GUI only |
 
@@ -108,8 +110,9 @@ The typed parameter/result models generate the schemas used by the registry;
 adapters do not maintain another catalogue.
 
 The independent GUI-free session advertises only the first four commands. GUI
-attachment advertises all eight. Sending a known GUI-only command to an independent
-session returns `missing_capability`, leaving its state unchanged.
+attachment advertises all ten. Sending a known GUI-only command to an independent
+session returns `missing_capability`, leaving its state unchanged. See [panels and
+status-bar help](layout.md) for layout commands, preferences and keyboard behavior.
 
 ## Presentation and capture
 
@@ -140,8 +143,8 @@ GUI-render timeout, which is a structured command error.
 
 `presentation.barrier` returns render metadata after actual readback, without
 writing an image. `capture.png` exports the complete client area: all currently
-implemented panels, central view and transport. Future status-bar controls will
-be included when implemented. Native window chrome/dialogs are outside capture.
+implemented panels, central view, transport and status bar. Native window chrome
+and dialogs are outside capture.
 
 Successful capture returns `path`, `mime_type: "image/png"` and `metadata` containing
 session ID, rendered core revision, presentation revision, active mode, frame

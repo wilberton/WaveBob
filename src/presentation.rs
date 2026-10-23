@@ -25,7 +25,7 @@ pub const COLLAPSED_WIDTH: f32 = 24.0;
 #[serde(deny_unknown_fields)]
 pub struct SidePanelLayout {
     pub visible: bool,
-    pub width: f32,
+    pub width: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -34,7 +34,7 @@ pub struct PanelLayout {
     pub left: SidePanelLayout,
     pub right: SidePanelLayout,
     /// Fraction of the left column reserved for open documents.
-    pub library_fraction: f32,
+    pub library_fraction: f64,
 }
 
 impl Default for PanelLayout {
@@ -57,7 +57,7 @@ impl PanelLayout {
     pub fn validate(&self) -> Result<(), crate::CommandError> {
         if [self.left.width, self.right.width]
             .iter()
-            .any(|width| !width.is_finite() || *width < MIN_PANEL_WIDTH)
+            .any(|width| !width.is_finite() || *width < MIN_PANEL_WIDTH as f64)
             || !self.library_fraction.is_finite()
             || !(0.15..=0.85).contains(&self.library_fraction)
         {
@@ -72,29 +72,33 @@ impl PanelLayout {
     /// Clamp rendered widths without overwriting the user's expanded sizes.
     pub fn effective_widths(&self, window_width: f32) -> [f32; 2] {
         let panels = [&self.left, &self.right];
-        let visible = panels.iter().filter(|panel| panel.visible).count() as f32;
-        let budget = (window_width - MIN_CENTER_WIDTH - (2.0 - visible) * COLLAPSED_WIDTH).max(0.0);
-        let minimum = visible * MIN_PANEL_WIDTH;
+        let visible = panels.iter().filter(|panel| panel.visible).count() as f64;
+        let min_width = MIN_PANEL_WIDTH as f64;
+        let budget = (window_width as f64
+            - MIN_CENTER_WIDTH as f64
+            - (2.0 - visible) * COLLAPSED_WIDTH as f64)
+            .max(0.0);
+        let minimum = visible * min_width;
         let extra = panels
             .iter()
             .filter(|panel| panel.visible)
-            .map(|panel| panel.width - MIN_PANEL_WIDTH)
-            .sum::<f32>();
+            .map(|panel| panel.width - min_width)
+            .sum::<f64>();
         let factor = if extra > 0.0 {
             ((budget - minimum) / extra).clamp(0.0, 1.0)
         } else {
             0.0
         };
         panels.map(|panel| {
-            if panel.visible {
+            (if panel.visible {
                 if budget < minimum {
                     budget / visible.max(1.0)
                 } else {
-                    MIN_PANEL_WIDTH + (panel.width - MIN_PANEL_WIDTH) * factor
+                    min_width + (panel.width - min_width) * factor
                 }
             } else {
-                COLLAPSED_WIDTH
-            }
+                COLLAPSED_WIDTH as f64
+            }) as f32
         })
     }
 }
@@ -115,13 +119,13 @@ pub enum PreferenceStatus {
 #[serde(deny_unknown_fields)]
 pub struct SetLayoutParams {
     #[schemars(range(min = 180))]
-    pub left_width: Option<f32>,
+    pub left_width: Option<f64>,
     #[schemars(range(min = 180))]
-    pub right_width: Option<f32>,
+    pub right_width: Option<f64>,
     pub left_visible: Option<bool>,
     pub right_visible: Option<bool>,
     #[schemars(range(min = 0.15, max = 0.85))]
-    pub library_fraction: Option<f32>,
+    pub library_fraction: Option<f64>,
     pub expected_presentation_revision: Option<u64>,
 }
 

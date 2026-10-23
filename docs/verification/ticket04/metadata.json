@@ -1,0 +1,210 @@
+[
+  {
+    "delivered_bytes": 128225,
+    "file": "waveform-expanded.png",
+    "layout": {
+      "left": {
+        "visible": true,
+        "width": 320.0
+      },
+      "library_fraction": 0.42,
+      "right": {
+        "visible": true,
+        "width": 280.0
+      }
+    },
+    "metadata": {
+      "frame_number": 15,
+      "height": 900,
+      "mode": "waveform",
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "rendered_revision": 0,
+      "scale": 1.0,
+      "session_id": "90b9a2f8-93cf-4f31-bc28-c25724c03683",
+      "width": 1440
+    }
+  },
+  {
+    "delivered_bytes": 111294,
+    "file": "waveform-left-hidden.png",
+    "layout": {
+      "left": {
+        "visible": false,
+        "width": 320.0
+      },
+      "library_fraction": 0.42,
+      "right": {
+        "visible": true,
+        "width": 280.0
+      }
+    },
+    "metadata": {
+      "frame_number": 21,
+      "height": 900,
+      "mode": "waveform",
+      "pending_resources": [],
+      "presentation_revision": 2,
+      "rendered_revision": 0,
+      "scale": 1.0,
+      "session_id": "90b9a2f8-93cf-4f31-bc28-c25724c03683",
+      "width": 1440
+    }
+  },
+  {
+    "delivered_bytes": 101438,
+    "file": "waveform-hidden.png",
+    "layout": {
+      "left": {
+        "visible": false,
+        "width": 320.0
+      },
+      "library_fraction": 0.42,
+      "right": {
+        "visible": false,
+        "width": 280.0
+      }
+    },
+    "metadata": {
+      "frame_number": 27,
+      "height": 900,
+      "mode": "waveform",
+      "pending_resources": [],
+      "presentation_revision": 3,
+      "rendered_revision": 0,
+      "scale": 1.0,
+      "session_id": "90b9a2f8-93cf-4f31-bc28-c25724c03683",
+      "width": 1440
+    }
+  },
+  {
+    "delivered_bytes": 118321,
+    "file": "multitrack-expanded.png",
+    "layout": {
+      "left": {
+        "visible": true,
+        "width": 320.0
+      },
+      "library_fraction": 0.42,
+      "right": {
+        "visible": true,
+        "width": 280.0
+      }
+    },
+    "metadata": {
+      "frame_number": 35,
+      "height": 900,
+      "mode": "multitrack",
+      "pending_resources": [],
+      "presentation_revision": 5,
+      "rendered_revision": 0,
+      "scale": 1.0,
+      "session_id": "90b9a2f8-93cf-4f31-bc28-c25724c03683",
+      "width": 1440
+    }
+  },
+  {
+    "delivered_bytes": 85065,
+    "file": "multitrack-hidden.png",
+    "layout": {
+      "left": {
+        "visible": false,
+        "width": 320.0
+      },
+      "library_fraction": 0.42,
+      "right": {
+        "visible": false,
+        "width": 280.0
+      }
+    },
+    "metadata": {
+      "frame_number": 42,
+      "height": 900,
+      "mode": "multitrack",
+      "pending_resources": [],
+      "presentation_revision": 7,
+      "rendered_revision": 0,
+      "scale": 1.0,
+      "session_id": "90b9a2f8-93cf-4f31-bc28-c25724c03683",
+      "width": 1440
+    }
+  },
+  {
+    "delivered_bytes": 118321,
+    "file": "multitrack-restored.png",
+    "layout": {
+      "left": {
+        "visible": true,
+        "width": 320.0
+      },
+      "library_fraction": 0.42,
+      "right": {
+        "visible": true,
+        "width": 280.0
+      }
+    },
+    "metadata": {
+      "frame_number": 49,
+      "height": 900,
+      "mode": "multitrack",
+      "pending_resources": [],
+      "presentation_revision": 8,
+      "rendered_revision": 0,
+      "scale": 1.0,
+      "session_id": "90b9a2f8-93cf-4f31-bc28-c25724c03683",
+      "width": 1440
+    }
+  },
+  {
+    "delivered_bytes": 78440,
+    "file": "waveform-narrow.png",
+    "layout": {
+      "left": {
+        "visible": true,
+        "width": 320.0
+      },
+      "library_fraction": 0.37,
+      "right": {
+        "visible": true,
+        "width": 280.0
+      }
+    },
+    "metadata": {
+      "frame_number": 11,
+      "height": 600,
+      "mode": "waveform",
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "rendered_revision": 0,
+      "scale": 1.0,
+      "session_id": "bb3b9c77-7d50-495b-96e8-218e3e770a21",
+      "width": 800
+    }
+  },
+  {
+    "delivered_bytes": 89045,
+    "file": "multitrack-narrow.png",
+    "layout": {
+      "left": {
+        "visible": true,
+        "width": 320.0
+      },
+      "library_fraction": 0.37,
+      "right": {
+        "visible": true,
+        "width": 280.0
+      }
+    },
+    "metadata": {
+      "frame_number": 17,
+      "height": 600,
+      "mode": "multitrack",
+      "pending_resources": [],
+      "presentation_revision": 2,
+      "rendered_revision": 0,
+      "scale": 1.0,
+      "session_id": "bb3b9c77-7d50-495b-96e8-218e3e770a21",
+      "width": 800
+    }
+  }
+]

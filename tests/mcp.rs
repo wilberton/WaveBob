@@ -260,6 +260,14 @@ mod live {
     struct Gui(std::process::Child);
     impl Gui {
         fn start(runtime: &Path, name: &str) -> Self {
+            Self::with_profile(
+                runtime,
+                name,
+                &runtime.join(format!("{name}-layout.json")),
+                "1440x900",
+            )
+        }
+        fn with_profile(runtime: &Path, name: &str, preferences: &Path, size: &str) -> Self {
             let executable = std::env::var_os("WAVEBOB_GUI_TEST_BIN")
                 .unwrap_or_else(|| env!("CARGO_BIN_EXE_wavebob").into());
             let mut command = Command::new(executable);
@@ -267,7 +275,8 @@ mod live {
                 .args(["--hidden", "--name", name, "--runtime-dir"])
                 .arg(runtime)
                 .arg("--preferences")
-                .arg(runtime.join(format!("{name}-layout.json")))
+                .arg(preferences)
+                .args(["--window-size", size])
                 .stdout(Stdio::null())
                 .stderr(fs::File::create(runtime.join(format!("{name}.log"))).unwrap());
             #[cfg(windows)]
@@ -277,6 +286,253 @@ mod live {
             }
             Self(command.spawn().unwrap())
         }
+    }
+
+    async fn named_client(runtime: &Path, name: &str) -> RunningService<RoleClient, ClientConfig> {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let id = loop {
+            if let Some(instance) = ipc::discover(runtime)
+                .unwrap()
+                .into_iter()
+                .find(|instance| instance.name == name)
+            {
+                break instance.session_id;
+            }
+            assert!(Instant::now() < deadline, "GUI did not register {name}");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        };
+        connect(
+            ProtocolVersion::V_2026_07_28,
+            &[
+                "--attach".as_ref(),
+                id.as_ref(),
+                "--runtime-dir".as_ref(),
+                runtime.as_os_str(),
+            ],
+        )
+        .await
+    }
+
+    async fn saved_layout(client: &RunningService<RoleClient, ClientConfig>) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let view =
+                response(&call(client, "presentation.get", json!({})).await)["result"].clone();
+            match view["preferences"]["status"].as_str() {
+                Some("saved") => return view,
+                Some("error") => panic!("Preference worker failed: {view}"),
+                _ => {}
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Preferences did not finish saving"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    async fn layout_capture(
+        client: &RunningService<RoleClient, ClientConfig>,
+        runtime: &Path,
+        label: &str,
+        size: [u32; 2],
+        records: &mut Vec<Value>,
+    ) {
+        let view = saved_layout(client).await;
+        let path = runtime.join(format!("{label}.png"));
+        let result = call(
+            client,
+            "capture.png",
+            json!({"params":{"path":path,"after_presentation_revision":view["revision"]}}),
+        )
+        .await;
+        let capture = response(&result);
+        assert_eq!(capture["status"], "ok");
+        assert_eq!(
+            capture["revision"], 0,
+            "Layout operations must not change core history"
+        );
+        let metadata = &capture["result"]["metadata"];
+        assert_eq!(metadata["mode"], view["mode"]);
+        assert_eq!(metadata["mode"], label.split('-').next().unwrap());
+        assert_eq!(metadata["presentation_revision"], view["revision"]);
+        let image = result
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        let png = BASE64_STANDARD.decode(&image.data).unwrap();
+        assert_eq!(png.len(), fs::metadata(&path).unwrap().len() as usize);
+        assert_eq!(png, fs::read(&path).unwrap());
+        let mut reader = png::Decoder::new(std::io::Cursor::new(&png))
+            .read_info()
+            .unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        let scale = metadata["scale"].as_f64().unwrap();
+        assert!((info.width as f64 / scale - size[0] as f64).abs() < 2.0);
+        assert!((info.height as f64 / scale - size[1] as f64).abs() < 2.0);
+        // Status text must still be painted at the bottom with either sidebar state.
+        let status_start =
+            ((info.height as f64 - 24.0 * scale).max(0.0) as usize) * info.width as usize * 4;
+        assert!(
+            pixels[status_start..info.buffer_size()]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|pixel| pixel[0] > 100 && pixel[1] > 110 && pixel[2] > 120)
+                .count()
+                > 50,
+            "Missing status-bar text"
+        );
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(Path::new(&directory).join(format!("{label}.png")), &png).unwrap();
+        }
+        records.push(json!({"file":format!("{label}.png"),"metadata":metadata,"layout":view["layout"],"delivered_bytes":png.len()}));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires real native GUI renderers; run explicitly on a desktop"]
+    async fn layout_controls_persist_and_both_modes_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let preferences = runtime.path().join("persistent-layout.json");
+        let mut gui = Gui::with_profile(runtime.path(), "layout-wide", &preferences, "1440x900");
+        let client = named_client(runtime.path(), "layout-wide").await;
+        let configured=response(&call(&client,"presentation.layout.set",json!({"params":{"left_width":320,"right_width":280,"library_fraction":0.42,"expected_presentation_revision":0}})).await);
+        assert_eq!(configured["result"]["revision"], 1);
+        let stale = response(
+            &call(
+                &client,
+                "presentation.layout.set",
+                json!({"params":{"left_width":500,"expected_presentation_revision":0}}),
+            )
+            .await,
+        );
+        assert_eq!(stale["error"]["code"], "stale_revision");
+        let invalid = response(
+            &call(
+                &client,
+                "presentation.layout.set",
+                json!({"params":{"left_width":100,"right_visible":false}}),
+            )
+            .await,
+        );
+        assert_eq!(invalid["error"]["code"], "invalid_params");
+        let expected = saved_layout(&client).await["layout"].clone();
+        let mut records = Vec::new();
+        for mode in ["waveform", "multitrack"] {
+            call(
+                &client,
+                "presentation.set_mode",
+                json!({"params":{"mode":mode}}),
+            )
+            .await;
+            layout_capture(
+                &client,
+                runtime.path(),
+                &format!("{mode}-expanded"),
+                [1440, 900],
+                &mut records,
+            )
+            .await;
+            call(
+                &client,
+                "presentation.layout.set",
+                json!({"params":{"left_visible":false}}),
+            )
+            .await;
+            if mode == "waveform" {
+                layout_capture(
+                    &client,
+                    runtime.path(),
+                    "waveform-left-hidden",
+                    [1440, 900],
+                    &mut records,
+                )
+                .await;
+            }
+            let hidden = response(&call(&client, "presentation.panels.toggle", json!({})).await);
+            assert_eq!(hidden["result"]["layout"]["left"]["visible"], false);
+            assert_eq!(hidden["result"]["layout"]["right"]["visible"], false);
+            layout_capture(
+                &client,
+                runtime.path(),
+                &format!("{mode}-hidden"),
+                [1440, 900],
+                &mut records,
+            )
+            .await;
+            call(&client, "presentation.panels.toggle", json!({})).await;
+            assert_eq!(saved_layout(&client).await["layout"], expected);
+        }
+        layout_capture(
+            &client,
+            runtime.path(),
+            "multitrack-restored",
+            [1440, 900],
+            &mut records,
+        )
+        .await;
+        call(
+            &client,
+            "presentation.layout.set",
+            json!({"params":{"left_visible":false,"library_fraction":0.37}}),
+        )
+        .await;
+        let persisted = saved_layout(&client).await["layout"].clone();
+        gui.0.kill().unwrap();
+        gui.0.wait().unwrap();
+        client.cancel().await.unwrap();
+        drop(gui);
+        let _restarted =
+            Gui::with_profile(runtime.path(), "layout-narrow", &preferences, "800x600");
+        let narrow = named_client(runtime.path(), "layout-narrow").await;
+        let restored = saved_layout(&narrow).await;
+        assert_eq!(
+            restored["layout"], persisted,
+            "Restart must restore visibility, widths and split ratio"
+        );
+        assert_eq!(restored["revision"], 0);
+        call(
+            &narrow,
+            "presentation.layout.set",
+            json!({"params":{"left_visible":true}}),
+        )
+        .await;
+        for mode in ["waveform", "multitrack"] {
+            call(
+                &narrow,
+                "presentation.set_mode",
+                json!({"params":{"mode":mode}}),
+            )
+            .await;
+            layout_capture(
+                &narrow,
+                runtime.path(),
+                &format!("{mode}-narrow"),
+                [800, 600],
+                &mut records,
+            )
+            .await;
+        }
+        let narrow_layout = saved_layout(&narrow).await["layout"].clone();
+        assert_eq!(
+            narrow_layout["left"]["width"], 320.0,
+            "Narrow rendering must retain preferred expanded widths"
+        );
+        assert_eq!(narrow_layout["right"]["width"], 280.0);
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::write(
+                Path::new(&directory).join("layout-metadata.json"),
+                serde_json::to_vec_pretty(&records).unwrap(),
+            )
+            .unwrap();
+        }
+        narrow.cancel().await.unwrap();
     }
     impl Drop for Gui {
         fn drop(&mut self) {
