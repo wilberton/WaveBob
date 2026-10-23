@@ -90,6 +90,11 @@ impl DesktopHost {
         name: String,
         ctx: egui::Context,
     ) -> std::io::Result<()> {
+        let job_context = ctx.clone();
+        self.session.set_waker(Arc::new(move || {
+            job_context.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+            job_context.request_repaint();
+        }));
         let (server, incoming) = ipc::Server::start(
             directory,
             &self.session.snapshot().session_id,
@@ -157,7 +162,7 @@ impl DesktopHost {
                 presentation.layout.right.visible = show;
                 return self.commit_presentation(request.id, presentation, true);
             }
-            _ => return self.session.execute(request),
+            _ => return self.session.execute_committed(request),
         };
         self.session.success(Some(request.id), result)
     }
@@ -199,6 +204,9 @@ impl DesktopHost {
     }
 
     pub fn begin_frame(&mut self, ctx: &egui::Context) {
+        if !self.frozen() {
+            self.session.poll_jobs();
+        }
         if let Some(status) = self
             .preferences
             .as_ref()
@@ -340,7 +348,14 @@ impl DesktopHost {
             width: 0,
             height: 0,
             scale: ctx.pixels_per_point(),
-            pending_resources: Vec::new(),
+            pending_resources: self
+                .session
+                .snapshot()
+                .jobs
+                .into_iter()
+                .filter(|job| job.status == crate::documents::JobStatus::Running)
+                .map(|job| format!("job:{}", job.id))
+                .collect(),
         };
         let response = self.session.success(
             Some(pending.id.clone()),

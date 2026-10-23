@@ -143,11 +143,14 @@ fn catalogue_advertises_only_implemented_commands_and_versioned_schemas() {
     );
     let result = &response["result"];
     assert_eq!(result["protocol_version"], 1);
-    assert_eq!(result["capabilities"], json!(["session", "transport.loop"]));
+    assert_eq!(
+        result["capabilities"],
+        json!(["session", "transport.loop", "documents", "waveform", "jobs"])
+    );
     assert_eq!(result["request_schema"]["additionalProperties"], false);
     assert!(result["response_schema"]["properties"]["revision"].is_object());
     let commands = result["commands"].as_array().unwrap();
-    assert_eq!(commands.len(), 4);
+    assert_eq!(commands.len(), 11);
     for command in commands {
         assert_eq!(command["input_schema"]["type"], "object");
         assert_eq!(command["input_schema"]["additionalProperties"], false);
@@ -155,6 +158,13 @@ fn catalogue_advertises_only_implemented_commands_and_versioned_schemas() {
             command["input_schema"]["$schema"],
             "https://json-schema.org/draft/2020-12/schema"
         );
+        if command["input_schema"]["required"]
+            .as_array()
+            .is_some_and(|fields| !fields.is_empty())
+            && command["name"] != "transport.loop.set"
+        {
+            continue;
+        }
         let request = json!({
             "id":"probe", "command":command["name"],
             "params": if command["name"] == "transport.loop.set" { json!({"enabled":true}) } else { json!({}) },

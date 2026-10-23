@@ -2,6 +2,7 @@ use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::documents::*;
 use crate::presentation::{
     CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, RenderMetadata,
     RenderParams, SetLayoutParams, SetModeParams,
@@ -85,6 +86,13 @@ command_registry! {
     GetCapabilities(EmptyParams) => ("session.capabilities", "Discover implemented commands and their schemas.", false, false, Capabilities),
     SetLoop(LoopParams) => ("transport.loop.set", "Set looping without starting audio playback.", true, false, SessionSnapshot),
     ToggleLoop(EmptyParams) => ("transport.loop.toggle", "Toggle looping without starting audio playback.", true, false, SessionSnapshot),
+    OpenDocument(OpenParams) => ("documents.open", "Import an audio file as a background job without changing its source.", true, false, JobInfo),
+    GetDocument(DocumentParams) => ("documents.get", "Inspect an open audio document and its immutable revision.", false, false, DocumentInfo),
+    ActivateDocument(DocumentParams) => ("documents.activate", "Choose the active audio document.", true, false, DocumentInfo),
+    ReadSamples(SamplesParams) => ("documents.samples", "Read a bounded range of actual decoded channel samples.", false, false, SamplesData),
+    GetWaveform(WaveformParams) => ("documents.waveform", "Query exact per-channel waveform extrema for a frame interval.", false, false, WaveformData),
+    GetJob(JobParams) => ("jobs.get", "Inspect background operation progress, result or failure.", false, false, JobInfo),
+    CancelJob(JobParams) => ("jobs.cancel", "Cancel unfinished background work without publishing partial audio.", true, false, JobInfo),
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, PresentationSnapshot),
     SetLayout(SetLayoutParams) => ("presentation.layout.set", "Set panel widths, visibility and library/browser split.", true, true, PresentationSnapshot),
@@ -94,7 +102,13 @@ command_registry! {
 }
 
 pub(crate) fn capabilities(gui: bool) -> Capabilities {
-    let mut capabilities = vec!["session".into(), "transport.loop".into()];
+    let mut capabilities = vec![
+        "session".into(),
+        "transport.loop".into(),
+        "documents".into(),
+        "waveform".into(),
+        "jobs".into(),
+    ];
     if gui {
         capabilities.extend(["presentation".into(), "capture.png".into()]);
     }

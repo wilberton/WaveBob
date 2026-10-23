@@ -199,7 +199,7 @@ fn hover_and_keyboard_focus_help_clear_without_tooltip_popups() {
             .iter()
             .any(|(rect, text)| rect.top() > 860.0
                 && (text.contains("waveform editing")
-                    || text.contains("synthetic waveform")
+                    || text.contains("Open a WAV")
                     || text.contains("arrangement view")))
     );
     // Backtick still works with a button focused, and removes its stale help.
@@ -311,4 +311,66 @@ fn gui_loop_action_and_headless_command_produce_the_same_state() {
         );
         assert_eq!(app.host.snapshot().revision, headless.snapshot().revision);
     }
+}
+
+#[test]
+fn open_action_real_channels_document_switching_and_failed_jobs_use_shared_state() {
+    let directory = tempfile::tempdir().unwrap();
+    for (name, channels, value) in [("Stereo.wav", 2, 16384_i16), ("Mono.wav", 1, -8192_i16)] {
+        let mut writer = hound::WavWriter::create(
+            directory.path().join(name),
+            hound::WavSpec {
+                channels,
+                sample_rate: 48000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for _ in 0..4800 {
+            for channel in 0..channels {
+                writer
+                    .write_sample(if channel == 0 { value } else { -value })
+                    .unwrap();
+            }
+        }
+        writer.finalize().unwrap();
+    }
+    let mut h = Harness::new();
+    let open = h.text_rect("Open audio…").center();
+    h.click(open);
+    assert!(
+        h.app.open_requested,
+        "The visible Open action requests a native file dialog"
+    );
+    h.app.open_requested = false;
+    for name in ["Stereo.wav", "Mono.wav"] {
+        h.app.open_path(directory.path().join(name));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h.app.active_document().is_none_or(|doc| doc.name != name) {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            h.frame(Vec::new());
+        }
+    }
+    assert_eq!(h.app.waveform.as_ref().unwrap().channels.len(), 1);
+    assert_eq!(h.app.waveform.as_ref().unwrap().channels[0][0].min, -0.25);
+    h.app.set_mode(ViewMode::Multitrack);
+    let stereo = h.text_rect("Stereo.wav").center();
+    h.click(stereo);
+    assert_eq!(h.app.host.presentation().mode, ViewMode::Waveform);
+    let wave = h.app.waveform.as_ref().unwrap();
+    assert_eq!(wave.channels.len(), 2);
+    assert_eq!(wave.channels[0][0].max, 0.5);
+    assert_eq!(wave.channels[1][0].min, -0.5);
+    assert_eq!(h.app.active_document().unwrap().frames, 4800);
+    h.app.open_path(directory.path().join("missing.wav"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.error.is_none() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(Vec::new());
+    }
+    assert_eq!(h.app.host.snapshot().documents.len(), 2);
+    assert_eq!(h.app.active_document().unwrap().name, "Stereo.wav");
 }

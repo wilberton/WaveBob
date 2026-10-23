@@ -1,17 +1,21 @@
 use eframe::egui::{self, Align, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use std::{collections::HashSet, sync::mpsc};
 use wavebob::{Command, EmptyParams, Outcome, Request, desktop::DesktopHost, presentation::*};
+use wavebob::{CommandResult, documents::*};
 
 const BLUE: Color32 = Color32::from_rgb(0, 122, 255);
 const SURFACE: Color32 = Color32::from_rgb(20, 26, 33);
 const BORDER: Color32 = Color32::from_rgb(49, 60, 73);
 const MUTED: Color32 = Color32::from_rgb(145, 160, 179);
-const FILES: [&str; 3] = ["Rain ambience.wav", "Footsteps.wav", "Piano texture.wav"];
 
 #[derive(Default)]
 pub struct WaveBob {
-    selected: usize,
     host: DesktopHost,
     error: Option<String>,
+    waveform: Option<WaveformData>,
+    open_requested: bool,
+    dialog: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
+    reported_jobs: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -46,6 +50,94 @@ impl Help {
 }
 
 impl WaveBob {
+    fn open_path(&mut self, path: std::path::PathBuf) {
+        if let Some(path) = path.to_str() {
+            self.dispatch(Command::OpenDocument(OpenParams { path: path.into() }));
+            self.set_mode(ViewMode::Waveform);
+        } else {
+            self.error = Some("The selected path is not valid Unicode.".into());
+        }
+    }
+    fn poll_dialog(&mut self) {
+        if self.host.frozen() {
+            return;
+        }
+        if let Some(dialog) = &self.dialog {
+            match dialog.try_recv() {
+                Ok(path) => {
+                    self.dialog = None;
+                    if let Some(path) = path {
+                        self.open_path(path);
+                    }
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.dialog = None;
+                    self.error = Some("The file dialog failed to open.".into());
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+    }
+    fn start_dialog(&mut self, ctx: &egui::Context) {
+        if !self.open_requested || self.dialog.is_some() {
+            return;
+        }
+        self.open_requested = false;
+        let (sender, receiver) = mpsc::channel();
+        self.dialog = Some(receiver);
+        let ctx = ctx.clone();
+        // RFD dispatches windowed macOS dialogs to AppKit's main thread.
+        std::thread::spawn(move || {
+            let path = rfd::FileDialog::new()
+                .set_title("Open audio")
+                .add_filter("WAV audio", &["wav"])
+                .pick_file();
+            let _ = sender.send(path);
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+            ctx.request_repaint();
+        });
+    }
+    fn active_document(&self) -> Option<DocumentInfo> {
+        let snapshot = self.host.snapshot();
+        snapshot
+            .documents
+            .into_iter()
+            .find(|doc| Some(&doc.id) == snapshot.active_document_id.as_ref())
+    }
+    fn update_waveform(&mut self) {
+        if let Some(document) = self.active_document() {
+            if self
+                .waveform
+                .as_ref()
+                .is_none_or(|wave| wave.revision_id != document.revision_id)
+            {
+                let response = self.host.execute(Request::new(
+                    "gui-waveform",
+                    Command::GetWaveform(WaveformParams {
+                        document_id: document.id,
+                        revision_id: Some(document.revision_id),
+                        start_frame: 0,
+                        end_frame: None,
+                        bins: 2048,
+                    }),
+                ));
+                match response.outcome {
+                    Outcome::Ok {
+                        result: CommandResult::Waveform(waveform),
+                    } => self.waveform = Some(waveform),
+                    Outcome::Error { error } => self.error = Some(error.message),
+                    _ => {}
+                }
+            }
+        } else {
+            self.waveform = None;
+        }
+        for job in self.host.snapshot().jobs {
+            if job.status == JobStatus::Failed && self.reported_jobs.insert(job.id) {
+                self.error = job.error.map(|error| error.message);
+            }
+        }
+    }
     fn dispatch(&mut self, command: Command) {
         if self.host.frozen() {
             return;
@@ -85,6 +177,8 @@ impl WaveBob {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.text_edit_focused()
+            || self.dialog.is_some()
+            || self.open_requested
             || !ctx.input(|input| input.focused)
             || ctx.memory(|memory| memory.top_modal_layer().is_some())
             || egui::Popup::is_any_open(ctx)
@@ -109,6 +203,8 @@ impl WaveBob {
     // Independent of eframe::Frame for real egui pointer/key/focus tests.
     fn draw(&mut self, ui: &mut egui::Ui) {
         self.host.begin_frame(ui.ctx());
+        self.poll_dialog();
+        self.update_waveform();
         self.shortcuts(ui.ctx());
         let presentation = self.host.presentation();
         let mode = presentation.mode;
@@ -129,7 +225,12 @@ impl WaveBob {
                 left.horizontal(|ui| {
                     ui.label(RichText::new("WaveBob").strong().size(14.0));
                     ui.add_space(12.0);
-                    for name in ["File", "Edit", "View", "Help"] {
+                    let response = ui.button("Open…");
+                    help.observe(&response, "Open a WAV audio file in a new document.");
+                    if response.clicked() && !self.host.frozen() {
+                        self.open_requested = true;
+                    }
+                    for name in ["Edit", "View", "Help"] {
                         help.observe(
                             &ui.add_enabled(false, egui::Button::new(name).frame(false)),
                             "Menus will become available as editing features are added.",
@@ -214,7 +315,8 @@ impl WaveBob {
                 help.observe(&response, "Toggle looping without starting playback. Shortcut: /.");
                 if response.clicked() { self.toggle_loop(); }
                 ui.add_space(12.0);
-                ui.label(RichText::new("—  /  —").monospace().color(MUTED));
+                let timing = self.active_document().map(|doc| format!("{}  /  {}", time(doc.cursor,doc.sample_rate), time(doc.frames,doc.sample_rate))).unwrap_or_else(|| "—  /  —".into());
+                ui.label(RichText::new(timing).monospace().color(MUTED));
             });
         });
         egui::CentralPanel::default()
@@ -262,22 +364,50 @@ impl WaveBob {
         egui::ScrollArea::vertical()
             .id_salt("open-files")
             .show(&mut library, |ui| {
-                ui.label(
-                    RichText::new("No audio documents open")
-                        .small()
-                        .color(MUTED),
-                );
-                ui.add_space(8.0);
-                ui.label(RichText::new("SYNTHETIC PREVIEWS").size(10.0).color(MUTED));
-                for (index, name) in FILES.iter().enumerate() {
-                    let response = ui.selectable_label(self.selected == index, *name);
+                let snapshot = self.host.snapshot();
+                if snapshot.documents.is_empty() {
+                    ui.label(
+                        RichText::new("No audio documents open")
+                            .small()
+                            .color(MUTED),
+                    );
+                    let response = ui.button("Open audio…");
+                    help.observe(&response, "Open a WAV audio file in a new document.");
+                    if response.clicked() && !self.host.frozen() {
+                        self.open_requested = true;
+                    }
+                }
+                for document in snapshot.documents {
+                    let response = ui.selectable_label(
+                        snapshot.active_document_id.as_ref() == Some(&document.id),
+                        &document.name,
+                    );
                     help.observe(
                         &response,
-                        "Show a synthetic waveform preview. This is not an open audio document.",
+                        "Show this document in the waveform editing view.",
                     );
-                    if response.clicked() && !self.host.frozen() {
-                        self.selected = index;
+                    if response.clicked() {
+                        self.dispatch(Command::ActivateDocument(DocumentParams {
+                            document_id: document.id,
+                        }));
                         self.set_mode(ViewMode::Waveform);
+                    }
+                }
+                for job in snapshot
+                    .jobs
+                    .iter()
+                    .filter(|job| job.status == JobStatus::Running)
+                {
+                    ui.add(
+                        egui::ProgressBar::new(job.progress as f32 / 100.0)
+                            .text(format!("Opening… {}%", job.progress)),
+                    );
+                    let response = ui.small_button("Cancel import");
+                    help.observe(&response, "Cancel this import without creating a document.");
+                    if response.clicked() {
+                        self.dispatch(Command::CancelJob(JobParams {
+                            job_id: job.id.clone(),
+                        }));
                     }
                 }
             });
@@ -413,25 +543,52 @@ impl WaveBob {
         );
     }
 
-    fn waveform_view(&self, ui: &mut egui::Ui, help: &mut Help) {
+    fn waveform_view(&mut self, ui: &mut egui::Ui, help: &mut Help) {
+        self.update_waveform();
+        let Some(document) = self.active_document() else {
+            ui.centered_and_justified(|ui| {
+                ui.label(
+                    RichText::new("Open an audio file to begin")
+                        .size(18.0)
+                        .color(MUTED),
+                );
+            });
+            return;
+        };
         ui.horizontal(|ui| {
-            ui.label(RichText::new(FILES[self.selected]).strong());
+            ui.label(RichText::new(&document.name).strong());
             ui.label(
-                RichText::new("SYNTHETIC PREVIEW · No audio loaded")
-                    .small()
-                    .color(MUTED),
+                RichText::new(format!(
+                    "{} Hz · {} · {}",
+                    document.sample_rate,
+                    if document.channels == 1 {
+                        "Mono"
+                    } else {
+                        "Stereo"
+                    },
+                    time(document.frames, document.sample_rate)
+                ))
+                .small()
+                .color(MUTED),
             );
         });
         ui.add_space(10.0);
+        let Some(wave) = &self.waveform else {
+            ui.spinner();
+            return;
+        };
         help.observe(
-            &waveform(ui, 70.0, self.selected, true, BLUE),
-            "Waveform overview preview. Panning and zooming become available with real audio.",
+            &audio_waveform(ui, 70.0, &wave.channels[0], BLUE),
+            "Whole-sample waveform overview.",
         );
         ui.add_space(12.0);
-        ui.label(RichText::new("WAVEFORM PREVIEW").size(10.0).color(MUTED));
-        let height = ((ui.available_height() - 10.0) / 2.0).max(40.0);
-        for channel in 0..2 {
-            help.observe(&waveform(ui,height,self.selected+channel,false,BLUE),"Synthetic waveform preview. Cursor and selection are empty until an audio document is open.");
+        ui.label(RichText::new("WAVEFORM").size(10.0).color(MUTED));
+        let height = ((ui.available_height() - 10.0) / document.channels as f32).max(40.0);
+        for peaks in &wave.channels {
+            help.observe(
+                &audio_waveform(ui, height, peaks, BLUE),
+                "Audio waveform. Each channel shows the actual decoded sample bounds.",
+            );
         }
     }
 
@@ -483,9 +640,17 @@ impl WaveBob {
         }
         content.horizontal(|ui| {
             let readout = if mode == ViewMode::Waveform {
-                "No document · Cursor — · No selection"
+                self.active_document()
+                    .map(|doc| {
+                        format!(
+                            "Cursor {} · No selection · {} frames",
+                            time(doc.cursor, doc.sample_rate),
+                            doc.frames
+                        )
+                    })
+                    .unwrap_or_else(|| "No document · Cursor — · No selection".into())
             } else {
-                "Empty arrangement · Selection: none · Selected clips: 0"
+                "Empty arrangement · Selection: none · Selected clips: 0".into()
             };
             ui.label(RichText::new(readout).size(11.0));
             ui.separator();
@@ -508,6 +673,7 @@ impl WaveBob {
 impl eframe::App for WaveBob {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.draw(ui);
+        self.start_dialog(ui.ctx());
     }
 }
 
@@ -515,6 +681,36 @@ fn panel_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(SURFACE)
         .stroke(Stroke::new(1.0, BORDER))
+}
+fn time(frame: u64, rate: u32) -> String {
+    let millis = frame.saturating_mul(1000) / rate.max(1) as u64;
+    format!(
+        "{:02}:{:02}.{:03}",
+        millis / 60000,
+        (millis / 1000) % 60,
+        millis % 1000
+    )
+}
+fn audio_waveform(
+    ui: &mut egui::Ui,
+    height: f32,
+    peaks: &[Peak],
+    color: Color32,
+) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 3.0, Color32::from_rgb(13, 19, 26));
+    painter.hline(rect.x_range(), rect.center().y, Stroke::new(1.0, BORDER));
+    for (index, peak) in peaks.iter().enumerate() {
+        let x = rect.left() + (index as f32 + 0.5) * rect.width() / peaks.len() as f32;
+        let y = |value: f64| rect.center().y - value as f32 * height * 0.46;
+        painter.line_segment(
+            [Pos2::new(x, y(peak.min)), Pos2::new(x, y(peak.max))],
+            Stroke::new((rect.width() / peaks.len() as f32).max(1.0), color),
+        );
+    }
+    response
 }
 fn section(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).size(11.0).strong());

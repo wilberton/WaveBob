@@ -1,8 +1,8 @@
 # Shared commands and headless execution
 
-Tickets 01–04 implement shared session commands, GUI attachment, presentation
+Tickets 01–05 implement shared session commands, WAV import, GUI attachment, presentation
 commands, actual framebuffer PNG capture and a [stdio MCP adapter](mcp.md).
-Playback and file editing arrive in later tickets. All adapters share command
+Playback and destructive editing arrive in later tickets. All adapters share command
 definitions and core behavior. Snapshots are owned read models; views cannot
 change core state directly.
 
@@ -13,7 +13,7 @@ cargo run --locked
 cargo run --locked --no-default-features --bin wavebob-headless
 ```
 
-The second command builds without egui, eframe, windowing or audio dependencies.
+The second command builds without egui, eframe, windowing or an audio device.
 By default, every process starts a separate session. Use explicit GUI attachment
 below to control a running window from the GUI-free runner.
 
@@ -95,6 +95,13 @@ not process failures. There is no persistence across process restarts yet.
 | `session.capabilities` | `{}` | No | Catalogue and JSON schemas |
 | `transport.loop.set` | `{"enabled":true}` | Yes | Session snapshot |
 | `transport.loop.toggle` | `{}` | Yes | Session snapshot |
+| `documents.open` | `{"path":"/path/sample.wav"}` | Job submission | Import job |
+| `documents.get` | `{"document_id":"UUID"}` | No | Document metadata, revision, cursor and selection |
+| `documents.activate` | `{"document_id":"UUID"}` | Yes | Active document |
+| `documents.samples` | Document ID, optional revision ID, start frame, 1–4096 frames | No | Exact decoded channel samples |
+| `documents.waveform` | Document ID, optional revision ID, interval, 1–2048 bins | No | Exact minimum/maximum per channel and bin |
+| `jobs.get` | `{"job_id":"UUID"}` | No | Progress, status, result or structured error |
+| `jobs.cancel` | `{"job_id":"UUID"}` | Job cancellation | Job status |
 | `presentation.get` | `{}` | No | Presentation snapshot; GUI only |
 | `presentation.set_mode` | `{"mode":"multitrack"}` | Presentation | Presentation snapshot; GUI only |
 | `presentation.layout.set` | Optional widths, visibility, library fraction and revision guard | Presentation | Presentation snapshot; GUI only |
@@ -109,12 +116,29 @@ command's output schema describes `result`, not the entire response envelope.
 The typed parameter/result models generate the schemas used by the registry;
 adapters do not maintain another catalogue.
 
-The independent GUI-free session advertises only the first four commands. GUI
-attachment advertises all ten. Sending a known GUI-only command to an independent
+The independent GUI-free session advertises eleven commands. GUI
+attachment advertises all seventeen. Sending a known GUI-only command to an independent
 session returns `missing_capability`, leaving its state unchanged. See [panels and
 status-bar help](layout.md) for layout commands, preferences and keyboard behavior.
 
 ## Presentation and capture
+
+Imports run off the UI/command thread and return a job immediately. Poll `jobs.get`
+until `succeeded`, `failed` or `cancelled`; successful results contain the new
+document and revision UUIDs. `session.get` also lists documents, jobs and the active
+document. Only completed imports publish audio and advance the session revision.
+Cancellation before publication discards the result; terminal cancellation is
+idempotent. The initial importer accepts mono/stereo 16-bit PCM WAV, caps decoded
+audio at 512 MiB and runs at most two imports at once (`busy` otherwise). Sources
+are never modified. Empty, corrupt, missing, inaccessible and unsupported files
+fail the job with a stable error and leave existing documents usable. MP3 and
+additional WAV encodings follow in ticket 06.
+
+Waveform extrema use a revision-local multiresolution cache and exact edge samples;
+small sample queries return decoded values rather than display peaks. Both accept
+an optional revision guard. A stale audio revision returns `stale_revision`.
+Frame ranges are half-open. A screenshot can wait for the successful import's
+committed revision; `pending_resources` lists import jobs that are still running.
 
 `presentation.get` returns `mode` (`waveform` or `multitrack`) and its own
 `revision`. Set mode with `presentation.set_mode`; optional

@@ -1,8 +1,10 @@
 //! The shared application command interface. No window or audio device is required.
 
+mod audio;
 mod commands;
 #[cfg(feature = "gui")]
 pub mod desktop;
+pub mod documents;
 pub mod ipc;
 pub mod mcp;
 #[cfg(feature = "gui")]
@@ -23,6 +25,9 @@ pub struct SessionSnapshot {
     pub session_id: String,
     pub revision: u64,
     pub loop_enabled: bool,
+    pub documents: Vec<documents::DocumentInfo>,
+    pub active_document_id: Option<String>,
+    pub jobs: Vec<documents::JobInfo>,
 }
 
 /// Typed requests are used directly by the GUI. Protocol adapters construct the
@@ -57,6 +62,10 @@ pub enum CommandResult {
     Presentation(presentation::PresentationSnapshot),
     Rendered(presentation::RenderMetadata),
     Capture(presentation::CaptureResult),
+    Document(Box<documents::DocumentInfo>),
+    Job(Box<documents::JobInfo>),
+    Samples(documents::SamplesData),
+    Waveform(documents::WaveformData),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -91,9 +100,15 @@ pub enum ErrorCode {
     RenderFailed,
     OutputExists,
     IoError,
+    NotFound,
+    UnsupportedFormat,
+    DecodeFailed,
+    ResourceLimit,
+    Cancelled,
+    Busy,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct CommandError {
     pub code: ErrorCode,
     pub message: String,
@@ -113,9 +128,9 @@ impl CommandError {
 
 /// Sole owner of application state. Exclusive dispatch serializes mutations;
 /// transports and views never receive mutable access to the underlying state.
-#[derive(Debug)]
 pub struct Session {
     snapshot: SessionSnapshot,
+    editor: documents::Editor,
 }
 
 impl Default for Session {
@@ -125,17 +140,39 @@ impl Default for Session {
                 session_id: uuid::Uuid::new_v4().to_string(),
                 revision: 0,
                 loop_enabled: false,
+                documents: Vec::new(),
+                active_document_id: None,
+                jobs: Vec::new(),
             },
+            editor: documents::Editor::default(),
         }
     }
 }
 
 impl Session {
     pub fn snapshot(&self) -> SessionSnapshot {
-        self.snapshot.clone()
+        let mut snapshot = self.snapshot.clone();
+        snapshot.documents = self.editor.documents();
+        snapshot.active_document_id = self.editor.active();
+        snapshot.jobs = self.editor.jobs();
+        snapshot
+    }
+
+    pub fn poll_jobs(&mut self) {
+        self.editor.poll(&mut self.snapshot.revision);
+    }
+    pub fn set_waker(&mut self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        self.editor.set_wake(wake);
     }
 
     pub fn execute(&mut self, request: Request) -> Response {
+        if !matches!(&request.command, Command::CancelJob(_)) {
+            self.poll_jobs();
+        }
+        self.execute_committed(request)
+    }
+
+    pub(crate) fn execute_committed(&mut self, request: Request) -> Response {
         if let Err(error) = self.validate(&request) {
             return self.failure(Some(request.id), error);
         }
@@ -155,6 +192,7 @@ impl Session {
                 ErrorCode::MissingCapability,
                 "This command requires an attached GUI renderer",
             )),
+            command => self.editor.execute(command, &mut self.snapshot.revision),
         };
         match result {
             Ok(result) => self.success(Some(request.id), result),
@@ -213,5 +251,14 @@ impl Session {
             revision: self.snapshot.revision,
             outcome,
         }
+    }
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Session")
+            .field("snapshot", &self.snapshot())
+            .finish()
     }
 }

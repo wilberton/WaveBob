@@ -1,0 +1,86 @@
+[
+  {
+    "documents": [
+      {
+        "channels": 2,
+        "cursor": 0,
+        "dirty": false,
+        "encoding": "wav_pcm16",
+        "frames": 576000,
+        "id": "154f7c1d-aa80-418e-89d2-dbee54c4fd5c",
+        "name": "Rain ambience.wav",
+        "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpWz3IFt\\Rain ambience.wav",
+        "revision_id": "8aac7018-163e-4311-a2b7-475f52e23998",
+        "sample_rate": 48000,
+        "selection": null
+      },
+      {
+        "channels": 1,
+        "cursor": 0,
+        "dirty": false,
+        "encoding": "wav_pcm16",
+        "frames": 576000,
+        "id": "9e133272-ada1-4f63-bd31-37bd4b267a5d",
+        "name": "Footsteps.wav",
+        "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpWz3IFt\\Footsteps.wav",
+        "revision_id": "18d81a1a-efce-471e-992e-93e1086edba0",
+        "sample_rate": 48000,
+        "selection": null
+      }
+    ],
+    "file": "real-waveform.png",
+    "metadata": {
+      "frame_number": 14,
+      "height": 900,
+      "mode": "waveform",
+      "pending_resources": [],
+      "presentation_revision": 0,
+      "rendered_revision": 3,
+      "scale": 1.0,
+      "session_id": "53f8dffc-308d-41ab-a194-db7ba4aa9626",
+      "width": 1440
+    }
+  },
+  {
+    "documents": [
+      {
+        "channels": 2,
+        "cursor": 0,
+        "dirty": false,
+        "encoding": "wav_pcm16",
+        "frames": 576000,
+        "id": "154f7c1d-aa80-418e-89d2-dbee54c4fd5c",
+        "name": "Rain ambience.wav",
+        "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpWz3IFt\\Rain ambience.wav",
+        "revision_id": "8aac7018-163e-4311-a2b7-475f52e23998",
+        "sample_rate": 48000,
+        "selection": null
+      },
+      {
+        "channels": 1,
+        "cursor": 0,
+        "dirty": false,
+        "encoding": "wav_pcm16",
+        "frames": 576000,
+        "id": "9e133272-ada1-4f63-bd31-37bd4b267a5d",
+        "name": "Footsteps.wav",
+        "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpWz3IFt\\Footsteps.wav",
+        "revision_id": "18d81a1a-efce-471e-992e-93e1086edba0",
+        "sample_rate": 48000,
+        "selection": null
+      }
+    ],
+    "file": "real-multitrack.png",
+    "metadata": {
+      "frame_number": 19,
+      "height": 900,
+      "mode": "multitrack",
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "rendered_revision": 3,
+      "scale": 1.0,
+      "session_id": "53f8dffc-308d-41ab-a194-db7ba4aa9626",
+      "width": 1440
+    }
+  }
+]

@@ -1,0 +1,283 @@
+use serde_json::{Value, json};
+use wavebob::{Session, protocol};
+
+fn send(session: &mut Session, name: &str, params: Value) -> Value {
+    serde_json::to_value(protocol::dispatch_line(
+        session,
+        &json!({"id":name,"command":name,"params":params}).to_string(),
+    ))
+    .unwrap()
+}
+fn success(value: Value) -> Value {
+    assert_eq!(value["status"], "ok", "{value}");
+    value["result"].clone()
+}
+fn fixture(path: &std::path::Path, channels: u16, values: &[i16]) {
+    let mut writer = hound::WavWriter::create(
+        path,
+        hound::WavSpec {
+            channels,
+            sample_rate: 48000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .unwrap();
+    for value in values {
+        writer.write_sample(*value).unwrap();
+    }
+    writer.finalize().unwrap();
+}
+fn wait(session: &mut Session, id: &str) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let job = success(send(session, "jobs.get", json!({"job_id":id})));
+        if job["status"] != "running" {
+            return job;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Import did not finish: {job}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+fn open(session: &mut Session, path: &std::path::Path) -> Value {
+    let started = success(send(session, "documents.open", json!({"path":path})));
+    wait(session, started["id"].as_str().unwrap())
+}
+
+#[test]
+fn stereo_import_has_stable_ids_exact_samples_and_real_waveform_bounds() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("stereo.wav");
+    fixture(&path, 2, &[-32768, 32767, -16384, 16384, 0, 1]);
+    let source = std::fs::read(&path).unwrap();
+    let mut session = Session::default();
+    let job = open(&mut session, &path);
+    assert_eq!(job["status"], "succeeded");
+    let document = &job["result"];
+    let id = document["id"].as_str().unwrap();
+    assert!(uuid::Uuid::parse_str(id).is_ok());
+    assert!(uuid::Uuid::parse_str(document["revision_id"].as_str().unwrap()).is_ok());
+    assert_eq!(document["frames"], 3);
+    assert_eq!(document["channels"], 2);
+    assert_eq!(document["sample_rate"], 48000);
+    assert_eq!(document["encoding"], "wav_pcm16");
+    assert_eq!(
+        success(send(
+            &mut session,
+            "documents.get",
+            json!({"document_id":id})
+        )),
+        *document
+    );
+    let samples = success(send(
+        &mut session,
+        "documents.samples",
+        json!({"document_id":id,"frames":3}),
+    ));
+    assert_eq!(
+        samples["channels"],
+        json!([[-1.0, -0.5, 0.0], [32767.0 / 32768.0, 0.5, 1.0 / 32768.0]])
+    );
+    let peaks = success(send(
+        &mut session,
+        "documents.waveform",
+        json!({"document_id":id,"bins":2}),
+    ));
+    assert_eq!(
+        peaks["channels"][0][0],
+        json!({"start_frame":0,"end_frame":1,"min":-1.0,"max":-1.0})
+    );
+    assert_eq!(
+        peaks["channels"][0][1],
+        json!({"start_frame":1,"end_frame":3,"min":-0.5,"max":0.0})
+    );
+    assert_eq!(session.snapshot().revision, 1);
+    assert!(!session.snapshot().documents[0].dirty);
+    assert_eq!(std::fs::read(&path).unwrap(), source);
+    assert_eq!(
+        send(
+            &mut session,
+            "documents.samples",
+            json!({"document_id":id,"frames":4})
+        )["error"]["code"],
+        "invalid_params"
+    );
+    assert_eq!(
+        send(
+            &mut session,
+            "documents.get",
+            json!({"document_id":"unknown"})
+        )["error"]["code"],
+        "not_found"
+    );
+    assert_eq!(
+        send(
+            &mut session,
+            "documents.waveform",
+            json!({"document_id":id,"revision_id":"stale"})
+        )["error"]["code"],
+        "stale_revision"
+    );
+}
+
+#[test]
+fn multiple_imports_and_activation_preserve_distinct_audio_revisions() {
+    let directory = tempfile::tempdir().unwrap();
+    let a = directory.path().join("a.wav");
+    let b = directory.path().join("b.wav");
+    fixture(&a, 1, &[0, 8192, -8192, 16384]);
+    fixture(&b, 1, &[32767, 0, -32768]);
+    let mut session = Session::default();
+    let first = open(&mut session, &a)["result"].clone();
+    let second = open(&mut session, &b)["result"].clone();
+    assert_ne!(first["id"], second["id"]);
+    assert_ne!(first["revision_id"], second["revision_id"]);
+    assert_eq!(session.snapshot().documents.len(), 2);
+    assert_eq!(
+        session.snapshot().active_document_id.as_deref(),
+        second["id"].as_str()
+    );
+    success(send(
+        &mut session,
+        "documents.activate",
+        json!({"document_id":first["id"]}),
+    ));
+    assert_eq!(
+        session.snapshot().active_document_id.as_deref(),
+        first["id"].as_str()
+    );
+    let revision = session.snapshot().revision;
+    success(send(
+        &mut session,
+        "documents.activate",
+        json!({"document_id":first["id"]}),
+    ));
+    assert_eq!(session.snapshot().revision, revision);
+    let samples = success(send(
+        &mut session,
+        "documents.samples",
+        json!({"document_id":first["id"],"frames":4}),
+    ));
+    assert_eq!(samples["channels"], json!([[0.0, 0.25, -0.25, 0.5]]));
+}
+
+#[test]
+fn malformed_missing_empty_unsupported_and_truncated_imports_publish_no_documents() {
+    let directory = tempfile::tempdir().unwrap();
+    let bad = directory.path().join("bad.wav");
+    std::fs::write(&bad, "not a WAV").unwrap();
+    let empty = directory.path().join("empty.wav");
+    fixture(&empty, 1, &[]);
+    let surround = directory.path().join("surround.wav");
+    fixture(&surround, 3, &[0, 0, 0]);
+    let truncated = directory.path().join("truncated.wav");
+    fixture(&truncated, 1, &[0, 1, 2]);
+    let mut bytes = std::fs::read(&truncated).unwrap();
+    bytes.pop();
+    std::fs::write(&truncated, bytes).unwrap();
+    let float = directory.path().join("float.wav");
+    let mut writer = hound::WavWriter::create(
+        &float,
+        hound::WavSpec {
+            channels: 1,
+            sample_rate: 44100,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        },
+    )
+    .unwrap();
+    writer.write_sample(0.1_f32).unwrap();
+    writer.finalize().unwrap();
+    for (path, code) in [
+        (directory.path().join("missing.wav"), "io_error"),
+        (bad, "decode_failed"),
+        (empty, "decode_failed"),
+        (surround, "unsupported_format"),
+        (float, "unsupported_format"),
+        (truncated, "decode_failed"),
+    ] {
+        let mut session = Session::default();
+        let job = open(&mut session, &path);
+        assert_eq!(job["status"], "failed", "{job}");
+        assert_eq!(job["error"]["code"], code, "{job}");
+        assert!(session.snapshot().documents.is_empty());
+        assert_eq!(session.snapshot().revision, 0);
+        assert_eq!(
+            send(&mut session, "transport.loop.toggle", json!({}))["status"],
+            "ok"
+        );
+    }
+}
+
+#[test]
+fn cancellation_before_publication_never_creates_partial_documents() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cancel.wav");
+    fixture(&path, 1, &[0, 100, -100]);
+    let mut session = Session::default();
+    let job = success(send(&mut session, "documents.open", json!({"path":path})));
+    let cancelled = success(send(
+        &mut session,
+        "jobs.cancel",
+        json!({"job_id":job["id"]}),
+    ));
+    assert_eq!(cancelled["status"], "cancelled");
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    let job = wait(&mut session, job["id"].as_str().unwrap());
+    assert_eq!(job["status"], "cancelled");
+    assert!(session.snapshot().documents.is_empty());
+    assert_eq!(session.snapshot().revision, 0);
+}
+
+#[test]
+fn multiresolution_peaks_match_exact_samples_across_unaligned_boundaries() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("ramp.wav");
+    let samples: Vec<i16> = (0..1037)
+        .map(|frame| ((frame * 193) % 65536 - 32768) as i16)
+        .collect();
+    fixture(&path, 1, &samples);
+    let mut session = Session::default();
+    let document = open(&mut session, &path)["result"].clone();
+    for (start, end, bins) in [
+        (0, 1037, 1),
+        (17, 999, 7),
+        (255, 1030, 43),
+        (1000, 1037, 100),
+    ] {
+        let waveform = success(send(
+            &mut session,
+            "documents.waveform",
+            json!({"document_id":document["id"],"start_frame":start,"end_frame":end,"bins":bins}),
+        ));
+        for peak in waveform["channels"][0].as_array().unwrap() {
+            let first = peak["start_frame"].as_u64().unwrap() as usize;
+            let last = peak["end_frame"].as_u64().unwrap() as usize;
+            let min = *samples[first..last].iter().min().unwrap() as f64 / 32768.0;
+            let max = *samples[first..last].iter().max().unwrap() as f64 / 32768.0;
+            assert_eq!(peak["min"], min);
+            assert_eq!(peak["max"], max);
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn inaccessible_audio_is_an_observable_failed_job() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("locked.wav");
+    fixture(&path, 1, &[0, 1]);
+    let _lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&path)
+        .unwrap();
+    let mut session = Session::default();
+    let job = open(&mut session, &path);
+    assert_eq!(job["error"]["code"], "io_error");
+    assert!(session.snapshot().documents.is_empty());
+}

@@ -92,7 +92,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 11);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -534,6 +534,142 @@ mod live {
         }
         narrow.cancel().await.unwrap();
     }
+    #[tokio::test]
+    #[ignore = "requires a real native GUI renderer; run explicitly on a desktop"]
+    async fn real_audio_import_switching_and_pixels_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::with_profile(
+            runtime.path(),
+            "real-audio",
+            &runtime.path().join("layout.json"),
+            "1440x900",
+        );
+        let client = named_client(runtime.path(), "real-audio").await;
+        let mut documents = Vec::new();
+        for (name, channels) in [("Rain ambience.wav", 2), ("Footsteps.wav", 1)] {
+            let path = runtime.path().join(name);
+            let mut writer = hound::WavWriter::create(
+                &path,
+                hound::WavSpec {
+                    channels,
+                    sample_rate: 48000,
+                    bits_per_sample: 16,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            for frame in 0..576000 {
+                let t = frame as f64 / 48000.0;
+                for channel in 0..channels {
+                    let envelope = 0.12 + 0.65 * (t * 1.1 + channel as f64).sin().powi(4);
+                    writer
+                        .write_sample(
+                            ((t * std::f64::consts::TAU * (220.0 + channel as f64 * 111.0)).sin()
+                                * envelope
+                                * 32767.0) as i16,
+                        )
+                        .unwrap();
+                }
+            }
+            writer.finalize().unwrap();
+            let original = fs::read(&path).unwrap();
+            let opened =
+                response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+            assert_eq!(opened["status"], "ok");
+            let id = &opened["result"]["id"];
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let document = loop {
+                let job =
+                    response(&call(&client, "jobs.get", json!({"params":{"job_id":id}})).await);
+                match job["result"]["status"].as_str() {
+                    Some("succeeded") => break job["result"]["result"].clone(),
+                    Some("failed") => panic!("Import failed: {job}"),
+                    _ => {}
+                }
+                assert!(Instant::now() < deadline);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            };
+            assert_eq!(document["frames"], 576000);
+            assert_eq!(document["channels"], channels);
+            assert_eq!(fs::read(&path).unwrap(), original);
+            let samples = response(
+                &call(
+                    &client,
+                    "documents.samples",
+                    json!({"params":{"document_id":document["id"],"frames":32}}),
+                )
+                .await,
+            );
+            assert_eq!(
+                samples["result"]["channels"].as_array().unwrap().len(),
+                channels as usize
+            );
+            documents.push(document);
+        }
+        call(
+            &client,
+            "documents.activate",
+            json!({"params":{"document_id":documents[0]["id"]}}),
+        )
+        .await;
+        let state = response(&call(&client, "session.get", json!({})).await);
+        assert_eq!(state["result"]["active_document_id"], documents[0]["id"]);
+        let revision = state["revision"].clone();
+        let mut records = Vec::new();
+        for mode in ["waveform", "multitrack"] {
+            let view = response(
+                &call(
+                    &client,
+                    "presentation.set_mode",
+                    json!({"params":{"mode":mode}}),
+                )
+                .await,
+            );
+            let path = runtime.path().join(format!("real-{mode}.png"));
+            let result = call(&client,"capture.png",json!({"params":{"path":path,"after_revision":revision,"after_presentation_revision":view["result"]["revision"]}})).await;
+            let capture = response(&result);
+            assert_eq!(capture["status"], "ok");
+            assert_eq!(capture["result"]["metadata"]["rendered_revision"], revision);
+            let image = result
+                .content
+                .iter()
+                .find_map(|block| match block {
+                    ContentBlock::Image(image) => Some(image),
+                    _ => None,
+                })
+                .unwrap();
+            let png = BASE64_STANDARD.decode(&image.data).unwrap();
+            assert_eq!(fs::read(&path).unwrap(), png);
+            let mut reader = png::Decoder::new(std::io::Cursor::new(&png))
+                .read_info()
+                .unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let info = reader.next_frame(&mut pixels).unwrap();
+            assert!(
+                pixels[..info.buffer_size()]
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .filter(|pixel| pixel[2] > 150 && pixel[0] < 80 && pixel[1] > 70)
+                    .count()
+                    > 1000,
+                "Waveform/clip color must be present"
+            );
+            if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+                fs::create_dir_all(&directory).unwrap();
+                fs::write(Path::new(&directory).join(format!("real-{mode}.png")), &png).unwrap();
+            }
+            records.push(json!({"file":format!("real-{mode}.png"),"metadata":capture["result"]["metadata"],"documents":documents}));
+        }
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::write(
+                Path::new(&directory).join("audio-metadata.json"),
+                serde_json::to_vec_pretty(&records).unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
     impl Drop for Gui {
         fn drop(&mut self) {
             let _ = self.0.kill();
@@ -609,7 +745,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 10);
+        assert_eq!(tools.len(), 17);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

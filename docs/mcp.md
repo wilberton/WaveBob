@@ -58,10 +58,11 @@ session identity, revision, result or error. Schema references remain resolvable
 after nesting. No separate editing implementation or handwritten command list
 exists in the adapter.
 
-An independent session advertises four tools: `session.capabilities`, `session.get`,
-`transport.loop.set` and `transport.loop.toggle`. An attached GUI also advertises
+An independent session advertises eleven tools: session/loop commands, document
+open/get/activate, exact samples/waveforms and job inspection/cancellation.
+An attached GUI also advertises
 `presentation.get`, `presentation.set_mode`, `presentation.layout.set`,
-`presentation.panels.toggle`, `presentation.barrier` and `capture.png` (ten tools
+`presentation.panels.toggle`, `presentation.barrier` and `capture.png` (seventeen tools
 in total). See [panel commands and preferences](layout.md) for layout behavior.
 Use `tools/list` for tool discovery or call `session.capabilities` for the full
 application catalogue. There is one catalogue page and no list-change subscription.
@@ -88,10 +89,11 @@ UUID is also reported in server instructions and every command result.
 MCP request IDs are represented as strings in the inner command response; MCP's
 outer response correlation remains managed by the SDK.
 
-All queries and future registered job commands use the same mechanism. Audio jobs
-are not implemented yet, so no job tools or MCP Tasks capability are advertised.
-When job commands are registered, their handles, progress and result queries will
-flow through these tools without a second implementation in MCP.
+Audio imports return shared application job handles. Poll `jobs.get` and use
+`jobs.cancel` for cancellation. Successful imports return document/revision IDs;
+then query `documents.samples` or `documents.waveform` and capture the committed
+GUI revision. No MCP Tasks capability is advertised; jobs use ordinary tools.
+See [the command protocol](commands.md) for format limits and errors.
 
 ## Retrieve an inspectable screenshot
 

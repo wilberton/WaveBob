@@ -8,7 +8,7 @@ default-run = "wavebob"
 
 [features]
 default = ["gui"]
-gui = ["dep:eframe", "dep:png", "dep:tempfile"]
+gui = ["dep:eframe", "dep:png", "dep:tempfile", "dep:rfd"]
 
 [[bin]]
 name = "wavebob"
@@ -36,6 +36,8 @@ tempfile = { version = "3", optional = true }
 rmcp = { version = "=3.7.0", default-features = false, features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
 base64 = "0.23"
+hound = "=3.5.1"
+rfd = { version = "0.17", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
