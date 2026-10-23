@@ -180,3 +180,22 @@ fn typed_requests_validate_blank_identifiers_too() {
     assert!(matches!(response.outcome, Outcome::Error { .. }));
     assert_eq!(session.snapshot().revision, 0);
 }
+
+#[test]
+fn gui_free_session_reports_missing_renderer_without_creating_output() {
+    let mut session = Session::default();
+    let before = session.snapshot();
+    for (command, params) in [
+        ("presentation.get", json!({})),
+        ("presentation.set_mode", json!({"mode":"multitrack"})),
+        ("presentation.barrier", json!({})),
+        ("capture.png", json!({})),
+    ] {
+        let response = send(
+            &mut session,
+            json!({"id":"gui-free", "command":command,"params":params}),
+        );
+        assert_eq!(response["error"]["code"], "missing_capability");
+        assert_eq!(session.snapshot(), before);
+    }
+}

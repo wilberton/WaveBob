@@ -33,47 +33,54 @@ fn empty_params() -> Value {
 /// Decode one frame and dispatch it through the same interface as the GUI.
 /// Invalid frames yield a correlated error where an id can be recovered.
 pub fn dispatch_line(session: &mut Session, line: &str) -> Response {
+    match decode_line(line) {
+        Ok(request) => session.execute(request),
+        Err((id, error)) => session.failure(id, error),
+    }
+}
+
+pub(crate) fn decode_line(line: &str) -> Result<Request, (Option<String>, CommandError)> {
     let value: Value = match serde_json::from_str(line) {
         Ok(value) => value,
         Err(error) => {
-            return session.failure(
+            return Err((
                 None,
                 CommandError::new(ErrorCode::InvalidJson, error.to_string()),
-            );
+            ));
         }
     };
     let id = value.get("id").and_then(Value::as_str).map(str::to_owned);
     let wire: WireRequest = match serde_json::from_value(value) {
         Ok(request) => request,
         Err(error) => {
-            return session.failure(
+            return Err((
                 id,
                 CommandError::new(ErrorCode::InvalidRequest, error.to_string()),
-            );
+            ));
         }
     };
     if wire.protocol_version != PROTOCOL_VERSION {
-        return session.failure(
+        return Err((
             Some(wire.id),
             CommandError::new(
                 ErrorCode::UnsupportedProtocol,
                 "Supported protocol version is 1",
             ),
-        );
+        ));
     }
     if !wire.params.is_object() {
-        return session.failure(
+        return Err((
             Some(wire.id),
             CommandError::new(ErrorCode::InvalidParams, "Command params must be an object"),
-        );
+        ));
     }
     match Command::decode(&wire.command, wire.params) {
-        Ok(command) => session.execute(Request {
+        Ok(command) => Ok(Request {
             id: wire.id,
             command,
             expected_revision: wire.expected_revision,
         }),
-        Err(error) => session.failure(Some(wire.id), error),
+        Err(error) => Err((Some(wire.id), error)),
     }
 }
 

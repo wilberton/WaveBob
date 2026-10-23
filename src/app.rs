@@ -1,20 +1,26 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
-use wavebob::{Command, EmptyParams, Request, Session};
+use wavebob::{
+    Command, EmptyParams, Request,
+    desktop::DesktopHost,
+    presentation::{SetModeParams, ViewMode},
+};
 
 const BLUE: Color32 = Color32::from_rgb(85, 150, 245);
 const FILES: [&str; 3] = ["Rain ambience.wav", "Footsteps.wav", "Piano texture.wav"];
 
 #[derive(Default)]
 pub struct WaveBob {
-    multitrack: bool,
     selected: usize,
-    session: Session,
+    host: DesktopHost,
 }
 
 impl WaveBob {
     fn toggle_loop(&mut self) {
-        let revision = self.session.snapshot().revision;
-        self.session.execute(
+        if self.host.frozen() {
+            return;
+        }
+        let revision = self.host.snapshot().revision;
+        self.host.execute(
             Request::new(
                 format!("gui-loop-{revision}"),
                 Command::ToggleLoop(EmptyParams {}),
@@ -23,54 +29,89 @@ impl WaveBob {
         );
     }
 
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn set_mode(&mut self, mode: ViewMode) {
+        if self.host.frozen() {
+            return;
+        }
+        self.host.execute(Request::new(
+            "gui-mode",
+            Command::SetMode(SetModeParams {
+                mode,
+                expected_presentation_revision: None,
+            }),
+        ));
+    }
+
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        directory: &std::path::Path,
+        name: String,
+    ) -> std::io::Result<Self> {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = Color32::from_rgb(20, 21, 24);
         visuals.window_fill = visuals.panel_fill;
         visuals.selection.bg_fill = Color32::from_rgb(35, 65, 105);
         visuals.selection.stroke = Stroke::new(1.0, BLUE);
         cc.egui_ctx.set_visuals(visuals);
-        Self::default()
+        let mut app = Self::default();
+        app.host.listen(directory, name, cc.egui_ctx.clone())?;
+        Ok(app)
     }
 }
 
 impl eframe::App for WaveBob {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.host.begin_frame(ui.ctx());
+        let mode = self.host.presentation().mode;
         egui::Panel::top("header").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("WaveBob");
                 ui.separator();
                 ui.label("UI CONCEPT / DEMO DATA");
                 ui.add_space(30.0);
-                ui.selectable_value(&mut self.multitrack, false, "Waveform");
-                ui.selectable_value(&mut self.multitrack, true, "Multitrack");
+                if ui
+                    .selectable_label(mode == ViewMode::Waveform, "Waveform")
+                    .clicked()
+                {
+                    self.set_mode(ViewMode::Waveform);
+                }
+                if ui
+                    .selectable_label(mode == ViewMode::Multitrack, "Multitrack")
+                    .clicked()
+                {
+                    self.set_mode(ViewMode::Multitrack);
+                }
             });
         });
-        egui::Panel::bottom("transport").show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.label("00:04.250   /   00:24.000");
-                ui.horizontal_centered(|ui| {
-                    ui.add_enabled(false, egui::Button::new("|<  Start"));
-                    ui.add_enabled(false, egui::Button::new("Play"));
-                    if ui
-                        .selectable_label(self.session.snapshot().loop_enabled, "Loop")
-                        .clicked()
-                    {
-                        self.toggle_loop();
-                    }
-                    ui.label("Space: play/pause   •   Enter or ,: start   •   /: loop");
+        egui::Panel::bottom("transport")
+            .exact_size(76.0)
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label("00:04.250   /   00:24.000");
+                    ui.horizontal(|ui| {
+                        ui.add_enabled(false, egui::Button::new("|<  Start"));
+                        ui.add_enabled(false, egui::Button::new("Play"));
+                        if ui
+                            .selectable_label(self.host.snapshot().loop_enabled, "Loop")
+                            .clicked()
+                        {
+                            self.toggle_loop();
+                        }
+                        ui.label("Space: play/pause   •   Enter or ,: start   •   /: loop");
+                    });
+                    ui.small("Loop uses shared session state. Audio playback is not implemented.");
                 });
-                ui.small("Loop uses shared session state. Audio playback is not implemented.");
             });
-        });
         egui::Panel::left("library")
             .default_size(235.0)
             .show(ui, |ui| {
                 ui.heading("Open files");
                 for (index, name) in FILES.iter().enumerate() {
-                    if ui.selectable_label(self.selected == index, *name).clicked() {
+                    if ui.selectable_label(self.selected == index, *name).clicked()
+                        && !self.host.frozen()
+                    {
                         self.selected = index;
-                        self.multitrack = false;
+                        self.set_mode(ViewMode::Waveform);
                     }
                 }
                 ui.add_space(35.0);
@@ -94,7 +135,7 @@ impl eframe::App for WaveBob {
             .default_size(225.0)
             .show(ui, |ui| {
                 ui.heading("Edit & effects");
-                ui.label(if self.multitrack {
+                ui.label(if mode == ViewMode::Multitrack {
                     "Target: selected clip"
                 } else {
                     "Target: selection / whole sample"
@@ -111,7 +152,7 @@ impl eframe::App for WaveBob {
                 ui.small("Effects are placeholders pending design approval.");
             });
         egui::CentralPanel::default().show(ui, |ui| {
-            if self.multitrack {
+            if mode == ViewMode::Multitrack {
                 ui.heading("Untitled arrangement");
                 ui.small("SECONDS     0           4           8           12           16           20           24");
                 for (index, name) in ["Ambience", "Footsteps", "Texture", "Track 4"].iter().enumerate() {
@@ -143,6 +184,7 @@ impl eframe::App for WaveBob {
                 ui.small("Static preview: selection, overview handles, zoom and pan are planned.");
             }
         });
+        self.host.end_frame(ui.ctx());
     }
 }
 
@@ -196,14 +238,14 @@ mod tests {
     #[test]
     fn gui_loop_action_and_headless_command_produce_the_same_state() {
         let mut app = WaveBob::default();
-        let mut headless = Session::default();
+        let mut headless = wavebob::Session::default();
         for _ in 0..3 {
             app.toggle_loop();
             wavebob::protocol::dispatch_line(
                 &mut headless,
                 r#"{"id":"headless","command":"transport.loop.toggle"}"#,
             );
-            let gui_state = app.session.snapshot();
+            let gui_state = app.host.snapshot();
             let headless_state = headless.snapshot();
             assert_eq!(gui_state.loop_enabled, headless_state.loop_enabled);
             assert_eq!(gui_state.revision, headless_state.revision);

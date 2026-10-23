@@ -1,17 +1,21 @@
 //! The shared application command interface. No window or audio device is required.
 
 mod commands;
+#[cfg(feature = "gui")]
+pub mod desktop;
+pub mod ipc;
+pub mod presentation;
 pub mod protocol;
 
 pub use commands::{Capabilities, Command, CommandDescriptor, EmptyParams, LoopParams};
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// An owned read model; changing it cannot mutate the session.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct SessionSnapshot {
     pub session_id: String,
     pub revision: u64,
@@ -42,21 +46,24 @@ impl Request {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum CommandResult {
     Snapshot(SessionSnapshot),
     Capabilities(Capabilities),
+    Presentation(presentation::PresentationSnapshot),
+    Rendered(presentation::RenderMetadata),
+    Capture(presentation::CaptureResult),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Outcome {
     Ok { result: CommandResult },
     Error { error: CommandError },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Response {
     pub protocol_version: u32,
     pub id: Option<String>,
@@ -66,7 +73,7 @@ pub struct Response {
     pub outcome: Outcome,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     InvalidJson,
@@ -76,9 +83,14 @@ pub enum ErrorCode {
     UnsupportedProtocol,
     StaleRevision,
     RevisionExhausted,
+    MissingCapability,
+    Timeout,
+    RenderFailed,
+    OutputExists,
+    IoError,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct CommandError {
     pub code: ErrorCode,
     pub message: String,
@@ -121,41 +133,52 @@ impl Session {
     }
 
     pub fn execute(&mut self, request: Request) -> Response {
+        if let Err(error) = self.validate(&request) {
+            return self.failure(Some(request.id), error);
+        }
+        let result = match request.command {
+            Command::GetSession(_) => Ok(CommandResult::Snapshot(self.snapshot())),
+            Command::GetCapabilities(_) => {
+                Ok(CommandResult::Capabilities(commands::capabilities(false)))
+            }
+            Command::SetLoop(params) => self.set_loop(params.enabled),
+            Command::ToggleLoop(_) => self.set_loop(!self.snapshot.loop_enabled),
+            Command::GetPresentation(_)
+            | Command::SetMode(_)
+            | Command::RenderBarrier(_)
+            | Command::CapturePng(_) => Err(CommandError::new(
+                ErrorCode::MissingCapability,
+                "This command requires an attached GUI renderer",
+            )),
+        };
+        match result {
+            Ok(result) => self.success(Some(request.id), result),
+            Err(error) => self.failure(Some(request.id), error),
+        }
+    }
+
+    pub(crate) fn validate(&self, request: &Request) -> Result<(), CommandError> {
         if request.id.trim().is_empty() {
-            return self.failure(
-                Some(request.id),
-                CommandError::new(ErrorCode::InvalidRequest, "Request id must not be blank"),
-            );
+            return Err(CommandError::new(
+                ErrorCode::InvalidRequest,
+                "Request id must not be blank",
+            ));
         }
         if request.command.mutates()
             && let Some(expected) = request.expected_revision
             && expected != self.snapshot.revision
         {
-            return self.failure(
-                Some(request.id),
-                CommandError {
-                    code: ErrorCode::StaleRevision,
-                    message: "Session changed since the expected revision".into(),
-                    details: Some(serde_json::json!({
-                        "expected_revision": expected,
-                        "actual_revision": self.snapshot.revision,
-                    })),
-                },
-            );
+            return Err(CommandError {
+                code: ErrorCode::StaleRevision,
+                message: "Session changed since the expected revision".into(),
+                details: Some(serde_json::json!({
+                    "expected_revision": expected,
+                    "actual_revision": self.snapshot.revision,
+                })),
+            });
         }
 
-        let result = match request.command {
-            Command::GetSession(_) => Ok(CommandResult::Snapshot(self.snapshot())),
-            Command::GetCapabilities(_) => {
-                Ok(CommandResult::Capabilities(commands::capabilities()))
-            }
-            Command::SetLoop(params) => self.set_loop(params.enabled),
-            Command::ToggleLoop(_) => self.set_loop(!self.snapshot.loop_enabled),
-        };
-        match result {
-            Ok(result) => self.response(Some(request.id), Outcome::Ok { result }),
-            Err(error) => self.failure(Some(request.id), error),
-        }
+        Ok(())
     }
 
     fn set_loop(&mut self, enabled: bool) -> Result<CommandResult, CommandError> {
@@ -171,6 +194,10 @@ impl Session {
 
     pub(crate) fn failure(&self, id: Option<String>, error: CommandError) -> Response {
         self.response(id, Outcome::Error { error })
+    }
+
+    pub(crate) fn success(&self, id: Option<String>, result: CommandResult) -> Response {
+        self.response(id, Outcome::Ok { result })
     }
 
     fn response(&self, id: Option<String>, outcome: Outcome) -> Response {
