@@ -1,6 +1,6 @@
 # Shared commands and headless execution
 
-Tickets 01–06 and 22 implement shared session commands, audio import, GUI attachment, presentation
+Tickets 01–07 and 22 implement shared session commands, audio import, selection, GUI attachment, presentation
 commands, actual framebuffer PNG capture and a [stdio MCP adapter](mcp.md).
 Playback and destructive editing arrive in later tickets. All adapters share command
 definitions and core behavior. Snapshots are owned read models; views cannot
@@ -99,12 +99,16 @@ not process failures. There is no persistence across process restarts yet.
 | `documents.get` | `{"document_id":"UUID"}` | No | Document metadata, revision, cursor and selection |
 | `documents.activate` | `{"document_id":"UUID"}` | Yes | Active document |
 | `documents.close` | Document ID, optional `discard_changes` | Yes | Closed document metadata |
+| `documents.cursor.set` | Document ID and frame | Navigation | Document state |
+| `documents.selection.set` | Document ID and start/end frames | Navigation | Document state |
+| `documents.selection.all` / `.clear` | Document ID | Navigation | Document state |
 | `documents.samples` | Document ID, optional revision ID, start frame, 1–4096 frames | No | Exact decoded channel samples |
 | `documents.waveform` | Document ID, optional revision ID, interval, 1–2048 bins | No | Exact minimum/maximum per channel and bin |
 | `jobs.get` | `{"job_id":"UUID"}` | No | Progress, status, result or structured error |
 | `jobs.cancel` | `{"job_id":"UUID"}` | Job cancellation | Job status |
 | `presentation.get` | `{}` | No | Presentation snapshot; GUI only |
 | `presentation.set_mode` | `{"mode":"multitrack"}` | Presentation | Presentation snapshot; GUI only |
+| `presentation.viewport.set` | Document ID, visible start/end and optional presentation revision guard | Presentation | Presentation snapshot; GUI only |
 | `presentation.layout.set` | Optional widths, visibility, library fraction and revision guard | Presentation | Presentation snapshot; GUI only |
 | `presentation.panels.toggle` | Optional presentation revision guard | Presentation | Presentation snapshot; GUI only |
 | `presentation.barrier` | Minimum revisions and timeout | No | Render metadata; GUI only |
@@ -117,10 +121,11 @@ command's output schema describes `result`, not the entire response envelope.
 The typed parameter/result models generate the schemas used by the registry;
 adapters do not maintain another catalogue.
 
-The independent GUI-free session advertises twelve commands. GUI
-attachment advertises all eighteen. Sending a known GUI-only command to an independent
+The independent GUI-free session advertises sixteen commands. GUI
+attachment advertises all twenty-three. Sending a known GUI-only command to an independent
 session returns `missing_capability`, leaving its state unchanged. See [panels and
 status-bar help](layout.md) for layout commands, preferences and keyboard behavior.
+See [waveform controls](waveform.md) for precise selection and viewport semantics.
 
 ## Presentation and capture
 

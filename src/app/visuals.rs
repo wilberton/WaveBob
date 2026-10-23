@@ -223,15 +223,13 @@ pub fn ruler(painter: &egui::Painter, rect: Rect, start: f64, end: f64) {
         let label = if step >= 1.0 {
             format!("{}:{:02}", seconds as u64 / 60, seconds as u64 % 60)
         } else {
-            format!("{seconds:.2}")
+            let precision = (-step.log10().floor()).clamp(0.0, 6.0) as usize;
+            format!("{seconds:.precision$}")
         };
-        painter.text(
-            Pos2::new(x + 4.0, rect.top() + 2.0),
-            egui::Align2::LEFT_TOP,
-            label,
-            egui::FontId::proportional(10.0),
-            MUTED,
-        );
+        let text = painter.layout_no_wrap(label, egui::FontId::proportional(10.0), MUTED);
+        if x + 4.0 + text.size().x <= rect.right() {
+            painter.galley(Pos2::new(x + 4.0, rect.top() + 2.0), text, MUTED);
+        }
         painter.vline(
             x,
             (rect.bottom() - 5.0)..=rect.bottom(),
@@ -271,18 +269,22 @@ pub fn grid(painter: &egui::Painter, rect: Rect) {
 }
 
 pub fn peaks(painter: &egui::Painter, rect: Rect, values: &[Peak], color: Color32) {
+    let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
     let individual = !values.is_empty()
         && values
             .iter()
             .all(|peak| peak.end_frame - peak.start_frame == 1);
-    let mut previous = None;
-    for (index, peak) in values.iter().enumerate() {
-        let x = rect.left()
-            + (index as f32 + if individual { 0.0 } else { 0.5 }) * rect.width()
-                / values.len() as f32;
-        let y = |value: f64| rect.center().y - value as f32 * rect.height() * 0.45;
-        if individual {
-            let point = Pos2::new(x, y(peak.min));
+    let y = |value: f64| rect.center().y - value as f32 * rect.height() * 0.45;
+    if individual {
+        if values.len() == 1 {
+            painter.hline(rect.x_range(), y(values[0].min), Stroke::new(1.0, color));
+        }
+        let mut previous = None;
+        for (index, peak) in values.iter().enumerate() {
+            let point = Pos2::new(
+                rect.left() + index as f32 * rect.width() / values.len() as f32,
+                y(peak.min),
+            );
             if let Some(previous) = previous {
                 painter.line_segment([previous, point], Stroke::new(1.0, color));
             }
@@ -290,12 +292,29 @@ pub fn peaks(painter: &egui::Painter, rect: Rect, values: &[Peak], color: Color3
                 painter.circle_filled(point, 2.0, color);
             }
             previous = Some(point);
-            continue;
         }
-        painter.line_segment(
-            [Pos2::new(x, y(peak.min)), Pos2::new(x, y(peak.max))],
-            Stroke::new((rect.width() / values.len() as f32).max(1.0), color),
-        );
+    } else if !values.is_empty() {
+        let mut mesh = egui::Mesh::default();
+        // Join adjacent extrema into an envelope, including detail between coarse bins.
+        for index in 0..values.len() + 2 {
+            let peak = &values[index.saturating_sub(1).min(values.len() - 1)];
+            let x = if index == 0 {
+                rect.left()
+            } else if index == values.len() + 1 {
+                rect.right()
+            } else {
+                rect.left() + (index as f32 - 0.5) * rect.width() / values.len() as f32
+            };
+            for value in [peak.max, peak.min] {
+                mesh.colored_vertex(Pos2::new(x, y(value)), color);
+            }
+            if index > 0 {
+                let b = (index * 2) as u32;
+                mesh.add_triangle(b - 2, b - 1, b);
+                mesh.add_triangle(b, b - 1, b + 1);
+            }
+        }
+        painter.add(egui::Shape::mesh(mesh));
     }
     painter.hline(
         rect.x_range(),
@@ -304,11 +323,27 @@ pub fn peaks(painter: &egui::Painter, rect: Rect, values: &[Peak], color: Color3
     );
 }
 
+pub fn main_plot(rect: Rect) -> Rect {
+    Rect::from_min_max(
+        rect.min + Vec2::new(15.0, 22.0),
+        rect.max - Vec2::splat(1.0),
+    )
+}
+pub fn viewport_box(rect: Rect, total: u64, visible: &FrameRange) -> Rect {
+    let plot = rect.shrink(1.0);
+    let x = |frame: u64| plot.left() + frame as f32 / total.max(1) as f32 * plot.width();
+    Rect::from_min_max(
+        Pos2::new(x(visible.start), plot.top()),
+        Pos2::new(x(visible.end), plot.bottom()),
+    )
+}
+
 pub fn waveform_canvas(
     ui: &mut egui::Ui,
     height: f32,
     wave: &WaveformData,
-    rate: u32,
+    document: &DocumentInfo,
+    visible: &FrameRange,
     overview: bool,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
@@ -319,7 +354,7 @@ pub fn waveform_canvas(
     let plot = if overview {
         rect.shrink(1.0)
     } else {
-        Rect::from_min_max(rect.min + Vec2::new(1.0, 22.0), rect.max - Vec2::splat(1.0))
+        main_plot(rect)
     };
     grid(&painter, plot);
     if overview {
@@ -329,12 +364,28 @@ pub fn waveform_canvas(
             &wave.channels[0],
             Color32::from_rgb(105, 132, 166),
         );
-        painter.rect_filled(plot, 0.0, Color32::from_rgba_unmultiplied(0, 122, 255, 24));
-        painter.rect_stroke(plot, 1.0, Stroke::new(1.0, BLUE), egui::StrokeKind::Inside);
-        for x in [plot.left() + 2.0, plot.right() - 2.0] {
+        let viewport = viewport_box(rect, document.frames, visible);
+        painter.rect_filled(
+            viewport,
+            0.0,
+            Color32::from_rgba_unmultiplied(0, 122, 255, 42),
+        );
+        painter.rect_stroke(
+            viewport,
+            1.0,
+            Stroke::new(1.0, BLUE),
+            egui::StrokeKind::Inside,
+        );
+        for x in [viewport.left(), viewport.right()] {
             let handle =
-                Rect::from_center_size(Pos2::new(x, plot.center().y), Vec2::new(7.0, 28.0));
-            painter.rect_filled(handle, 2.0, BLUE);
+                Rect::from_center_size(Pos2::new(x, plot.center().y), Vec2::new(8.0, 28.0));
+            painter.rect(
+                handle,
+                2.0,
+                BLUE,
+                Stroke::new(1.0, Color32::from_rgb(110, 185, 255)),
+                egui::StrokeKind::Inside,
+            );
             painter.vline(
                 x,
                 (plot.center().y - 7.0)..=(plot.center().y + 7.0),
@@ -344,9 +395,12 @@ pub fn waveform_canvas(
     } else {
         ruler(
             &painter,
-            Rect::from_min_max(rect.min, Pos2::new(rect.right(), plot.top())),
-            wave.start_frame as f64 / rate as f64,
-            wave.end_frame as f64 / rate as f64,
+            Rect::from_min_max(
+                Pos2::new(plot.left(), rect.top()),
+                Pos2::new(rect.right(), plot.top()),
+            ),
+            wave.start_frame as f64 / document.sample_rate as f64,
+            wave.end_frame as f64 / document.sample_rate as f64,
         );
         for (channel, values) in wave.channels.iter().enumerate() {
             let channel_rect = Rect::from_min_size(
@@ -357,19 +411,14 @@ pub fn waveform_canvas(
                     ),
                 Vec2::new(plot.width(), plot.height() / wave.channels.len() as f32),
             );
-            peaks(
-                &painter,
-                Rect::from_min_max(channel_rect.min + Vec2::new(14.0, 0.0), channel_rect.max),
-                values,
-                WAVE,
-            );
+            peaks(&painter, channel_rect, values, WAVE);
             painter.hline(
                 channel_rect.x_range(),
                 channel_rect.bottom(),
                 Stroke::new(1.0, BORDER),
             );
             painter.text(
-                channel_rect.left_center() + Vec2::new(4.0, -12.0),
+                Pos2::new(rect.left() + 4.0, channel_rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 if wave.channels.len() == 1 {
                     "M"
@@ -382,11 +431,38 @@ pub fn waveform_canvas(
                 MUTED,
             );
         }
-        painter.vline(
-            plot.left() + 1.0,
-            plot.y_range(),
-            Stroke::new(1.0, Color32::from_rgb(220, 230, 244)),
-        );
+        let x = |frame: u64| {
+            plot.left()
+                + (frame as f64 - wave.start_frame as f64) as f32
+                    / (wave.end_frame - wave.start_frame).max(1) as f32
+                    * plot.width()
+        };
+        if let Some(selection) = &document.selection
+            && selection.start < wave.end_frame
+            && selection.end > wave.start_frame
+        {
+            let selection_rect = Rect::from_min_max(
+                Pos2::new(x(selection.start.max(wave.start_frame)), plot.top()),
+                Pos2::new(x(selection.end.min(wave.end_frame)), plot.bottom()),
+            );
+            painter.rect_filled(
+                selection_rect,
+                0.0,
+                Color32::from_rgba_unmultiplied(0, 122, 255, 48),
+            );
+            for frame in [selection.start, selection.end] {
+                if (wave.start_frame..=wave.end_frame).contains(&frame) {
+                    painter.vline(x(frame), plot.y_range(), Stroke::new(1.0, BLUE));
+                }
+            }
+        }
+        if (wave.start_frame..=wave.end_frame).contains(&document.cursor) {
+            painter.vline(
+                x(document.cursor),
+                plot.y_range(),
+                Stroke::new(1.2, Color32::from_rgb(225, 234, 247)),
+            );
+        }
     }
     painter.rect_stroke(
         rect,

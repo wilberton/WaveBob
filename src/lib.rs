@@ -186,6 +186,7 @@ impl Session {
             Command::ToggleLoop(_) => self.set_loop(!self.snapshot.loop_enabled),
             Command::GetPresentation(_)
             | Command::SetMode(_)
+            | Command::SetViewport(_)
             | Command::SetLayout(_)
             | Command::TogglePanels(_)
             | Command::RenderBarrier(_)

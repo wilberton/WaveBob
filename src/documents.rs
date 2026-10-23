@@ -100,6 +100,19 @@ pub struct CloseParams {
 }
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct CursorParams {
+    pub document_id: String,
+    pub frame: u64,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectionParams {
+    pub document_id: String,
+    pub start_frame: u64,
+    pub end_frame: u64,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct JobParams {
     pub job_id: String,
 }
@@ -284,6 +297,42 @@ impl Editor {
                 }
                 Ok(CommandResult::Document(document.into()))
             }
+            Command::SetCursor(params) => {
+                let mut document = self.document(&params.document_id)?.clone();
+                if params.frame > document.frames {
+                    return Err(invalid_range());
+                }
+                document.cursor = params.frame;
+                document.selection = None;
+                self.commit_navigation(document, revision)
+            }
+            Command::SetSelection(params) => {
+                let mut document = self.document(&params.document_id)?.clone();
+                if params.start_frame > document.frames || params.end_frame > document.frames {
+                    return Err(invalid_range());
+                }
+                let (start, end) = (
+                    params.start_frame.min(params.end_frame),
+                    params.start_frame.max(params.end_frame),
+                );
+                document.cursor = start;
+                document.selection = (start < end).then_some(FrameRange { start, end });
+                self.commit_navigation(document, revision)
+            }
+            Command::SelectAll(params) => {
+                let mut document = self.document(&params.document_id)?.clone();
+                document.cursor = 0;
+                document.selection = (document.frames > 0).then_some(FrameRange {
+                    start: 0,
+                    end: document.frames,
+                });
+                self.commit_navigation(document, revision)
+            }
+            Command::ClearSelection(params) => {
+                let mut document = self.document(&params.document_id)?.clone();
+                document.selection = None;
+                self.commit_navigation(document, revision)
+            }
             Command::GetJob(params) => Ok(CommandResult::Job(
                 self.jobs
                     .get(&params.job_id)
@@ -361,6 +410,22 @@ impl Editor {
             .iter()
             .find(|document| document.id == id)
             .ok_or_else(|| not_found("document"))
+    }
+    fn commit_navigation(
+        &mut self,
+        document: DocumentInfo,
+        revision: &mut u64,
+    ) -> Result<CommandResult, CommandError> {
+        let index = self
+            .documents
+            .iter()
+            .position(|doc| doc.id == document.id)
+            .unwrap();
+        if document != self.documents[index] {
+            advance(revision)?;
+            self.documents[index] = document.clone();
+        }
+        Ok(CommandResult::Document(document.into()))
     }
     fn audio(
         &self,

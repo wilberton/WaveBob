@@ -49,6 +49,7 @@ pub struct DesktopHost {
     drawn_revision: u64,
     drawn_presentation_revision: u64,
     preferences: Option<crate::preferences::Preferences>,
+    transient_resources: Vec<String>,
 }
 
 impl Default for DesktopHost {
@@ -68,6 +69,7 @@ impl Default for DesktopHost {
             drawn_revision: 0,
             drawn_presentation_revision: 0,
             preferences: None,
+            transient_resources: Vec::new(),
         }
     }
 }
@@ -116,6 +118,9 @@ impl DesktopHost {
     pub fn presentation(&self) -> PresentationSnapshot {
         self.presentation.clone()
     }
+    pub fn set_transient_resources(&mut self, resources: Vec<String>) {
+        self.transient_resources = resources;
+    }
 
     pub fn frozen(&self) -> bool {
         self.pending
@@ -129,6 +134,7 @@ impl DesktopHost {
         }
         let expected = match &request.command {
             Command::SetMode(params) => params.expected_presentation_revision,
+            Command::SetViewport(params) => params.expected_presentation_revision,
             Command::SetLayout(params) => params.expected_presentation_revision,
             Command::TogglePanels(params) => params.expected_presentation_revision,
             _ => None,
@@ -147,6 +153,36 @@ impl DesktopHost {
             Command::GetPresentation(_) => CommandResult::Presentation(self.presentation()),
             Command::SetMode(params) => {
                 presentation.mode = params.mode;
+                return self.commit_presentation(request.id, presentation, false);
+            }
+            Command::SetViewport(params) => {
+                let snapshot = self.session.snapshot();
+                let Some(document) = snapshot
+                    .documents
+                    .iter()
+                    .find(|doc| doc.id == params.document_id)
+                else {
+                    return self.session.failure(
+                        Some(request.id),
+                        CommandError::new(ErrorCode::NotFound, "Unknown document identifier"),
+                    );
+                };
+                if params.start_frame >= params.end_frame || params.end_frame > document.frames {
+                    return self.session.failure(
+                        Some(request.id),
+                        CommandError::new(
+                            ErrorCode::InvalidParams,
+                            "Visible interval must contain at least one frame within the document",
+                        ),
+                    );
+                }
+                presentation.viewports.insert(
+                    params.document_id.clone(),
+                    crate::documents::FrameRange {
+                        start: params.start_frame,
+                        end: params.end_frame,
+                    },
+                );
                 return self.commit_presentation(request.id, presentation, false);
             }
             Command::SetLayout(params) => {
@@ -174,7 +210,10 @@ impl DesktopHost {
         layout_requested: bool,
     ) -> Response {
         let layout_changed = next.layout != self.presentation.layout;
-        if layout_changed || next.mode != self.presentation.mode {
+        if layout_changed
+            || next.mode != self.presentation.mode
+            || next.viewports != self.presentation.viewports
+        {
             let Some(revision) = self.presentation.revision.checked_add(1) else {
                 return self.session.failure(
                     Some(id),
@@ -206,6 +245,19 @@ impl DesktopHost {
     pub fn begin_frame(&mut self, ctx: &egui::Context) {
         if !self.frozen() {
             self.session.poll_jobs();
+            let snapshot = self.session.snapshot();
+            let mut next = self.presentation.clone();
+            next.viewports.retain(|id, view| {
+                if let Some(document) = snapshot.documents.iter().find(|doc| &doc.id == id) {
+                    *view = self.presentation.visible_interval(document);
+                    true
+                } else {
+                    false
+                }
+            });
+            if next.viewports != self.presentation.viewports {
+                self.commit_presentation("viewport-sync".into(), next, false);
+            }
         }
         if let Some(status) = self
             .preferences
@@ -355,6 +407,7 @@ impl DesktopHost {
                 .into_iter()
                 .filter(|job| job.status == crate::documents::JobStatus::Running)
                 .map(|job| format!("job:{}", job.id))
+                .chain(self.transient_resources.iter().cloned())
                 .collect(),
         };
         let response = self.session.success(

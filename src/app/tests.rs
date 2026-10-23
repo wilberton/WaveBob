@@ -378,3 +378,374 @@ fn open_action_real_channels_document_switching_and_failed_jobs_use_shared_state
     assert_eq!(h.app.host.snapshot().documents.len(), 1);
     assert_eq!(h.app.active_document().unwrap().name, "Mono.wav");
 }
+
+fn audio_harness() -> (Harness, tempfile::TempDir) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("Gestures.wav");
+    let mut writer = hound::WavWriter::create(
+        &path,
+        hound::WavSpec {
+            channels: 2,
+            sample_rate: 48000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .unwrap();
+    for frame in 0..4800 {
+        let sample = ((frame % 100) as i16 - 50) * 400;
+        writer.write_sample(sample).unwrap();
+        writer.write_sample(-sample).unwrap();
+    }
+    writer.finalize().unwrap();
+    let mut h = Harness::new();
+    h.app.open_path(path);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.active_document().is_none() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(Vec::new());
+    }
+    h.frame(Vec::new());
+    (h, directory)
+}
+fn canvas_rects(h: &mut Harness) -> [Rect; 2] {
+    fn collect(shape: &egui::Shape, out: &mut Vec<Rect>) {
+        match shape {
+            egui::Shape::Rect(shape)
+                if shape.stroke.color == Color32::from_rgb(91, 104, 119)
+                    && shape.rect.width() > 300.0
+                    && shape.rect.height() > 60.0 =>
+            {
+                out.push(shape.rect)
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let output = h.frame(Vec::new());
+    let mut rects = Vec::new();
+    for shape in output.shapes {
+        collect(&shape.shape, &mut rects);
+    }
+    rects.sort_by(|a, b| a.top().total_cmp(&b.top()));
+    assert_eq!(rects.len(), 2);
+    [rects[0], rects[1]]
+}
+fn pointer_event(pos: Pos2, button: egui::PointerButton, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+#[test]
+fn waveform_click_reversed_drag_preview_and_escape_have_exact_shared_semantics() {
+    let (mut h, _directory) = audio_harness();
+    let rect = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = |fraction: f32| Pos2::new(rect.left() + rect.width() * fraction, rect.center().y);
+    let revision = h.app.active_document().unwrap().revision_id;
+    let from = point(0.75);
+    let to = point(0.25);
+    h.frame(vec![egui::Event::PointerMoved(from)]);
+    h.frame(vec![pointer_event(
+        from,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(to)]);
+    assert!(
+        h.app.active_document().unwrap().selection.is_none(),
+        "Drag previews must not commit early"
+    );
+    assert_eq!(
+        h.app.display_document().unwrap().selection,
+        Some(FrameRange {
+            start: 1200,
+            end: 3600
+        })
+    );
+    h.frame(vec![pointer_event(to, egui::PointerButton::Primary, false)]);
+    h.frame(Vec::new());
+    let document = h.app.active_document().unwrap();
+    assert_eq!(
+        document.selection,
+        Some(FrameRange {
+            start: 1200,
+            end: 3600
+        })
+    );
+    assert_eq!(document.cursor, 1200);
+    assert_eq!(document.revision_id, revision);
+    assert!(!document.dirty);
+    let output = h.frame(Vec::new());
+    assert!(
+        text_shapes(&output)
+            .iter()
+            .any(|(rect, text)| rect.top() > 840.0
+                && text.contains("Selection 1200–3600")
+                && text.contains("2400 frames / 00:00.050000"))
+    );
+    h.click(point(0.5));
+    assert_eq!(h.app.active_document().unwrap().cursor, 2400);
+    assert!(h.app.active_document().unwrap().selection.is_none());
+    let before = h.app.host.snapshot();
+    h.frame(vec![egui::Event::PointerMoved(from)]);
+    h.frame(vec![pointer_event(
+        from,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(to)]);
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    h.frame(vec![pointer_event(to, egui::PointerButton::Primary, false)]);
+    assert_eq!(
+        h.app.host.snapshot(),
+        before,
+        "Escape cancels the uncommitted selection"
+    );
+}
+
+#[test]
+fn overview_body_and_both_edges_pan_zoom_and_keep_selection_independent() {
+    let (mut h, _directory) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    h.app.dispatch(Command::SetSelection(SelectionParams {
+        document_id: doc.id.clone(),
+        start_frame: 1000,
+        end_frame: 2000,
+    }));
+    h.app.dispatch(Command::SetViewport(SetViewportParams {
+        document_id: doc.id.clone(),
+        start_frame: 1200,
+        end_frame: 3600,
+        expected_presentation_revision: None,
+    }));
+    let core = h.app.host.snapshot();
+    let overview = canvas_rects(&mut h)[0].shrink(1.0);
+    let point = |frame: u64| {
+        Pos2::new(
+            overview.left() + overview.width() * frame as f32 / 4800.0,
+            overview.center().y,
+        )
+    };
+    h.drag(point(2400), point(2880));
+    assert_eq!(
+        h.app.host.presentation().visible_interval(&doc),
+        FrameRange {
+            start: 1680,
+            end: 4080
+        }
+    );
+    h.drag(point(1680), point(720));
+    assert_eq!(
+        h.app.host.presentation().visible_interval(&doc),
+        FrameRange {
+            start: 720,
+            end: 4080
+        }
+    );
+    h.drag(point(4080), point(4320));
+    assert_eq!(
+        h.app.host.presentation().visible_interval(&doc),
+        FrameRange {
+            start: 720,
+            end: 4320
+        }
+    );
+    h.drag(point(720), point(4800));
+    assert_eq!(
+        h.app.host.presentation().visible_interval(&doc),
+        FrameRange {
+            start: 4319,
+            end: 4320
+        }
+    );
+    h.frame(Vec::new());
+    assert_eq!(
+        h.app.detail.as_ref().unwrap().end_frame - h.app.detail.as_ref().unwrap().start_frame,
+        1
+    );
+    assert_eq!(
+        h.app.host.snapshot(),
+        core,
+        "Navigation must preserve selection and all core state"
+    );
+}
+
+#[test]
+fn wheel_pinch_middle_drag_and_toolbar_zoom_anchor_and_clamp_the_view() {
+    let (mut h, _directory) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    let set = |h: &mut Harness| {
+        h.app.dispatch(Command::SetViewport(SetViewportParams {
+            document_id: doc.id.clone(),
+            start_frame: 1200,
+            end_frame: 3600,
+            expected_presentation_revision: None,
+        }))
+    };
+    set(&mut h);
+    let [overview, main] = canvas_rects(&mut h);
+    let plot = visuals::main_plot(main);
+    let anchor = Pos2::new(plot.left() + plot.width() * 0.25, plot.center().y);
+    h.frame(vec![
+        egui::Event::PointerMoved(anchor),
+        egui::Event::Zoom(2.0),
+    ]);
+    assert_eq!(
+        h.app.host.presentation().visible_interval(&doc),
+        FrameRange {
+            start: 1500,
+            end: 2700
+        }
+    );
+    set(&mut h);
+    h.frame(Vec::new());
+    let from = plot.center();
+    let to = from + Vec2::new(plot.width() * 0.1, 0.0);
+    h.frame(vec![egui::Event::PointerMoved(from)]);
+    h.frame(vec![pointer_event(from, egui::PointerButton::Middle, true)]);
+    h.frame(vec![egui::Event::PointerMoved(to)]);
+    h.frame(vec![pointer_event(to, egui::PointerButton::Middle, false)]);
+    assert_eq!(
+        h.app.host.presentation().visible_interval(&doc),
+        FrameRange {
+            start: 960,
+            end: 3360
+        }
+    );
+    set(&mut h);
+    h.frame(Vec::new());
+    let wheel = |modifiers, delta| egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers,
+    };
+    h.frame(vec![
+        egui::Event::PointerMoved(anchor),
+        wheel(egui::Modifiers::CTRL, Vec2::new(0.0, 60.0)),
+    ]);
+    let zoomed = h.app.host.presentation().visible_interval(&doc);
+    assert!(zoomed.end - zoomed.start < 2400);
+    assert!(
+        (zoomed.start as f64 + 0.25 * (zoomed.end - zoomed.start) as f64 - 1800.0).abs() <= 1.0
+    );
+    // Finish wheel smoothing before testing plain scrolling as a separate gesture.
+    for _ in 0..15 {
+        h.frame(Vec::new());
+    }
+    set(&mut h);
+    h.frame(Vec::new());
+    h.frame(vec![
+        egui::Event::PointerMoved(anchor),
+        wheel(egui::Modifiers::NONE, Vec2::new(0.0, -80.0)),
+    ]);
+    let panned = h.app.host.presentation().visible_interval(&doc);
+    assert_eq!(panned.end - panned.start, 2400);
+    assert!(panned.start > 1200);
+    for _ in 0..15 {
+        h.frame(Vec::new());
+    }
+    h.click(Pos2::new(main.right() - 22.0, overview.top() - 22.0));
+    assert_eq!(
+        h.app.host.presentation().visible_interval(&doc),
+        FrameRange {
+            start: 0,
+            end: 4800
+        }
+    );
+    h.click(Pos2::new(main.right() - 60.0, overview.top() - 22.0));
+    assert_eq!(
+        h.app.host.presentation().visible_interval(&doc),
+        FrameRange {
+            start: 1200,
+            end: 3600
+        }
+    );
+    assert!(h.app.active_document().unwrap().selection.is_none());
+    assert!(!h.app.active_document().unwrap().dirty);
+}
+
+#[test]
+fn selection_keyboard_shortcuts_respect_text_focus_and_narrow_status_help() {
+    let (mut h, _directory) = audio_harness();
+    let event = egui::Event::Key {
+        key: egui::Key::A,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::CTRL,
+    };
+    h.frame(vec![event.clone()]);
+    assert_eq!(
+        h.app.active_document().unwrap().selection,
+        Some(FrameRange {
+            start: 0,
+            end: 4800
+        })
+    );
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::A,
+        physical_key: None,
+        pressed: false,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    h.size = Vec2::new(800.0, 600.0);
+    let main = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let output = h.frame(vec![egui::Event::PointerMoved(main.center())]);
+    let texts = text_shapes(&output);
+    let readout = texts
+        .iter()
+        .find(|(_, text)| text.contains("Selection 0–4800"))
+        .unwrap();
+    assert!(readout.0.right() <= 800.0 && readout.0.bottom() <= 600.0);
+    let help = texts
+        .iter()
+        .find(|(_, text)| text.contains("Click to place the cursor"))
+        .unwrap();
+    assert!(help.0.top() > 550.0);
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    assert!(h.app.active_document().unwrap().selection.is_none());
+    let before = h.app.host.snapshot();
+    let mut text = String::from("Typed text");
+    let id = egui::Id::unique("selection-text-focus");
+    let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.add(egui::TextEdit::singleline(&mut text).id(id))
+            .request_focus();
+    });
+    output.textures_delta.clear();
+    let mut output = h.ctx.run_ui(
+        egui::RawInput {
+            events: vec![event],
+            ..Default::default()
+        },
+        |ui| {
+            ui.add(egui::TextEdit::singleline(&mut text).id(id));
+            h.app.shortcuts(ui.ctx());
+        },
+    );
+    output.textures_delta.clear();
+    assert_eq!(h.app.host.snapshot(), before);
+}

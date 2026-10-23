@@ -19,6 +19,12 @@ _Avoid_: Sample (when counting positions across multiple channels).
 **Selection**: A half-open interval of sample frames spanning a document's channels
 or an arrangement's timeline; an empty interval means no selection.
 
+**Edit cursor**: A frame boundary marking where a click places editing or playback
+start; it may be at the end of a document.
+
+**Viewport**: The interval visible in the main waveform, independent of the edit
+cursor and selection. The overview shows this interval within the whole sample.
+
 **Session revision**: The version of committed session state, excluding job progress
 and presentation-only changes.
 

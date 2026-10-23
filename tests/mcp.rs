@@ -110,7 +110,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 16);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -881,6 +881,179 @@ mod live {
     }
 
     #[tokio::test]
+    #[ignore = "requires a real native GUI renderer; run explicitly on a desktop"]
+    async fn exact_selection_zoom_and_sample_detail_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let path = runtime.path().join("Rain ambience.wav");
+        let mut writer = hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: 48000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        let mut noise = 123456789_u32;
+        for frame in 0..576000 {
+            let t = frame as f64 / 48000.0;
+            for channel in 0..2 {
+                noise = noise.wrapping_mul(1664525).wrapping_add(1013904223);
+                let envelope = 0.15 + 0.35 * (t * 0.3 + channel as f64 * 0.2).sin().powi(2);
+                writer
+                    .write_sample(
+                        ((0.4
+                            * (t * std::f64::consts::TAU * (220.0 + channel as f64 * 111.0)).sin()
+                            + 0.6 * (noise as f64 / u32::MAX as f64 * 2.0 - 1.0))
+                            * envelope
+                            * 32767.0) as i16,
+                    )
+                    .unwrap();
+            }
+        }
+        writer.finalize().unwrap();
+        let original = fs::read(&path).unwrap();
+        let _gui = Gui::start(runtime.path(), "selection-audio");
+        let client = named_client(runtime.path(), "selection-audio").await;
+        let opened =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let doc = loop {
+            let job = response(
+                &call(
+                    &client,
+                    "jobs.get",
+                    json!({"params":{"job_id":opened["result"]["id"]}}),
+                )
+                .await,
+            );
+            if job["result"]["status"] != "running" {
+                assert_eq!(job["result"]["status"], "succeeded");
+                break job["result"]["result"].clone();
+            }
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        let selected = response(
+            &call(
+                &client,
+                "documents.selection.set",
+                json!({"params":{"document_id":doc["id"],"start_frame":144000,"end_frame":240000}}),
+            )
+            .await,
+        );
+        assert_eq!(
+            selected["result"]["selection"],
+            json!({"start":144000,"end":240000})
+        );
+        assert_eq!(selected["result"]["cursor"], 144000);
+        assert_eq!(selected["result"]["dirty"], false);
+        let revision = selected["revision"].clone();
+        let mut records = Vec::new();
+        for (label, start, end) in [
+            ("waveform-zoomed", 96000, 384000),
+            ("waveform-samples", 143995, 144020),
+            ("waveform-single-frame", 144000, 144001),
+        ] {
+            let viewport = response(
+                &call(
+                    &client,
+                    "presentation.viewport.set",
+                    json!({"params":{"document_id":doc["id"],"start_frame":start,"end_frame":end}}),
+                )
+                .await,
+            );
+            assert_eq!(viewport["status"], "ok");
+            assert_eq!(viewport["revision"], revision);
+            let current = response(
+                &call(
+                    &client,
+                    "documents.get",
+                    json!({"params":{"document_id":doc["id"]}}),
+                )
+                .await,
+            );
+            assert_eq!(current["result"], selected["result"]);
+            if end - start <= 25 {
+                let samples=response(&call(&client,"documents.samples",json!({"params":{"document_id":doc["id"],"start_frame":start,"frames":end-start}})).await);
+                let peaks=response(&call(&client,"documents.waveform",json!({"params":{"document_id":doc["id"],"start_frame":start,"end_frame":end,"bins":32}})).await);
+                for channel in 0..2 {
+                    for frame in 0..(end - start) as usize {
+                        assert_eq!(
+                            peaks["result"]["channels"][channel][frame]["min"],
+                            samples["result"]["channels"][channel][frame]
+                        );
+                        assert_eq!(
+                            peaks["result"]["channels"][channel][frame]["max"],
+                            samples["result"]["channels"][channel][frame]
+                        );
+                    }
+                }
+            }
+            let path = runtime.path().join(format!("{label}.png"));
+            let result=call(&client,"capture.png",json!({"params":{"path":path,"after_revision":revision,"after_presentation_revision":viewport["result"]["revision"]}})).await;
+            let captured = response(&result);
+            assert_eq!(captured["status"], "ok");
+            assert_eq!(
+                captured["result"]["metadata"]["rendered_revision"],
+                revision
+            );
+            assert_eq!(
+                captured["result"]["metadata"]["pending_resources"],
+                json!([])
+            );
+            let image = result
+                .content
+                .iter()
+                .find_map(|block| match block {
+                    ContentBlock::Image(image) => Some(image),
+                    _ => None,
+                })
+                .unwrap();
+            let png = BASE64_STANDARD.decode(&image.data).unwrap();
+            assert_eq!(png, fs::read(&path).unwrap());
+            if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+                fs::create_dir_all(&directory).unwrap();
+                fs::write(Path::new(&directory).join(format!("{label}.png")), png).unwrap();
+            }
+            records.push(json!({"file":format!("{label}.png"),"capture":captured,"document":current["result"],"view":viewport["result"]}));
+        }
+        call(
+            &client,
+            "presentation.set_mode",
+            json!({"params":{"mode":"multitrack"}}),
+        )
+        .await;
+        call(
+            &client,
+            "presentation.set_mode",
+            json!({"params":{"mode":"waveform"}}),
+        )
+        .await;
+        assert_eq!(
+            response(
+                &call(
+                    &client,
+                    "documents.get",
+                    json!({"params":{"document_id":doc["id"]}})
+                )
+                .await
+            )["result"],
+            selected["result"]
+        );
+        assert_eq!(fs::read(path).unwrap(), original);
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::write(
+                Path::new(&directory).join("selection-metadata.json"),
+                serde_json::to_vec_pretty(&records).unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
     #[ignore = "measured large-file native GUI benchmark; run explicitly in release mode"]
     async fn large_import_keeps_live_navigation_and_cancellation_responsive() {
         let runtime = tempfile::tempdir().unwrap();
@@ -1049,7 +1222,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 18);
+        assert_eq!(tools.len(), 23);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

@@ -472,3 +472,88 @@ fn oversized_declared_audio_fails_before_allocating_or_publishing_a_document() {
     assert_eq!(job["error"]["code"], "resource_limit");
     assert!(session.snapshot().documents.is_empty());
 }
+
+#[test]
+fn exact_cursor_selection_all_clear_and_stale_navigation_preserve_audio() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("selection.wav");
+    fixture(&path, 2, &[0; 24]);
+    let mut session = Session::default();
+    let document = open(&mut session, &path)["result"].clone();
+    let id = document["id"].clone();
+    let range = success(send(
+        &mut session,
+        "documents.selection.set",
+        json!({"document_id":id,"start_frame":9,"end_frame":3}),
+    ));
+    assert_eq!(range["selection"], json!({"start":3,"end":9}));
+    assert_eq!(range["cursor"], 3);
+    assert_eq!(range["revision_id"], document["revision_id"]);
+    assert_eq!(range["dirty"], false);
+    let cleared = success(send(
+        &mut session,
+        "documents.selection.clear",
+        json!({"document_id":id}),
+    ));
+    assert!(cleared["selection"].is_null());
+    assert_eq!(cleared["cursor"], 3);
+    let before = session.snapshot();
+    success(send(
+        &mut session,
+        "documents.selection.clear",
+        json!({"document_id":id}),
+    ));
+    assert_eq!(session.snapshot(), before);
+    let all = success(send(
+        &mut session,
+        "documents.selection.all",
+        json!({"document_id":id}),
+    ));
+    assert_eq!(all["selection"], json!({"start":0,"end":12}));
+    assert_eq!(all["cursor"], 0);
+    let one = success(send(
+        &mut session,
+        "documents.selection.set",
+        json!({"document_id":id,"start_frame":11,"end_frame":12}),
+    ));
+    assert_eq!(one["selection"], json!({"start":11,"end":12}));
+    let empty = success(send(
+        &mut session,
+        "documents.selection.set",
+        json!({"document_id":id,"start_frame":5,"end_frame":5}),
+    ));
+    assert!(empty["selection"].is_null());
+    assert_eq!(empty["cursor"], 5);
+    success(send(
+        &mut session,
+        "documents.cursor.set",
+        json!({"document_id":id,"frame":12}),
+    ));
+    let before = session.snapshot();
+    for (name, params, code) in [
+        (
+            "documents.cursor.set",
+            json!({"document_id":id,"frame":13}),
+            "invalid_params",
+        ),
+        (
+            "documents.selection.set",
+            json!({"document_id":id,"start_frame":13,"end_frame":0}),
+            "invalid_params",
+        ),
+        (
+            "documents.selection.all",
+            json!({"document_id":"missing"}),
+            "not_found",
+        ),
+    ] {
+        assert_eq!(send(&mut session, name, params)["error"]["code"], code);
+        assert_eq!(session.snapshot(), before);
+    }
+    let stale=protocol::dispatch_line(&mut session,&json!({"id":"stale","command":"documents.selection.all","params":{"document_id":id},"expected_revision":0}).to_string());
+    assert_eq!(
+        serde_json::to_value(stale).unwrap()["error"]["code"],
+        "stale_revision"
+    );
+    assert_eq!(session.snapshot(), before);
+}

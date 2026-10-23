@@ -15,6 +15,76 @@ pub struct PresentationSnapshot {
     pub mode: ViewMode,
     pub layout: PanelLayout,
     pub preferences: PreferenceStatus,
+    #[serde(default)]
+    pub viewports: std::collections::BTreeMap<String, crate::documents::FrameRange>,
+}
+
+impl PresentationSnapshot {
+    pub fn visible_interval(
+        &self,
+        document: &crate::documents::DocumentInfo,
+    ) -> crate::documents::FrameRange {
+        let Some(view) = self.viewports.get(&document.id) else {
+            return crate::documents::FrameRange {
+                start: 0,
+                end: document.frames,
+            };
+        };
+        if document.frames == 0 {
+            return crate::documents::FrameRange { start: 0, end: 0 };
+        }
+        let end = view.end.min(document.frames).max(1);
+        crate::documents::FrameRange {
+            start: view.start.min(end - 1),
+            end,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetViewportParams {
+    pub document_id: String,
+    pub start_frame: u64,
+    pub end_frame: u64,
+    pub expected_presentation_revision: Option<u64>,
+}
+
+pub fn pan(
+    view: &crate::documents::FrameRange,
+    delta: f64,
+    total: u64,
+) -> crate::documents::FrameRange {
+    let span = (view.end - view.start).min(total);
+    let start = (view.start as f64 + delta)
+        .round()
+        .clamp(0.0, (total - span) as f64) as u64;
+    crate::documents::FrameRange {
+        start,
+        end: start + span,
+    }
+}
+pub fn zoom(
+    view: &crate::documents::FrameRange,
+    factor: f64,
+    anchor: f64,
+    total: u64,
+) -> crate::documents::FrameRange {
+    if total == 0 || !factor.is_finite() || factor <= 0.0 {
+        return view.clone();
+    }
+    let anchor = anchor.clamp(0.0, 1.0);
+    let span = ((view.end - view.start) as f64 / factor)
+        .round()
+        .clamp(1.0, total as f64) as u64;
+    let frame = view.start as f64 + anchor * (view.end - view.start) as f64;
+    let start = (frame - anchor * span as f64)
+        .round()
+        .clamp(0.0, (total - span) as f64) as u64;
+    crate::documents::FrameRange {
+        start,
+        end: start + span,
+    }
 }
 
 pub const MIN_PANEL_WIDTH: f32 = 180.0;

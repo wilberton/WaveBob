@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::mpsc};
 use wavebob::{Command, EmptyParams, Outcome, Request, desktop::DesktopHost, presentation::*};
 use wavebob::{CommandResult, documents::*};
 mod visuals;
+mod waveform;
 use visuals::{Icon, icon_button};
 
 const BLUE: Color32 = Color32::from_rgb(0, 122, 255);
@@ -15,6 +16,8 @@ pub struct WaveBob {
     host: DesktopHost,
     error: Option<String>,
     waveform: Option<WaveformData>,
+    detail: Option<WaveformData>,
+    gesture: Option<waveform::Gesture>,
     open_requested: bool,
     dialog: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
     reported_jobs: HashSet<String>,
@@ -106,33 +109,56 @@ impl WaveBob {
             .into_iter()
             .find(|doc| Some(&doc.id) == snapshot.active_document_id.as_ref())
     }
+    fn read_waveform(
+        &mut self,
+        document: &DocumentInfo,
+        start: u64,
+        end: u64,
+    ) -> Option<WaveformData> {
+        let response = self.host.execute(Request::new(
+            "gui-waveform",
+            Command::GetWaveform(WaveformParams {
+                document_id: document.id.clone(),
+                revision_id: Some(document.revision_id.clone()),
+                start_frame: start,
+                end_frame: Some(end),
+                bins: 2048,
+            }),
+        ));
+        match response.outcome {
+            Outcome::Ok {
+                result: CommandResult::Waveform(wave),
+            } => Some(wave),
+            Outcome::Error { error } => {
+                self.error = Some(error.message);
+                None
+            }
+            _ => None,
+        }
+    }
     fn update_waveform(&mut self) {
         if let Some(document) = self.active_document() {
-            if self
-                .waveform
-                .as_ref()
-                .is_none_or(|wave| wave.revision_id != document.revision_id)
-            {
-                let response = self.host.execute(Request::new(
-                    "gui-waveform",
-                    Command::GetWaveform(WaveformParams {
-                        document_id: document.id,
-                        revision_id: Some(document.revision_id),
-                        start_frame: 0,
-                        end_frame: None,
-                        bins: 2048,
-                    }),
-                ));
-                match response.outcome {
-                    Outcome::Ok {
-                        result: CommandResult::Waveform(waveform),
-                    } => self.waveform = Some(waveform),
-                    Outcome::Error { error } => self.error = Some(error.message),
-                    _ => {}
-                }
+            if self.waveform.as_ref().is_none_or(|wave| {
+                wave.document_id != document.id || wave.revision_id != document.revision_id
+            }) {
+                self.waveform = self.read_waveform(&document, 0, document.frames);
+            }
+            let visible = self.host.presentation().visible_interval(&document);
+            if self.detail.as_ref().is_none_or(|wave| {
+                wave.document_id != document.id
+                    || wave.revision_id != document.revision_id
+                    || wave.start_frame != visible.start
+                    || wave.end_frame != visible.end
+            }) {
+                self.detail = if visible.start == 0 && visible.end == document.frames {
+                    self.waveform.clone()
+                } else {
+                    self.read_waveform(&document, visible.start, visible.end)
+                };
             }
         } else {
             self.waveform = None;
+            self.detail = None;
         }
         for job in self.host.snapshot().jobs {
             if job.status == JobStatus::Failed && self.reported_jobs.insert(job.id) {
@@ -143,6 +169,16 @@ impl WaveBob {
     fn dispatch(&mut self, command: Command) {
         if self.host.frozen() {
             return;
+        }
+        if matches!(
+            &command,
+            Command::SetMode(_)
+                | Command::SetLayout(_)
+                | Command::TogglePanels(_)
+                | Command::ActivateDocument(_)
+                | Command::CloseDocument(_)
+        ) {
+            self.gesture = None;
         }
         let response = self.host.execute(Request::new("gui", command));
         self.error = match response.outcome {
@@ -193,6 +229,26 @@ impl WaveBob {
             fresh && input.consume_key(egui::Modifiers::NONE, key)
         })
         };
+        let select_all=ctx.input(|input|input.events.iter().any(|event|matches!(event,egui::Event::Key{key:egui::Key::A,pressed:true,repeat:false,modifiers,..} if (modifiers.command||modifiers.ctrl||modifiers.mac_cmd) && !modifiers.shift && !modifiers.alt)));
+        if self.host.presentation().mode == ViewMode::Waveform
+            && let Some(document) = self.active_document()
+        {
+            if select_all {
+                self.gesture = None;
+                self.dispatch(Command::SelectAll(DocumentParams {
+                    document_id: document.id.clone(),
+                }));
+            }
+            if pressed(egui::Key::Escape) {
+                if self.gesture.is_some() {
+                    self.cancel_gesture();
+                } else {
+                    self.dispatch(Command::ClearSelection(DocumentParams {
+                        document_id: document.id,
+                    }));
+                }
+            }
+        }
         let toggle = pressed(egui::Key::Backtick);
         if toggle {
             self.dispatch(Command::TogglePanels(PresentationRevisionParams::default()));
@@ -205,11 +261,18 @@ impl WaveBob {
     // Independent of eframe::Frame for real egui pointer/key/focus tests.
     fn draw(&mut self, ui: &mut egui::Ui) {
         self.host.begin_frame(ui.ctx());
+        if !self.host.frozen() && !ui.ctx().input(|input| input.focused) {
+            self.cancel_gesture();
+        }
         self.poll_dialog();
         self.update_waveform();
         self.shortcuts(ui.ctx());
         let presentation = self.host.presentation();
         let mode = presentation.mode;
+        if mode != ViewMode::Waveform {
+            self.gesture = None;
+            self.host.set_transient_resources(Vec::new());
+        }
         let mut help = Help::default();
         let error = self.error.clone().or_else(|| match &presentation.preferences {
             PreferenceStatus::Error { .. } => Some("Layout preferences could not be saved or loaded. Check the preferences file and its permissions.".into()),
@@ -239,7 +302,44 @@ impl WaveBob {
                         &menu.response,
                         "Open a WAV or MP3 audio file in a new document.",
                     );
-                    for name in ["Edit", "View", "Help"] {
+                    let edit = ui.menu_button("Edit", |ui| {
+                        let document = self.active_document();
+                        let enabled = mode == ViewMode::Waveform && document.is_some();
+                        for (label, all) in [
+                            ("Select all    Ctrl/Cmd+A", true),
+                            ("Clear selection    Escape", false),
+                        ] {
+                            let response = ui.add_enabled(enabled, egui::Button::new(label));
+                            help.observe(
+                                &response,
+                                if all {
+                                    "Select every frame without changing the audio."
+                                } else {
+                                    "Clear the selection and keep the edit cursor."
+                                },
+                            );
+                            if response.clicked()
+                                && let Some(document) = &document
+                            {
+                                self.gesture = None;
+                                self.dispatch(if all {
+                                    Command::SelectAll(DocumentParams {
+                                        document_id: document.id.clone(),
+                                    })
+                                } else {
+                                    Command::ClearSelection(DocumentParams {
+                                        document_id: document.id.clone(),
+                                    })
+                                });
+                                ui.close();
+                            }
+                        }
+                    });
+                    help.observe(
+                        &edit.response,
+                        "Select all or clear the active document's selection.",
+                    );
+                    for name in ["View", "Help"] {
                         help.observe(
                             &ui.add_enabled(false, egui::Button::new(name).frame(false)),
                             "Menus will become available as editing features are added.",
@@ -275,7 +375,18 @@ impl WaveBob {
 
         // Allocate the strip first; paint its text after collecting this frame's help.
         let status = egui::Panel::bottom("status")
-            .exact_size(if error.is_some() { 54.0 } else { 30.0 })
+            .exact_size(
+                if self
+                    .display_document()
+                    .is_some_and(|doc| doc.selection.is_some())
+                {
+                    if error.is_some() { 74.0 } else { 50.0 }
+                } else if error.is_some() {
+                    54.0
+                } else {
+                    30.0
+                },
+            )
             .frame(panel_frame())
             .show(ui, |ui| ui.max_rect())
             .inner;
@@ -565,10 +676,10 @@ impl WaveBob {
         });
         content.add_space(18.0);
         content.label("Target");
-        let target = if self.active_document().is_some() {
-            "Whole sample"
-        } else {
-            "No editing target"
+        let target = match self.display_document() {
+            Some(doc) if doc.selection.is_some() => "Selection",
+            Some(_) => "Whole sample",
+            None => "No editing target",
         };
         help.observe(&content.add_enabled(false,centered_button(target).min_size(Vec2::new(area.width(),26.0))),"Effects apply to the selection, or the whole sample when no selection exists. Editing arrives in ticket 10.");
         content.add_space(14.0);
@@ -613,81 +724,6 @@ impl WaveBob {
             ),
             "Apply is unavailable until audio editing is implemented.",
         );
-    }
-
-    fn waveform_view(&mut self, ui: &mut egui::Ui, help: &mut Help) {
-        self.update_waveform();
-        let Some(document) = self.active_document() else {
-            ui.centered_and_justified(|ui| {
-                ui.label(
-                    RichText::new("Open an audio file to begin")
-                        .size(18.0)
-                        .color(MUTED),
-                );
-            });
-            return;
-        };
-        let toolbar_height = 28.0;
-        let (toolbar, _) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), toolbar_height),
-            Sense::hover(),
-        );
-        let mut info = child(
-            ui,
-            Rect::from_min_max(
-                toolbar.min,
-                Pos2::new(toolbar.right() - 125.0, toolbar.bottom()),
-            ),
-        );
-        info.horizontal(|ui| {
-            ui.label(RichText::new(&document.name).strong());
-            ui.label(
-                RichText::new(format!(
-                    "{} kHz / {} / {}   |   {}",
-                    document.sample_rate as f64 / 1000.0,
-                    if document.channels == 1 {
-                        "Mono"
-                    } else {
-                        "Stereo"
-                    },
-                    encoding_label(&document),
-                    time(document.frames, document.sample_rate)
-                ))
-                .small()
-                .color(MUTED),
-            );
-        });
-        let mut zoom = child(
-            ui,
-            Rect::from_min_max(
-                Pos2::new(toolbar.right() - 116.0, toolbar.top()),
-                toolbar.max,
-            ),
-        );
-        zoom.spacing_mut().item_spacing.x = 4.0;
-        zoom.horizontal(|ui| {
-            for (icon, label) in [
-                (Icon::Minus, "Zoom out"),
-                (Icon::Plus, "Zoom in"),
-                (Icon::Fit, "Fit sample"),
-            ] {
-                help.observe(
-                    &icon_button(ui, icon, label, false, false),
-                    "Waveform zoom and pan arrive in ticket 07.",
-                );
-            }
-        });
-        ui.add_space(4.0);
-        let Some(wave) = &self.waveform else {
-            ui.spinner();
-            return;
-        };
-        help.observe(
-            &visuals::waveform_canvas(ui, 72.0, wave, document.sample_rate, true),
-            "Whole-sample waveform overview. The blue frame shows the complete visible interval.",
-        );
-        ui.add_space(12.0);
-        help.observe(&visuals::waveform_canvas(ui,ui.available_height().max(80.0),wave,document.sample_rate,false),"Actual audio channels and time ruler. Cursor and selection editing arrive in ticket 07.");
     }
 
     fn multitrack_view(&self, ui: &mut egui::Ui, help: &mut Help) {
@@ -779,35 +815,62 @@ impl WaveBob {
                     .color(Color32::from_rgb(255, 180, 128)),
             );
         }
-        content.horizontal(|ui| {
-            let readout = if mode == ViewMode::Waveform {
-                self.active_document()
-                    .map(|doc| {
+        let document = if mode == ViewMode::Waveform {
+            self.display_document()
+        } else {
+            None
+        };
+        let selected = document.as_ref().is_some_and(|doc| doc.selection.is_some());
+        let readout = if mode == ViewMode::Waveform {
+            document
+                .map(|doc| {
+                    if let Some(selection) = doc.selection {
                         format!(
-                            "Cursor {} · No selection · {} frames",
-                            time(doc.cursor, doc.sample_rate),
+                            "Cursor {} · Selection {}–{}  |  {}–{}  |  {} frames / {}",
+                            exact_time(doc.cursor, doc.sample_rate),
+                            selection.start,
+                            selection.end,
+                            exact_time(selection.start, doc.sample_rate),
+                            exact_time(selection.end, doc.sample_rate),
+                            selection.end - selection.start,
+                            exact_time(selection.end - selection.start, doc.sample_rate)
+                        )
+                    } else {
+                        format!(
+                            "Cursor {} ({}) · No selection · {} frames",
+                            exact_time(doc.cursor, doc.sample_rate),
+                            doc.cursor,
                             doc.frames
                         )
-                    })
-                    .unwrap_or_else(|| "No document · Cursor — · No selection".into())
-            } else {
-                "Empty arrangement · Selection: none · Selected clips: 0".into()
-            };
+                    }
+                })
+                .unwrap_or_else(|| "No document · Cursor — · No selection".into())
+        } else {
+            "Empty arrangement · Selection: none · Selected clips: 0".into()
+        };
+        let saving = matches!(
+            self.host.presentation().preferences,
+            PreferenceStatus::Saving
+        );
+        content.horizontal(|ui| {
             ui.label(RichText::new(readout).size(11.0));
-            ui.separator();
-            let saving = matches!(
-                self.host.presentation().preferences,
-                PreferenceStatus::Saving
-            );
-            let available = (ui.available_width() - if saving { 95.0 } else { 0.0 }).max(0.0);
-            ui.add_sized(
-                [available, 18.0],
-                egui::Label::new(RichText::new(help.text()).size(11.0).color(MUTED)).truncate(),
-            );
+            if !selected {
+                ui.separator();
+                let available = (ui.available_width() - if saving { 95.0 } else { 0.0 }).max(0.0);
+                ui.add_sized(
+                    [available, 18.0],
+                    egui::Label::new(RichText::new(help.text()).size(11.0).color(MUTED)).truncate(),
+                );
+            }
             if saving {
                 ui.label(RichText::new("Saving layout…").size(10.0).color(MUTED));
             }
         });
+        if selected {
+            content.add(
+                egui::Label::new(RichText::new(help.text()).size(11.0).color(MUTED)).truncate(),
+            );
+        }
     }
 }
 
@@ -843,6 +906,15 @@ fn encoding_label(document: &DocumentInfo) -> String {
             + "-bit"
     }
 }
+fn exact_time(frame: u64, rate: u32) -> String {
+    let micros = frame.saturating_mul(1_000_000) / rate.max(1) as u64;
+    format!(
+        "{:02}:{:02}.{:06}",
+        micros / 60_000_000,
+        (micros / 1_000_000) % 60,
+        micros % 1_000_000
+    )
+}
 fn time(frame: u64, rate: u32) -> String {
     let millis = frame.saturating_mul(1000) / rate.max(1) as u64;
     format!(
@@ -869,6 +941,14 @@ fn child(ui: &mut egui::Ui, rect: Rect) -> egui::Ui {
 }
 
 fn theme(ctx: &egui::Context) {
+    ctx.options_mut(|options| {
+        options.input_options.zoom_modifier = egui::Modifiers {
+            ctrl: true,
+            mac_cmd: true,
+            command: true,
+            ..Default::default()
+        }
+    });
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "Inter".into(),

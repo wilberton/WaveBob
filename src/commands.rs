@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::documents::*;
 use crate::presentation::{
     CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, RenderMetadata,
-    RenderParams, SetLayoutParams, SetModeParams,
+    RenderParams, SetLayoutParams, SetModeParams, SetViewportParams,
 };
 use crate::{CommandError, ErrorCode, PROTOCOL_VERSION, SessionSnapshot};
 
@@ -90,12 +90,17 @@ command_registry! {
     GetDocument(DocumentParams) => ("documents.get", "Inspect an open audio document and its immutable revision.", false, false, DocumentInfo),
     ActivateDocument(DocumentParams) => ("documents.activate", "Choose the active audio document.", true, false, DocumentInfo),
     CloseDocument(CloseParams) => ("documents.close", "Close an audio document; dirty work requires explicit discard intent.", true, false, DocumentInfo),
+    SetCursor(CursorParams) => ("documents.cursor.set", "Place the edit cursor and clear the selection.", true, false, DocumentInfo),
+    SetSelection(SelectionParams) => ("documents.selection.set", "Set a normalized half-open frame selection across all channels.", true, false, DocumentInfo),
+    SelectAll(DocumentParams) => ("documents.selection.all", "Select all frames and place the cursor at the start.", true, false, DocumentInfo),
+    ClearSelection(DocumentParams) => ("documents.selection.clear", "Clear the selection without moving the cursor.", true, false, DocumentInfo),
     ReadSamples(SamplesParams) => ("documents.samples", "Read a bounded range of actual decoded channel samples.", false, false, SamplesData),
     GetWaveform(WaveformParams) => ("documents.waveform", "Query exact per-channel waveform extrema for a frame interval.", false, false, WaveformData),
     GetJob(JobParams) => ("jobs.get", "Inspect background operation progress, result or failure.", false, false, JobInfo),
     CancelJob(JobParams) => ("jobs.cancel", "Cancel unfinished background work without publishing partial audio.", true, false, JobInfo),
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, PresentationSnapshot),
+    SetViewport(SetViewportParams) => ("presentation.viewport.set", "Set a document's visible frame interval without changing its selection or audio.", true, true, PresentationSnapshot),
     SetLayout(SetLayoutParams) => ("presentation.layout.set", "Set panel widths, visibility and library/browser split.", true, true, PresentationSnapshot),
     TogglePanels(PresentationRevisionParams) => ("presentation.panels.toggle", "Hide both panels if either is visible; otherwise restore both.", true, true, PresentationSnapshot),
     RenderBarrier(RenderParams) => ("presentation.barrier", "Wait for a frame reflecting the requested revisions.", false, true, RenderMetadata),
@@ -109,6 +114,7 @@ pub(crate) fn capabilities(gui: bool) -> Capabilities {
         "documents".into(),
         "waveform".into(),
         "jobs".into(),
+        "selection".into(),
     ];
     if gui {
         capabilities.extend(["presentation".into(), "capture.png".into()]);
