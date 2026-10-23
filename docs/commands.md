@@ -1,9 +1,9 @@
 # Shared commands and headless execution
 
-Ticket 01 implements session inspection, command discovery and loop state only.
-Playback, file editing, MCP attachment and screenshots arrive in later tickets.
-The GUI loop button and the headless runner dispatch through the same `Session`.
-Snapshots are owned read models; views cannot change core state directly.
+Tickets 01 and 02 implement shared session commands, GUI attachment, presentation
+commands and actual framebuffer PNG capture. Playback, file editing and MCP arrive
+in later tickets. The GUI and headless runner share command definitions and core
+behavior. Snapshots are owned read models; views cannot change core state directly.
 
 ## Run
 
@@ -13,8 +13,8 @@ cargo run --locked --no-default-features --bin wavebob-headless
 ```
 
 The second command builds without egui, eframe, windowing or audio dependencies.
-Every process starts a separate session. Attaching to the GUI belongs to ticket
-02; launching a headless process does not change an already running window.
+By default, every process starts a separate session. Use explicit GUI attachment
+below to control a running window from the GUI-free runner.
 
 For a release executable:
 
@@ -24,6 +24,38 @@ cargo build --locked --release --no-default-features --bin wavebob-headless
 
 Run `wavebob-headless --help` for usage. Unknown command-line arguments return
 exit code 2 and write diagnostics to stderr. Normal protocol use prints no banner.
+
+## Attach to a running GUI
+
+Start the GUI with an optional display name:
+
+```sh
+cargo run --locked -- --name Editing
+```
+
+In another terminal, list live instances, then attach using the exact session UUID
+returned by discovery. Names are display labels and need not be unique.
+
+```sh
+cargo run --locked --no-default-features --bin wavebob-headless -- --list-instances
+cargo run --locked --no-default-features --bin wavebob-headless -- --attach SESSION_UUID
+```
+
+Send the normal JSON requests on stdin after attachment. These operate on the
+selected window's session, including its real loop state and active mode. The
+client verifies session identity on every response; no instance is silently chosen.
+MCP transport is a later ticket; attachment already works without it.
+
+The registry defaults to the current user's runtime/cache directory. For isolated
+workspaces/tests, pass `--runtime-dir DIRECTORY` to both executables or set
+`WAVEBOB_RUNTIME_DIR`. Discovery lists only authenticated live endpoints; normal
+shutdown removes the instance record, and stale records after a forced exit are
+excluded. Windows uses named pipes; Unix uses local sockets. No network port is opened.
+
+GUI `--hidden` starts a real renderer-backed window without showing it. Commands
+can still request painting and capture; this is distinct from a GUI-free session,
+which never initializes a renderer. Failed startup or unavailable transport exits
+the client with an stderr diagnostic rather than fabricating a core response.
 
 ## Framing and requests
 
@@ -62,6 +94,10 @@ not process failures. There is no persistence across process restarts yet.
 | `session.capabilities` | `{}` | No | Catalogue and JSON schemas |
 | `transport.loop.set` | `{"enabled":true}` | Yes | Session snapshot |
 | `transport.loop.toggle` | `{}` | Yes | Session snapshot |
+| `presentation.get` | `{}` | No | Presentation snapshot; GUI only |
+| `presentation.set_mode` | `{"mode":"multitrack"}` | Presentation | Presentation snapshot; GUI only |
+| `presentation.barrier` | Minimum revisions and timeout | No | Render metadata; GUI only |
+| `capture.png` | Destination, overwrite intent, minimum revisions and timeout | No | PNG artifact and render metadata; GUI only |
 
 Discovery reports protocol version, capability names, the request/response
 envelope schemas and per-command descriptions, mutation classification, input
@@ -69,6 +105,58 @@ schemas and result schemas. These schemas use JSON Schema Draft 2020-12. A
 command's output schema describes `result`, not the entire response envelope.
 The typed parameter/result models generate the schemas used by the registry;
 adapters do not maintain another catalogue.
+
+The independent GUI-free session advertises only the first four commands. GUI
+attachment advertises all eight. Sending a known GUI-only command to an independent
+session returns `missing_capability`, leaving its state unchanged.
+
+## Presentation and capture
+
+`presentation.get` returns `mode` (`waveform` or `multitrack`) and its own
+`revision`. Set mode with `presentation.set_mode`; optional
+`expected_presentation_revision` rejects stale view changes. Re-selecting the same
+mode is a no-op. Presentation changes do not advance the core session revision
+and do not create audio undo history. Envelope `expected_revision` still checks
+the core revision for mutations; use the presentation field to guard view changes.
+
+For example, after querying the relevant revisions:
+
+```json
+{"id":"mode","command":"presentation.set_mode","params":{"mode":"multitrack","expected_presentation_revision":0}}
+{"id":"frame","command":"presentation.barrier","params":{"after_revision":0,"after_presentation_revision":1,"timeout_ms":10000}}
+{"id":"image","command":"capture.png","params":{"path":"multitrack.png","overwrite":false,"after_revision":0,"after_presentation_revision":1,"timeout_ms":10000}}
+```
+
+Both render commands accept `after_revision` and `after_presentation_revision` as
+minimums; omitted values mean the state at command acceptance. They wait until a
+frame representing those revisions is actually read back from egui. The reported
+revision can be newer than the requested minimum. Requests time out explicitly;
+future revision numbers do not create artificial state changes.
+
+`timeout_ms` defaults to 10000, with a valid range of 1–60000. The IPC client allows
+an additional two seconds for transport. Transport failure is distinct from a
+GUI-render timeout, which is a structured command error.
+
+`presentation.barrier` returns render metadata after actual readback, without
+writing an image. `capture.png` exports the complete client area: all currently
+implemented panels, central view and transport. Future status-bar controls will
+be included when implemented. Native window chrome/dialogs are outside capture.
+
+Successful capture returns `path`, `mime_type: "image/png"` and `metadata` containing
+session ID, rendered core revision, presentation revision, active mode, frame
+number, actual pixel width/height, scale and pending resources. The envelope's
+revision refers to the captured state, even if later commands have already run.
+
+The host fences state changes through framebuffer readback. PNG encoding and file
+publication run on a worker after the pixels arrive, so later commands cannot
+change the image or its metadata. File publication is atomic; an existing path is
+preserved unless `overwrite` is explicitly true. Failed/timed-out output cleans
+its temporary file. Custom parent directories must exist. With no `path`, capture
+creates a unique PNG under the selected runtime directory's `captures` folder.
+Relative paths resolve against the GUI process's working directory.
+
+IPC frames are limited to 2 MiB. PNG bytes are stored in the reported artifact,
+not embedded in JSON; MCP image delivery will be implemented in its own ticket.
 
 ## Responses and state
 
@@ -92,7 +180,8 @@ For example, a stale mutation reports:
 Stable error codes are `invalid_json`, `invalid_request`, `unknown_command`,
 `invalid_params`, `unsupported_protocol`, `stale_revision` and
 `revision_exhausted`. Messages are explanatory and may evolve; branch on codes.
-Errors leave state and revision unchanged.
+Desktop commands also use `missing_capability`, `timeout`, `render_failed`,
+`output_exists` and `io_error`. Errors leave core/presentation state unchanged.
 
 ## Verify
 
@@ -108,4 +197,22 @@ Command tests cover adapter equivalence, no-op revision semantics, stale writes,
 strict validation, capabilities and snapshot isolation. Process tests exercise
 real stdin/stdout exchange and require a response while stdin remains open.
 The GUI action test compares its command dispatch with headless state changes.
-CI performs these checks and release builds on Windows, macOS and Linux.
+CI is configured for these checks and release builds on Windows, macOS and Linux.
+Native macOS/Linux verification is deferred until a remote exists, as requested.
+
+Run the real two-instance GUI integration test explicitly on a workstation with
+a native renderer:
+
+```sh
+cargo test --locked --test gui_attachment -- --ignored --nocapture
+```
+
+It verifies isolation, mode changes, actual PNG pixels, matching revision metadata,
+render barriers, timeout recovery, overwrite protection, stale endpoints and a
+concurrent mode/capture race. Set `WAVEBOB_TEST_ARTIFACT_DIR` to retain captures for
+inspection. The test is excluded from normal display-free test runs. Restricted
+Windows sandboxes can block temporary-file attribute changes during atomic PNG
+publication; native verification must allow these normal file operations.
+
+The [ticket 02 verification record](verification/ticket02/README.md) includes
+inspected PNGs and metadata from the release GUI controlled by the GUI-free runner.

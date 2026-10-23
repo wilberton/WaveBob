@@ -1,9 +1,10 @@
 # WaveBob
 
 A native Rust + egui audio editor for Windows, macOS and Linux.
-The first implementation milestone provides a shared session command layer,
-GUI-free JSON runner and a demo-data egui shell. Audio editing and playback are
-not implemented yet.
+The first two implementation milestones provide shared session commands, a
+GUI-free JSON runner, attachment to named GUI instances, revision-fenced PNG
+screenshots and a demo-data egui shell. Audio editing and playback are not
+implemented yet.
 
 ## Run
 
@@ -44,13 +45,16 @@ $env:PATH = "$(Join-Path $PWD '.tools\cargo\bin');$env:PATH"
 ```
 
 See [the command protocol](docs/commands.md) for discovery, request examples,
-revision/error semantics and GUI-free build instructions.
+revision/error semantics and GUI-free build instructions. The
+[ticket 02 verification record](docs/verification/ticket02/README.md) includes
+captures from the running release app.
 
 ## This milestone
 
 - Native window, dark theme, demo mode/file selection and a core-backed loop button.
 - Typed session commands, snapshots, schema discovery and revision checks.
 - Newline-delimited JSON runner with structured responses and recoverable errors.
+- Explicit GUI instance discovery/attachment, mode commands and actual PNG captures.
 - Synthetic waveform drawings and static multitrack lanes.
 - Library, browser, effects and transport layout placeholders.
 - No real file access, audio decoding, playback, editing, export or persistence.
@@ -58,9 +62,9 @@ revision/error semantics and GUI-free build instructions.
 
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
-Markdown tracker. Each ticket has acceptance criteria, explicit blockers and
-`ready-for-agent` status. Ticket 01 is the initial unblocked ticket; publication
-does not mean implementation is complete. The tracker conventions are in
+Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
+current execution status. Tickets 01 and 02 are complete; derive subsequent
+availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 
 Version 1 includes WAV and MP3 import and export, the shared command interface,
