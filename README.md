@@ -1,22 +1,24 @@
 # WaveBob
 
 A native Rust + egui audio editor for Windows, macOS and Linux.
-This initial milestone contains build scaffolding, a demo-data UI shell and a
-visual concept for discussion. It is not yet an audio editor.
+The first implementation milestone provides a shared session command layer,
+GUI-free JSON runner and a demo-data egui shell. Audio editing and playback are
+not implemented yet.
 
 ## Run
 
 Install stable Rust using [rustup](https://rustup.rs/), then:
 
 ```sh
-cargo run
+cargo run --locked
 ```
 
 ```sh
-cargo fmt
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
-cargo build --release
+cargo run --locked --no-default-features --bin wavebob-headless
+cargo fmt --all --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+cargo build --locked --release
 ```
 
 Windows needs the MSVC C++ build tools and Windows SDK. macOS needs Xcode command
@@ -27,15 +29,28 @@ sudo apt-get install build-essential pkg-config libx11-dev libxi-dev libxrandr-d
 ```
 
 The renderer is eframe's OpenGL backend, with X11 and Wayland enabled for Linux.
-The CI workflow checks and builds all three desktop platforms. CI has not been
-run as part of this initial scaffold. Rust is not installed in the authoring
-environment, so local compilation, linting and formatting are also unverified.
-Generate and commit `Cargo.lock` on the first successful Cargo build; the direct
-eframe dependency is pinned, but transitive dependencies are not yet locked.
+The committed dependency lock is used by CI, which checks both GUI and headless
+configurations on all three platforms. Native macOS/Linux CI requires a GitHub
+remote with Actions enabled; the local repository does not have a remote yet.
+
+For the workspace-local Rust installation created in this checkout, initialize
+the following environment in PowerShell before running Cargo. These local tools
+are ignored by Git; other checkouts can use a normal rustup installation.
+
+```powershell
+$env:RUSTUP_HOME = Join-Path $PWD '.tools\rustup'
+$env:CARGO_HOME = Join-Path $PWD '.tools\cargo'
+$env:PATH = "$(Join-Path $PWD '.tools\cargo\bin');$env:PATH"
+```
+
+See [the command protocol](docs/commands.md) for discovery, request examples,
+revision/error semantics and GUI-free build instructions.
 
 ## This milestone
 
-- Native window, dark theme, mode switch, open-file selection and loop toggle.
+- Native window, dark theme, demo mode/file selection and a core-backed loop button.
+- Typed session commands, snapshots, schema discovery and revision checks.
+- Newline-delimited JSON runner with structured responses and recoverable errors.
 - Synthetic waveform drawings and static multitrack lanes.
 - Library, browser, effects and transport layout placeholders.
 - No real file access, audio decoding, playback, editing, export or persistence.
