@@ -1,8 +1,9 @@
 # WaveBob local tracker
 
 Published: 23 October 2026. The user approved the command test seam and ticket
-breakdown and authorized local Markdown publication. All 21 tickets begin as
-`ready-for-agent`; none is implemented by being published.
+breakdown and authorized local Markdown publication. The original 21 tickets
+were published as `ready-for-agent`; ticket 22 was subsequently added at the
+user's request. Read ticket files for current status.
 
 [Canonical specification](spec.md) | [UI mockups](../../docs/ui-concept-01.png) |
 [Tracker conventions](../../docs/agents/issue-tracker.md)
@@ -23,15 +24,16 @@ criteria and blockers; only start a ticket when all its blockers are `done`.
 | 03 | [Drive sessions and inspect captures through MCP](issues/03-drive-sessions-and-inspect-captures-through-mcp.md) | 02 |
 | 04 | [Resizable panels and persistent status-bar help](issues/04-resizable-panels-and-persistent-status-bar-help.md) | 01 |
 | 05 | [Open a WAV and see its real waveform](issues/05-open-a-wav-and-see-its-real-waveform.md) | 01 |
-| 06 | [WAV and MP3 import with scalable waveform jobs](issues/06-wav-and-mp3-import-with-scalable-waveform-jobs.md) | 05 |
-| 07 | [Precise waveform selection, overview zoom and pan](issues/07-precise-waveform-selection-overview-zoom-and-pan.md) | 04, 05 |
+| 22 | [Refine the UI to match the accepted mockups](issues/22-refine-the-ui-to-match-the-accepted-mockups.md) | 02, 04, 05 |
+| 06 | [WAV and MP3 import with scalable waveform jobs](issues/06-wav-and-mp3-import-with-scalable-waveform-jobs.md) | 22 |
+| 07 | [Precise waveform selection, overview zoom and pan](issues/07-precise-waveform-selection-overview-zoom-and-pan.md) | 22 |
 | 08 | [Waveform playback, seeking and loop transport](issues/08-waveform-playback-seeking-and-loop-transport.md) | 07 |
 | 09 | [Filesystem browsing and independent audition](issues/09-filesystem-browsing-and-independent-audition.md) | 06, 08 |
 | 10 | [Undoable gain, fades and reverse on the editing target](issues/10-undoable-gain-fades-and-reverse-on-the-editing-target.md) | 07 |
 | 11 | [Cut, copy, paste, delete and trim samples](issues/11-cut-copy-paste-delete-and-trim-samples.md) | 10 |
 | 12 | [Apply bounded reverb to the editing target](issues/12-apply-bounded-reverb-to-the-editing-target.md) | 10 |
 | 13 | [Save/export WAV and MP3 samples and protect dirty documents](issues/13-save-export-wav-and-mp3-samples-and-protect-dirty-documents.md) | 06, 11 |
-| 14 | [Arrange document clips on editable tracks](issues/14-arrange-document-clips-on-editable-tracks.md) | 05, 10 |
+| 14 | [Arrange document clips on editable tracks](issues/14-arrange-document-clips-on-editable-tracks.md) | 22, 10 |
 | 15 | [Trim and process an individual arrangement clip](issues/15-trim-and-process-an-individual-arrangement-clip.md) | 12, 14 |
 | 16 | [Hear and inspect a multitrack mix](issues/16-hear-and-inspect-a-multitrack-mix.md) | 06, 08, 11, 14 |
 | 17 | [Automatic crossfades on overlapping clips](issues/17-automatic-crossfades-on-overlapping-clips.md) | 16 |
@@ -48,7 +50,8 @@ the ticket files rather than maintaining another status copy here.
 
 ## Publication decisions
 
-- Retain the approved 21-slice structure.
+- Retain published IDs. Ticket 22 adds the user-requested UI refinement step
+  immediately after 05, gating the remaining editor work without renumbering it.
 - Match the generated WaveBob mockups; Artcraft is architectural background.
 - Include CBR/VBR MP3 import and MP3 sample/mix export in version 1.
 - Ticket 09 depends on 06 for MP3 audition/import coverage.

@@ -57,7 +57,7 @@ revision/error semantics and GUI-free build instructions.
 - The generated design sheet is a visual proposal, not a screenshot of the shell.
 
 The approved [editor specification](.scratch/wavebob/spec.md) and
-[21 implementation tickets](.scratch/wavebob/README.md) are published in the local
+[22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and
 `ready-for-agent` status. Ticket 01 is the initial unblocked ticket; publication
 does not mean implementation is complete. The tracker conventions are in

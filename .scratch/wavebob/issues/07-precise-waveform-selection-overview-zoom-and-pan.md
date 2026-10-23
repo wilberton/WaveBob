@@ -3,7 +3,7 @@
 **What to build:** Set a cursor or time selection, navigate the main waveform
 with mouse/trackpad or overview handles, and inspect exact selection timing.
 
-**Blocked by:** 04 — Resizable panels and persistent status-bar help; 05 — Open a WAV and see its real waveform.
+**Blocked by:** 22 — Refine the UI to match the accepted mockups.
 
 **Status:** ready-for-agent
 

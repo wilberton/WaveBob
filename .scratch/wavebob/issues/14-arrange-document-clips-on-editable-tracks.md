@@ -3,7 +3,7 @@
 **What to build:** Create/reorder/name tracks, drag an open document into the
 timeline, and move or remove clips with undoable command-driven placement.
 
-**Blocked by:** 05 — Open a WAV and see its real waveform; 10 — Undoable gain, fades and reverse on the editing target.
+**Blocked by:** 22 — Refine the UI to match the accepted mockups; 10 — Undoable gain, fades and reverse on the editing target.
 
 **Status:** ready-for-agent
 

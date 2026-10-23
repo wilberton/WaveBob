@@ -459,6 +459,12 @@ in this specification and affected tickets.
 
 ## Further Notes
 
+The user requested a dedicated visual refinement pass immediately after ticket
+05. Ticket 22 implements that step without renumbering published tickets. It uses
+actual captures to match both modes to the accepted mockups as closely as possible,
+with the requested status bar and panel controls retained. Later editor work is
+gated on this pass. Native macOS/Linux CI is deferred until a remote exists.
+
 This specification supersedes unresolved behavior notes in the earlier concept
 brief. The concept image remains a visual reference; it does not accurately show
 the zoomed ruler relationship and predates the requested status bar and chevrons.

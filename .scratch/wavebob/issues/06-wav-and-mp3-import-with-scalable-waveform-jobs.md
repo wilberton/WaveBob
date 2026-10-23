@@ -4,7 +4,7 @@
 MP3 files, and navigate large samples while decoding and waveform preparation
 report progress. MP3 import is a version 1 requirement.
 
-**Blocked by:** 05 — Open a WAV and see its real waveform.
+**Blocked by:** 22 — Refine the UI to match the accepted mockups.
 
 **Status:** ready-for-agent
 
