@@ -15,7 +15,13 @@ jobs:
       - name: Linux windowing dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --all-targets
-      - run: cargo build --release
+      - run: cargo fmt --all --check
+      - name: Lint headless without GUI dependencies
+        run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
+      - name: Test headless without a window or audio device
+        run: cargo test --locked --no-default-features --all-targets
+      - name: Build standalone headless runner
+        run: cargo build --locked --release --no-default-features --bin wavebob-headless
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --all-targets
+      - run: cargo build --locked --release

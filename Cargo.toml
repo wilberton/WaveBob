@@ -3,10 +3,28 @@ name = "wavebob"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "A cross-platform waveform and multitrack editor — UI concept shell"
+description = "A command-driven waveform and multitrack editor"
+default-run = "wavebob"
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe"]
+
+[[bin]]
+name = "wavebob"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "wavebob-headless"
+path = "src/bin/headless.rs"
 
 [dependencies]
-eframe = { version = "=0.37.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+eframe = { version = "=0.37.0", optional = true, default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+schemars = "1.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
 
 [profile.release]
 lto = "thin"
