@@ -268,6 +268,15 @@ mod live {
             )
         }
         fn with_profile(runtime: &Path, name: &str, preferences: &Path, size: &str) -> Self {
+            Self::with_scale(runtime, name, preferences, size, "1.0")
+        }
+        fn with_scale(
+            runtime: &Path,
+            name: &str,
+            preferences: &Path,
+            size: &str,
+            scale: &str,
+        ) -> Self {
             let executable = std::env::var_os("WAVEBOB_GUI_TEST_BIN")
                 .unwrap_or_else(|| env!("CARGO_BIN_EXE_wavebob").into());
             let mut command = Command::new(executable);
@@ -277,6 +286,7 @@ mod live {
                 .arg("--preferences")
                 .arg(preferences)
                 .args(["--window-size", size])
+                .args(["--ui-scale", scale])
                 .stdout(Stdio::null())
                 .stderr(fs::File::create(runtime.join(format!("{name}.log"))).unwrap());
             #[cfg(windows)]
@@ -538,11 +548,15 @@ mod live {
     #[ignore = "requires a real native GUI renderer; run explicitly on a desktop"]
     async fn real_audio_import_switching_and_pixels_through_mcp() {
         let runtime = tempfile::tempdir().unwrap();
-        let _gui = Gui::with_profile(
+        let size =
+            std::env::var("WAVEBOB_AUDIO_TEST_WINDOW_SIZE").unwrap_or_else(|_| "1440x900".into());
+        let scale = std::env::var("WAVEBOB_AUDIO_TEST_UI_SCALE").unwrap_or_else(|_| "1.0".into());
+        let _gui = Gui::with_scale(
             runtime.path(),
             "real-audio",
             &runtime.path().join("layout.json"),
-            "1440x900",
+            &size,
+            &scale,
         );
         let client = named_client(runtime.path(), "real-audio").await;
         let mut documents = Vec::new();
@@ -558,13 +572,20 @@ mod live {
                 },
             )
             .unwrap();
+            let mut noise = 123456789_u32;
             for frame in 0..576000 {
                 let t = frame as f64 / 48000.0;
                 for channel in 0..channels {
-                    let envelope = 0.12 + 0.65 * (t * 1.1 + channel as f64).sin().powi(4);
+                    let envelope = 0.12
+                        + 0.28 * (t * 0.37 + channel as f64 * 0.21).sin().powi(2)
+                        + 0.07 * (t * 4.7).sin().abs();
+                    noise = noise.wrapping_mul(1664525).wrapping_add(1013904223);
                     writer
                         .write_sample(
-                            ((t * std::f64::consts::TAU * (220.0 + channel as f64 * 111.0)).sin()
+                            ((0.4
+                                * (t * std::f64::consts::TAU * (220.0 + channel as f64 * 111.0))
+                                    .sin()
+                                + 0.6 * (noise as f64 / u32::MAX as f64 * 2.0 - 1.0))
                                 * envelope
                                 * 32767.0) as i16,
                         )
@@ -650,7 +671,7 @@ mod live {
                     .as_chunks::<4>()
                     .0
                     .iter()
-                    .filter(|pixel| pixel[2] > 150 && pixel[0] < 80 && pixel[1] > 70)
+                    .filter(|pixel| pixel[2] > 150 && pixel[0] < 130 && pixel[1] > 70)
                     .count()
                     > 1000,
                 "Waveform/clip color must be present"

@@ -6,10 +6,14 @@ either is visible and restores both when both are hidden. The divider between
 open files and the browser changes their height ratio. Both lists scroll when
 their share is short.
 
-Defaults are 250 logical pixels on the left, 240 on the right and a 0.27 library
+Defaults are 240 logical pixels on the left, 200 on the right and a 0.18 library
 height fraction. Expanded panels have a minimum width of 180; collapsed rails use
 24. Narrow windows shrink rendered widths proportionally to preserve a 400-pixel
 center, retaining preferred widths for restoration. The window minimum is 800×520.
+
+`--window-size WIDTHxHEIGHT` and `--ui-scale SCALE` (0.75–3) allow reproducible
+layout checks. Scale is applied on top of the OS display scale and is reported in
+capture metadata. Inter is embedded for consistent proportional text across OSes.
 
 ## Commands and persistence
 

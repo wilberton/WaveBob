@@ -55,6 +55,8 @@ screenshots as image content. The [MCP verification record](docs/verification/ti
 includes images retrieved from the release app.
 See [panels and status-bar help](docs/layout.md) and the
 [ticket 04 captures](docs/verification/ticket04/README.md) for layout controls.
+The [mockup comparison](docs/verification/ticket22/README.md) records refined
+waveform and arrangement captures at wide, compact, narrow and 150% scale.
 
 ## This milestone
 

@@ -42,13 +42,13 @@ impl Default for PanelLayout {
         Self {
             left: SidePanelLayout {
                 visible: true,
-                width: 250.0,
+                width: 240.0,
             },
             right: SidePanelLayout {
                 visible: true,
-                width: 240.0,
+                width: 200.0,
             },
-            library_fraction: 0.27,
+            library_fraction: 0.18,
         }
     }
 }

@@ -2,6 +2,8 @@ use eframe::egui::{self, Align, Color32, Pos2, Rect, RichText, Sense, Stroke, Ve
 use std::{collections::HashSet, sync::mpsc};
 use wavebob::{Command, EmptyParams, Outcome, Request, desktop::DesktopHost, presentation::*};
 use wavebob::{CommandResult, documents::*};
+mod visuals;
+use visuals::{Icon, icon_button};
 
 const BLUE: Color32 = Color32::from_rgb(0, 122, 255);
 const SURFACE: Color32 = Color32::from_rgb(20, 26, 33);
@@ -214,7 +216,7 @@ impl WaveBob {
             _ => None,
         });
         egui::Panel::top("header")
-            .exact_size(42.0)
+            .exact_size(36.0)
             .frame(panel_frame())
             .show(ui, |ui| {
                 let area = ui.max_rect().shrink2(Vec2::new(14.0, 7.0));
@@ -225,11 +227,15 @@ impl WaveBob {
                 left.horizontal(|ui| {
                     ui.label(RichText::new("WaveBob").strong().size(14.0));
                     ui.add_space(12.0);
-                    let response = ui.button("Open…");
-                    help.observe(&response, "Open a WAV audio file in a new document.");
-                    if response.clicked() && !self.host.frozen() {
-                        self.open_requested = true;
-                    }
+                    let menu = ui.menu_button("File", |ui| {
+                        let response = ui.button("Open audio…");
+                        help.observe(&response, "Open a WAV audio file in a new document.");
+                        if response.clicked() && !self.host.frozen() {
+                            self.open_requested = true;
+                            ui.close();
+                        }
+                    });
+                    help.observe(&menu.response, "Open a WAV audio file in a new document.");
                     for name in ["Edit", "View", "Help"] {
                         help.observe(
                             &ui.add_enabled(false, egui::Button::new(name).frame(false)),
@@ -306,18 +312,24 @@ impl WaveBob {
                 if response.clicked() { self.layout(SetLayoutParams { right_visible: Some(true), ..Default::default() }); }
             }
         });
-        egui::Panel::bottom("transport").exact_size(56.0).frame(panel_frame()).show(ui, |ui| {
-            ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
-                ui.add_space(((ui.available_width()-300.0)/2.0).max(0.0));
-                help.observe(&ui.add_enabled(false, egui::Button::new("Start").min_size(Vec2::new(40.0,28.0))), "Rewind is unavailable until audio playback is implemented. Shortcut: Enter or comma.");
-                help.observe(&ui.add_enabled(false, egui::Button::new("Play").min_size(Vec2::new(44.0,28.0))), "Playback is unavailable: no audio document is open. Shortcut: Space.");
-                let response = ui.add(egui::Button::new("Loop").selected(self.host.snapshot().loop_enabled).min_size(Vec2::new(44.0,28.0)));
-                help.observe(&response, "Toggle looping without starting playback. Shortcut: /.");
-                if response.clicked() { self.toggle_loop(); }
+        egui::Panel::bottom("transport").exact_size(48.0).frame(panel_frame()).show(ui,|ui| {
+            let area=ui.max_rect();
+            let group=Rect::from_center_size(area.center(),Vec2::new(340.0,32.0));
+            let mut controls=child(ui,group);
+            controls.horizontal(|ui| {
+                help.observe(&icon_button(ui,Icon::Start,"Rewind to start",false,false),"Rewind is unavailable until audio playback is implemented. Shortcut: Enter or comma.");
+                help.observe(&icon_button(ui,Icon::Play,"Play",true,false),"Playback is unavailable until ticket 08. Shortcut: Space.");
+                let response=icon_button(ui,Icon::Loop,"Loop",self.host.snapshot().loop_enabled,true);
+                help.observe(&response,"Toggle looping without starting playback. Shortcut: /.");
+                if response.clicked() {self.toggle_loop();}
                 ui.add_space(12.0);
-                let timing = self.active_document().map(|doc| format!("{}  /  {}", time(doc.cursor,doc.sample_rate), time(doc.frames,doc.sample_rate))).unwrap_or_else(|| "—  /  —".into());
-                ui.label(RichText::new(timing).monospace().color(MUTED));
+                let timing=self.active_document().map(|doc|format!("{}  /  {}",time(doc.cursor,doc.sample_rate),time(doc.frames,doc.sample_rate))).unwrap_or_else(||"—  /  —".into());
+                ui.label(RichText::new(timing).monospace().size(12.0));
             });
+            if area.width()>980.0 {
+                let mut hints=child(ui,Rect::from_min_max(Pos2::new(area.right()-300.0,area.top()+13.0),area.max));
+                hints.horizontal(|ui| {ui.label(RichText::new("Space  Play / pause    Enter or ,  Start    /  Loop").size(10.0).color(MUTED));});
+            }
         });
         egui::CentralPanel::default()
             .frame(
@@ -341,29 +353,44 @@ impl WaveBob {
         let upper = Rect::from_min_max(area.min, Pos2::new(area.right(), split_y - 4.0));
         let lower = Rect::from_min_max(Pos2::new(area.left(), split_y + 4.0), area.max);
         let mut library = child(ui, upper);
-        library.horizontal(|ui| {
-            section(ui, "OPEN FILES");
-            let response = ui.put(
-                Rect::from_min_size(
-                    Pos2::new(upper.right() - 22.0, upper.top()),
-                    Vec2::new(22.0, 24.0),
-                ),
-                egui::Button::new("‹").frame(false),
-            );
-            help.observe(
-                &response,
-                "Hide the file panel. Backtick toggles both panels.",
-            );
-            if response.clicked() {
-                self.layout(SetLayoutParams {
-                    left_visible: Some(false),
-                    ..Default::default()
-                });
-            }
-        });
+        let (heading, _) =
+            library.allocate_exact_size(Vec2::new(upper.width(), 24.0), Sense::hover());
+        library.painter().text(
+            heading.left_center(),
+            egui::Align2::LEFT_CENTER,
+            "OPEN FILES",
+            egui::FontId::proportional(11.0),
+            Color32::from_rgb(217, 226, 240),
+        );
+        let add = library.put(
+            Rect::from_min_size(
+                Pos2::new(heading.right() - 48.0, heading.top()),
+                Vec2::new(24.0, 24.0),
+            ),
+            egui::Button::new("+").frame(false),
+        );
+        help.observe(&add, "Open a WAV audio file in a new document.");
+        if add.clicked() && !self.host.frozen() {
+            self.open_requested = true;
+        }
+        let hide = library.put(
+            Rect::from_min_size(
+                Pos2::new(heading.right() - 22.0, heading.top()),
+                Vec2::new(22.0, 24.0),
+            ),
+            egui::Button::new("‹").frame(false),
+        );
+        help.observe(&hide, "Hide the file panel. Backtick toggles both panels.");
+        if hide.clicked() {
+            self.layout(SetLayoutParams {
+                left_visible: Some(false),
+                ..Default::default()
+            });
+        }
         egui::ScrollArea::vertical()
             .id_salt("open-files")
             .show(&mut library, |ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
                 let snapshot = self.host.snapshot();
                 if snapshot.documents.is_empty() {
                     ui.label(
@@ -378,9 +405,12 @@ impl WaveBob {
                     }
                 }
                 for document in snapshot.documents {
-                    let response = ui.selectable_label(
-                        snapshot.active_document_id.as_ref() == Some(&document.id),
+                    let response = visuals::file_row(
+                        ui,
                         &document.name,
+                        snapshot.active_document_id.as_ref() == Some(&document.id),
+                        false,
+                        true,
                     );
                     help.observe(
                         &response,
@@ -418,8 +448,9 @@ impl WaveBob {
         let response = ui
             .interact(handle, ui.scope_id().with("library-split"), Sense::drag())
             .on_hover_cursor(egui::CursorIcon::ResizeVertical);
-        ui.painter().line_segment(
-            [handle.left_center(), handle.right_center()],
+        ui.painter().hline(
+            handle.x_range(),
+            handle.center().y,
             Stroke::new(1.0, BORDER),
         );
         help.observe(
@@ -436,29 +467,36 @@ impl WaveBob {
                 ..Default::default()
             });
         }
-        let mut browser = child(ui, lower);
+        let footer_height = 104.0_f32.min(lower.height() * 0.35);
+        let mut browser = child(
+            ui,
+            Rect::from_min_max(
+                lower.min,
+                Pos2::new(lower.right(), lower.bottom() - footer_height),
+            ),
+        );
+        section(&mut browser, "FILE BROWSER");
+        browser.add_space(5.0);
+        let crumb = browser.add_enabled(
+            false,
+            centered_button("Samples  ›  Field recordings")
+                .min_size(Vec2::new(lower.width(), 25.0)),
+        );
+        help.observe(
+            &crumb,
+            "Filesystem browsing arrives in ticket 09. These folder rows are a visual preview.",
+        );
         egui::ScrollArea::vertical()
             .id_salt("file-browser")
             .auto_shrink([false, false])
-            .show(&mut browser, |browser| {
-                section(browser, "FILE BROWSER");
-                browser.add_space(6.0);
-                browser.label(
-                    RichText::new("Samples  ›  Field recordings")
-                        .small()
-                        .color(MUTED),
-                );
-                browser.separator();
-                for folder in ["City", "Forest", "Indoor", "Weather"] {
+            .show(&mut browser, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for folder in ["..", "City", "Forest", "Indoor", "Weather"] {
                     help.observe(
-                        &browser.add_enabled(
-                            false,
-                            egui::Button::new(format!("›  {folder}")).frame(false),
-                        ),
-                        "Filesystem navigation is not implemented yet.",
+                        &visuals::file_row(ui, folder, false, true, false),
+                        "Folder navigation is not implemented yet.",
                     );
                 }
-                browser.add_space(10.0);
                 for name in [
                     "Birds in trees.wav",
                     "Creek close.wav",
@@ -466,22 +504,31 @@ impl WaveBob {
                     "Wind gusts.wav",
                 ] {
                     help.observe(
-                        &browser.add_enabled(false, egui::Button::new(name).frame(false)),
-                        "Opening and auditioning filesystem audio are not implemented yet.",
+                        &visuals::file_row(ui, name, false, false, false),
+                        "Opening and auditioning browser files arrive in ticket 09.",
                     );
                 }
-                browser.add_space(12.0);
-                help.observe(
-            &browser.add_enabled(false, egui::Button::new("Audition")),
-            "Audition is unavailable until filesystem browsing and audio playback are implemented.",
-        );
             });
+        let footer = Rect::from_min_max(
+            Pos2::new(lower.left(), lower.bottom() - footer_height + 4.0),
+            lower.max,
+        );
+        let mut preview = child(ui, footer);
+        preview.separator();
+        preview.label(RichText::new("Browser preview").strong().small());
+        preview.label(RichText::new("No file selected").small().color(MUTED));
+        preview.horizontal(|ui| {
+            help.observe(&icon_button(ui,Icon::Play,"Audition",false,false),"Browser audition is unavailable until filesystem browsing and playback are implemented.");
+            let mut volume=0.75;
+            ui.spacing_mut().slider_width=(footer.width()-65.0).max(30.0);
+            help.observe(&ui.add_enabled(false,egui::Slider::new(&mut volume,0.0..=1.0).show_value(false)),"Independent audition volume arrives with browser playback.");
+        });
     }
 
     fn effects(&mut self, ui: &mut egui::Ui, area: Rect, help: &mut Help) {
         let mut content = child(ui, area);
         content.horizontal(|ui| {
-            let response = ui.button("›");
+            let response = ui.add(egui::Button::new("›").frame(false));
             help.observe(
                 &response,
                 "Hide the effects panel. Backtick toggles both panels.",
@@ -494,29 +541,31 @@ impl WaveBob {
             }
             section(ui, "EDIT & EFFECTS");
         });
-        content.add_space(16.0);
+        content.add_space(18.0);
         content.label("Target");
-        help.observe(
-            &content.add_enabled(
-                false,
-                egui::Button::new("No editing target").min_size(Vec2::new(area.width(), 26.0)),
-            ),
-            "Effects need an audio document or a selected arrangement clip.",
-        );
-        content.add_space(16.0);
+        let target = if self.active_document().is_some() {
+            "Whole sample"
+        } else {
+            "No editing target"
+        };
+        help.observe(&content.add_enabled(false,centered_button(target).min_size(Vec2::new(area.width(),26.0))),"Effects apply to the selection, or the whole sample when no selection exists. Editing arrives in ticket 10.");
+        content.add_space(14.0);
         content.horizontal(|ui| {
             ui.label("Gain");
-            ui.label(RichText::new("— dB").color(MUTED));
+            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                ui.label(RichText::new("0.0 dB").small().color(MUTED));
+            });
         });
+        content.style_mut().spacing.slider_width = area.width();
         let mut gain = 0.0;
         help.observe(
             &content.add_enabled(
                 false,
                 egui::Slider::new(&mut gain, -24.0..=12.0).show_value(false),
             ),
-            "Gain is unavailable until an editable audio target is open.",
+            "Gain editing is not implemented yet.",
         );
-        content.add_space(10.0);
+        content.add_space(12.0);
         for pair in [["Fade in", "Fade out"], ["Reverse", "Reverb"]] {
             content.horizontal(|ui| {
                 for label in pair {
@@ -524,14 +573,15 @@ impl WaveBob {
                         &ui.add_enabled(
                             false,
                             centered_button(label)
-                                .min_size(Vec2::new((area.width() - 8.0) / 2.0, 28.0)),
+                                .min_size(Vec2::new((area.width() - 7.0) / 2.0, 28.0)),
                         ),
-                        "This audio effect is not implemented yet; no editing target is open.",
+                        "This audio effect is not implemented yet.",
                     );
                 }
             });
+            content.add_space(4.0);
         }
-        content.add_space(6.0);
+        content.add_space(5.0);
         help.observe(
             &content.add_enabled(
                 false,
@@ -539,7 +589,7 @@ impl WaveBob {
                     .fill(BLUE)
                     .min_size(Vec2::new(area.width(), 30.0)),
             ),
-            "Apply is unavailable: no audio document or selected clip can be edited yet.",
+            "Apply is unavailable until audio editing is implemented.",
         );
     }
 
@@ -555,12 +605,24 @@ impl WaveBob {
             });
             return;
         };
-        ui.horizontal(|ui| {
+        let toolbar_height = 28.0;
+        let (toolbar, _) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), toolbar_height),
+            Sense::hover(),
+        );
+        let mut info = child(
+            ui,
+            Rect::from_min_max(
+                toolbar.min,
+                Pos2::new(toolbar.right() - 125.0, toolbar.bottom()),
+            ),
+        );
+        info.horizontal(|ui| {
             ui.label(RichText::new(&document.name).strong());
             ui.label(
                 RichText::new(format!(
-                    "{} Hz · {} · {}",
-                    document.sample_rate,
+                    "{} kHz / {} / 16-bit   |   {}",
+                    document.sample_rate as f64 / 1000.0,
                     if document.channels == 1 {
                         "Mono"
                     } else {
@@ -572,52 +634,108 @@ impl WaveBob {
                 .color(MUTED),
             );
         });
-        ui.add_space(10.0);
+        let mut zoom = child(
+            ui,
+            Rect::from_min_max(
+                Pos2::new(toolbar.right() - 116.0, toolbar.top()),
+                toolbar.max,
+            ),
+        );
+        zoom.spacing_mut().item_spacing.x = 4.0;
+        zoom.horizontal(|ui| {
+            for (icon, label) in [
+                (Icon::Minus, "Zoom out"),
+                (Icon::Plus, "Zoom in"),
+                (Icon::Fit, "Fit sample"),
+            ] {
+                help.observe(
+                    &icon_button(ui, icon, label, false, false),
+                    "Waveform zoom and pan arrive in ticket 07.",
+                );
+            }
+        });
+        ui.add_space(4.0);
         let Some(wave) = &self.waveform else {
             ui.spinner();
             return;
         };
         help.observe(
-            &audio_waveform(ui, 70.0, &wave.channels[0], BLUE),
-            "Whole-sample waveform overview.",
+            &visuals::waveform_canvas(ui, 72.0, wave, document.sample_rate, true),
+            "Whole-sample waveform overview. The blue frame shows the complete visible interval.",
         );
         ui.add_space(12.0);
-        ui.label(RichText::new("WAVEFORM").size(10.0).color(MUTED));
-        let height = ((ui.available_height() - 10.0) / document.channels as f32).max(40.0);
-        for peaks in &wave.channels {
-            help.observe(
-                &audio_waveform(ui, height, peaks, BLUE),
-                "Audio waveform. Each channel shows the actual decoded sample bounds.",
-            );
-        }
+        help.observe(&visuals::waveform_canvas(ui,ui.available_height().max(80.0),wave,document.sample_rate,false),"Actual audio channels and time ruler. Cursor and selection editing arrive in ticket 07.");
     }
 
     fn multitrack_view(&self, ui: &mut egui::Ui, help: &mut Help) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Arrangement").strong());
             ui.label(
-                RichText::new("SYNTHETIC PREVIEW · No clips added")
+                RichText::new("DEMO · Track editing not yet available")
                     .small()
                     .color(MUTED),
             );
         });
-        ui.add_space(10.0);
-        egui::ScrollArea::vertical().show(ui,|ui| {
-            for (index,(name,color)) in [("Ambience",Color32::from_rgb(69,166,175)),("Footsteps",BLUE),("Texture",Color32::from_rgb(201,163,67)),("Track 4",MUTED)].iter().enumerate() {
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.allocate_ui_with_layout(Vec2::new(150.0,100.0),egui::Layout::top_down(Align::Min),|ui| {
-                        ui.label(RichText::new(format!("Track {}",index+1)).small().color(MUTED));
-                        ui.label(RichText::new(*name).strong());
-                        ui.horizontal(|ui| {
-                            help.observe(&ui.add_enabled(false,egui::Button::new("M")),"Track mute is unavailable in this synthetic arrangement preview.");
-                            help.observe(&ui.add_enabled(false,egui::Button::new("S")),"Track solo is unavailable in this synthetic arrangement preview.");
-                            ui.label(RichText::new("0 dB · C").small().color(MUTED));
-                        });
+        ui.add_space(6.0);
+        let width = ui.available_width();
+        let controls = 154.0_f32.min(width * 0.35);
+        let (ruler_rect, _) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::hover());
+        visuals::ruler(
+            &ui.painter_at(ruler_rect),
+            Rect::from_min_max(ruler_rect.min + Vec2::new(controls, 0.0), ruler_rect.max),
+            0.0,
+            134.893,
+        );
+        egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui,|ui| {
+            let lane_height=((ui.available_height()-12.0)/4.0).clamp(86.0,150.0);
+            for (index,(name,color)) in [("Ambience",visuals::TEAL),("Footsteps",visuals::WAVE),("Texture",visuals::GOLD),("Track 4",MUTED)].iter().enumerate() {
+                let (row,response)=ui.allocate_exact_size(Vec2::new(width,lane_height),Sense::hover());
+                help.observe(&response,"Demonstration arrangement. Clips and track controls become editable in ticket 14.");
+                let painter=ui.painter_at(row);
+                let header=Rect::from_min_max(row.min,Pos2::new(row.left()+controls,row.bottom()));
+                painter.rect_filled(header,0.0,Color32::from_rgb(23,30,37));
+                painter.line_segment([header.right_top(),header.right_bottom()],Stroke::new(1.0,BORDER));
+                painter.hline(row.x_range(),row.bottom(),Stroke::new(1.0,BORDER));
+                let mut track=child(ui,header.shrink2(Vec2::new(10.0,8.0)));
+                track.horizontal(|ui| {
+                    ui.label(RichText::new(format!("Track {}",index+1)).small().color(MUTED));
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center),|ui| {
+                        for label in ["S","M"] {help.observe(&ui.add_enabled(false,egui::Button::new(label).min_size(Vec2::new(21.0,21.0))),"Demo track controls are disabled until ticket 14.");}
                     });
-                    if index<3 { help.observe(&waveform(ui,90.0,index,false,*color),"Arrangement preview. Clip placement and track editing are not implemented yet."); }
-                    else { help.observe(&ui.label("No clips · Arrangement editing is planned"),"Add real audio and tracks in the upcoming arrangement milestone."); }
                 });
+                track.label(RichText::new(*name).strong());
+                track.horizontal(|ui| {
+                    let mut gain=[0.7,0.4,0.55,0.7][index];
+                    ui.spacing_mut().slider_width=(controls-85.0).max(32.0);
+                    ui.add_enabled(false,egui::Slider::new(&mut gain,0.0..=1.0).show_value(false));
+                    ui.label(RichText::new(["0.0 dB","-6.0 dB","-3.0 dB","0.0 dB"][index]).size(10.0).color(MUTED));
+                });
+                let c=Pos2::new(header.right()-19.0,header.bottom()-20.0);
+                painter.circle(c,10.0,Color32::from_rgb(30,38,46),Stroke::new(1.0,BORDER));
+                painter.line_segment([c,c-Vec2::new(0.0,8.0)],Stroke::new(1.5,visuals::WAVE));
+                let lane=Rect::from_min_max(header.right_top(),row.max);
+                visuals::grid(&painter,lane);
+                let clip=|start:f32,end:f32| Rect::from_min_max(Pos2::new(lane.left()+start*lane.width()+7.0,lane.top()+8.0),Pos2::new(lane.left()+end*lane.width()-7.0,lane.bottom()-8.0));
+                match index {
+                    0 => visuals::demo_clip(&painter,clip(0.0,1.0),"Rain ambience.wav",*color,index),
+                    1 => {
+                        visuals::demo_clip(&painter,clip(0.07,0.32),"Footsteps.wav",*color,index);
+                        visuals::demo_clip(&painter,clip(0.48,0.74),"Footsteps.wav",*color,index);
+                        visuals::demo_clip(&painter,clip(0.64,0.93),"Footsteps.wav",*color,index+2);
+                        let overlap=clip(0.65,0.73);
+                        painter.line_segment([overlap.left_top(),overlap.right_bottom()],Stroke::new(1.0,*color));
+                        painter.line_segment([overlap.left_bottom(),overlap.right_top()],Stroke::new(1.0,*color));
+                    }
+                    2 => {
+                        visuals::demo_clip(&painter,clip(0.26,0.57),"Piano texture.wav",*color,index);
+                        visuals::demo_clip(&painter,clip(0.77,1.0),"Piano texture.wav",*color,index+2);
+                    }
+                    _ => {
+                        painter.rect_stroke(lane.shrink(8.0),2.0,Stroke::new(1.0,BORDER),egui::StrokeKind::Inside);
+                        painter.text(lane.center(),egui::Align2::CENTER_CENTER,"Drag audio here",egui::FontId::proportional(12.0),MUTED);
+                    }
+                }
+                painter.vline(lane.left()+lane.width()*0.39,lane.y_range(),Stroke::new(1.0,Color32::from_rgb(225,233,245)));
             }
         });
     }
@@ -691,27 +809,6 @@ fn time(frame: u64, rate: u32) -> String {
         millis % 1000
     )
 }
-fn audio_waveform(
-    ui: &mut egui::Ui,
-    height: f32,
-    peaks: &[Peak],
-    color: Color32,
-) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 3.0, Color32::from_rgb(13, 19, 26));
-    painter.hline(rect.x_range(), rect.center().y, Stroke::new(1.0, BORDER));
-    for (index, peak) in peaks.iter().enumerate() {
-        let x = rect.left() + (index as f32 + 0.5) * rect.width() / peaks.len() as f32;
-        let y = |value: f64| rect.center().y - value as f32 * height * 0.46;
-        painter.line_segment(
-            [Pos2::new(x, y(peak.min)), Pos2::new(x, y(peak.max))],
-            Stroke::new((rect.width() / peaks.len() as f32).max(1.0), color),
-        );
-    }
-    response
-}
 fn section(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).size(11.0).strong());
 }
@@ -729,6 +826,19 @@ fn child(ui: &mut egui::Ui, rect: Rect) -> egui::Ui {
 }
 
 fn theme(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "Inter".into(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/InterVariable.ttf"
+        ))),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "Inter".into());
+    ctx.set_fonts(fonts);
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = SURFACE;
     visuals.window_fill = SURFACE;
@@ -739,7 +849,7 @@ fn theme(ctx: &egui::Context) {
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, BORDER);
     ctx.set_visuals(visuals);
     ctx.global_style_mut(|style| {
-        style.spacing.item_spacing = Vec2::new(7.0, 6.0);
+        style.spacing.item_spacing = Vec2::new(7.0, 4.0);
         style.spacing.button_padding = Vec2::new(8.0, 4.0);
         style.explanation_tooltips = false;
         style.url_in_tooltip = false;
@@ -749,58 +859,10 @@ fn theme(ctx: &egui::Context) {
         style
             .text_styles
             .insert(egui::TextStyle::Button, egui::FontId::proportional(12.0));
+        style
+            .text_styles
+            .insert(egui::TextStyle::Small, egui::FontId::proportional(11.0));
     });
-}
-
-fn waveform(
-    ui: &mut egui::Ui,
-    height: f32,
-    seed: usize,
-    overview: bool,
-    color: Color32,
-) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 3.0, Color32::from_rgb(13, 19, 26));
-    let middle = rect.center().y;
-    painter.line_segment(
-        [
-            Pos2::new(rect.left(), middle),
-            Pos2::new(rect.right(), middle),
-        ],
-        Stroke::new(1.0, BORDER),
-    );
-    for column in 0..(rect.width() as usize / 3) {
-        let x = rect.left() + column as f32 * 3.0;
-        let phase = column as f32 * 0.31 + seed as f32 * 2.0;
-        let amplitude = (phase.sin() * (phase * 0.17).cos()).abs() * height * 0.4 + 2.0;
-        painter.line_segment(
-            [
-                Pos2::new(x, middle - amplitude),
-                Pos2::new(x, middle + amplitude),
-            ],
-            Stroke::new(1.0, color),
-        );
-    }
-    let selection = Rect::from_min_max(
-        Pos2::new(rect.left() + rect.width() * 0.25, rect.top()),
-        Pos2::new(rect.left() + rect.width() * 0.6, rect.bottom()),
-    );
-    painter.rect_filled(
-        selection,
-        0.0,
-        Color32::from_rgba_unmultiplied(0, 122, 255, 35),
-    );
-    if overview {
-        for x in [selection.left(), selection.right()] {
-            painter.line_segment(
-                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                Stroke::new(2.0, BLUE),
-            );
-        }
-    }
-    response
 }
 
 #[cfg(test)]

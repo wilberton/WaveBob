@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut preferences =
         std::env::var_os("WAVEBOB_PREFERENCES_PATH").map(std::path::PathBuf::from);
     let mut window_size = [1440.0, 900.0];
+    let mut ui_scale = 1.0_f32;
     let mut args = std::env::args_os().skip(1);
     while let Some(argument) = args.next() {
         match argument.to_str() {
@@ -23,6 +24,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map_err(|_| "Instance name must be UTF-8")?
             }
             Some("--hidden") => hidden = true,
+            Some("--ui-scale") => {
+                ui_scale = args
+                    .next()
+                    .ok_or("Missing UI scale")?
+                    .into_string()
+                    .map_err(|_| "UI scale must be UTF-8")?
+                    .parse()?;
+                if !ui_scale.is_finite() || !(0.75..=3.0).contains(&ui_scale) {
+                    return Err("UI scale must be between 0.75 and 3".into());
+                }
+            }
             Some("--preferences") => {
                 preferences = Some(args.next().ok_or("Missing preferences path")?.into())
             }
@@ -44,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => {
                 return Err(
-                    "Usage: wavebob [--name NAME] [--runtime-dir DIRECTORY] [--hidden] [--preferences FILE] [--window-size WIDTHxHEIGHT]".into(),
+                    "Usage: wavebob [--name NAME] [--runtime-dir DIRECTORY] [--hidden] [--preferences FILE] [--window-size WIDTHxHEIGHT] [--ui-scale SCALE]".into(),
                 );
             }
         }
@@ -67,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         },
         Box::new(move |cc| {
+            cc.egui_ctx.set_zoom_factor(ui_scale);
             Ok(Box::new(app::WaveBob::new(
                 cc,
                 &directory,

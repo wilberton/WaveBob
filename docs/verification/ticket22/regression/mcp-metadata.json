@@ -1,0 +1,32 @@
+[
+  {
+    "delivered_bytes": 198809,
+    "file": "mcp-multitrack.png",
+    "metadata": {
+      "frame_number": 11,
+      "height": 900,
+      "mode": "multitrack",
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "rendered_revision": 1,
+      "scale": 1.0,
+      "session_id": "5c6b2ea5-8e4b-4448-ad54-12509b228f5e",
+      "width": 1440
+    }
+  },
+  {
+    "delivered_bytes": 80170,
+    "file": "mcp-waveform.png",
+    "metadata": {
+      "frame_number": 24,
+      "height": 900,
+      "mode": "waveform",
+      "pending_resources": [],
+      "presentation_revision": 2,
+      "rendered_revision": 1,
+      "scale": 1.0,
+      "session_id": "5c6b2ea5-8e4b-4448-ad54-12509b228f5e",
+      "width": 1440
+    }
+  }
+]

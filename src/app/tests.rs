@@ -148,14 +148,14 @@ fn chevrons_restore_independently_and_backtick_preserves_widths_in_both_modes() 
 #[test]
 fn pointer_drags_resize_both_panels_and_the_library_browser_split() {
     let mut h = Harness::new();
-    h.drag(Pos2::new(247.0, 400.0), Pos2::new(315.0, 400.0));
+    h.drag(Pos2::new(237.0, 400.0), Pos2::new(315.0, 400.0));
     assert!(h.app.host.presentation().layout.left.width > 300.0);
-    h.drag(Pos2::new(1203.0, 400.0), Pos2::new(1140.0, 400.0));
+    h.drag(Pos2::new(1243.0, 400.0), Pos2::new(1140.0, 400.0));
     assert!(h.app.host.presentation().layout.right.width > 290.0);
-    let top = 53.0;
-    let height = 804.0; // Visible column between header and status, inset by 10.
+    let top = 47.0;
+    let height = 810.0; // Visible column between header and status, inset by 10.
     h.drag(
-        Pos2::new(100.0, top + height * 0.27),
+        Pos2::new(100.0, top + height * 0.18),
         Pos2::new(100.0, top + height * 0.44),
     );
     assert!(h.app.host.presentation().layout.library_fraction > 0.40);
@@ -165,7 +165,7 @@ fn pointer_drags_resize_both_panels_and_the_library_browser_split() {
 #[test]
 fn hover_and_keyboard_focus_help_clear_without_tooltip_popups() {
     let mut h = Harness::new();
-    let play = h.text_rect("Play").center();
+    let play = Pos2::new(634.0, 844.0);
     h.frame(vec![egui::Event::PointerMoved(play)]);
     h.time += 3.0;
     let output = h.frame(Vec::new());

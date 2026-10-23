@@ -1,0 +1,47 @@
+{
+  "multitrack": {
+    "metadata": {
+      "frame_number": 9,
+      "height": 900,
+      "mode": "multitrack",
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "rendered_revision": 1,
+      "scale": 1.0,
+      "session_id": "6ee9673d-176c-46ac-988d-4a694d628318",
+      "width": 1440
+    },
+    "mime_type": "image/png",
+    "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpxwjif3\\multitrack.png"
+  },
+  "race": {
+    "metadata": {
+      "frame_number": 29,
+      "height": 900,
+      "mode": "multitrack",
+      "pending_resources": [],
+      "presentation_revision": 3,
+      "rendered_revision": 1,
+      "scale": 1.0,
+      "session_id": "6ee9673d-176c-46ac-988d-4a694d628318",
+      "width": 1440
+    },
+    "mime_type": "image/png",
+    "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpxwjif3\\race.png"
+  },
+  "waveform": {
+    "metadata": {
+      "frame_number": 18,
+      "height": 900,
+      "mode": "waveform",
+      "pending_resources": [],
+      "presentation_revision": 2,
+      "rendered_revision": 1,
+      "scale": 1.0,
+      "session_id": "6ee9673d-176c-46ac-988d-4a694d628318",
+      "width": 1440
+    },
+    "mime_type": "image/png",
+    "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpxwjif3\\waveform.png"
+  }
+}
