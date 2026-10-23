@@ -48,6 +48,7 @@ pub struct DesktopHost {
     frame_number: u64,
     drawn_revision: u64,
     drawn_presentation_revision: u64,
+    preferences: Option<crate::preferences::Preferences>,
 }
 
 impl Default for DesktopHost {
@@ -66,11 +67,23 @@ impl Default for DesktopHost {
             frame_number: 0,
             drawn_revision: 0,
             drawn_presentation_revision: 0,
+            preferences: None,
         }
     }
 }
 
 impl DesktopHost {
+    pub fn configure_preferences(&mut self, path: PathBuf, ctx: egui::Context) {
+        let (preferences, layout, status) =
+            crate::preferences::Preferences::open(path, move || {
+                ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+                ctx.request_repaint();
+            });
+        self.preferences = Some(preferences);
+        self.presentation.layout = layout;
+        self.presentation.preferences = status;
+    }
+
     pub fn listen(
         &mut self,
         directory: &Path,
@@ -109,42 +122,75 @@ impl DesktopHost {
         if let Err(error) = self.session.validate(&request) {
             return self.session.failure(Some(request.id), error);
         }
+        let expected = match &request.command {
+            Command::SetMode(params) => params.expected_presentation_revision,
+            Command::SetLayout(params) => params.expected_presentation_revision,
+            Command::TogglePanels(params) => params.expected_presentation_revision,
+            _ => None,
+        };
+        if expected.is_some_and(|revision| revision != self.presentation.revision) {
+            return self.session.failure(
+                Some(request.id),
+                CommandError::new(ErrorCode::StaleRevision, "Presentation revision changed"),
+            );
+        }
+        let mut presentation = self.presentation.clone();
         let result = match &request.command {
             Command::GetCapabilities(_) => {
                 CommandResult::Capabilities(commands::capabilities(true))
             }
             Command::GetPresentation(_) => CommandResult::Presentation(self.presentation()),
             Command::SetMode(params) => {
-                if params
-                    .expected_presentation_revision
-                    .is_some_and(|revision| revision != self.presentation.revision)
-                {
-                    return self.session.failure(
-                        Some(request.id),
-                        CommandError::new(
-                            ErrorCode::StaleRevision,
-                            "Presentation revision changed",
-                        ),
-                    );
-                }
-                if params.mode != self.presentation.mode {
-                    let Some(revision) = self.presentation.revision.checked_add(1) else {
-                        return self.session.failure(
-                            Some(request.id),
-                            CommandError::new(
-                                ErrorCode::RevisionExhausted,
-                                "Presentation revision exhausted",
-                            ),
-                        );
-                    };
-                    self.presentation.mode = params.mode;
-                    self.presentation.revision = revision;
-                }
-                CommandResult::Presentation(self.presentation())
+                presentation.mode = params.mode;
+                return self.commit_presentation(request.id, presentation, false);
+            }
+            Command::SetLayout(params) => {
+                presentation.layout = match params.apply(&presentation.layout) {
+                    Ok(layout) => layout,
+                    Err(error) => return self.session.failure(Some(request.id), error),
+                };
+                return self.commit_presentation(request.id, presentation, true);
+            }
+            Command::TogglePanels(_) => {
+                let show = !presentation.layout.left.visible && !presentation.layout.right.visible;
+                presentation.layout.left.visible = show;
+                presentation.layout.right.visible = show;
+                return self.commit_presentation(request.id, presentation, true);
             }
             _ => return self.session.execute(request),
         };
         self.session.success(Some(request.id), result)
+    }
+
+    fn commit_presentation(
+        &mut self,
+        id: String,
+        mut next: PresentationSnapshot,
+        layout_requested: bool,
+    ) -> Response {
+        let layout_changed = next.layout != self.presentation.layout;
+        if layout_changed || next.mode != self.presentation.mode {
+            let Some(revision) = self.presentation.revision.checked_add(1) else {
+                return self.session.failure(
+                    Some(id),
+                    CommandError::new(
+                        ErrorCode::RevisionExhausted,
+                        "Presentation revision exhausted",
+                    ),
+                );
+            };
+            next.revision = revision;
+        }
+        if (layout_changed
+            || (layout_requested && matches!(next.preferences, PreferenceStatus::Error { .. })))
+            && let Some(preferences) = &mut self.preferences
+        {
+            preferences.save(&next.layout);
+            next.preferences = PreferenceStatus::Saving;
+        }
+        self.presentation = next;
+        self.session
+            .success(Some(id), CommandResult::Presentation(self.presentation()))
     }
 
     fn ready(&self, pending: &Pending) -> bool {
@@ -153,6 +199,13 @@ impl DesktopHost {
     }
 
     pub fn begin_frame(&mut self, ctx: &egui::Context) {
+        if let Some(status) = self
+            .preferences
+            .as_ref()
+            .and_then(|preferences| preferences.poll())
+        {
+            self.presentation.preferences = status;
+        }
         self.frame_number += 1;
         for token in self.finished.try_iter() {
             if self

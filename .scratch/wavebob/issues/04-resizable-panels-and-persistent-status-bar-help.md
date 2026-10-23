@@ -5,7 +5,7 @@ and read selection state and contextual help below the transport in both modes.
 
 **Blocked by:** 01 — Command-driven session and headless runner.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Inner-edge dragging resizes panels; independent chevrons retain restore
   affordances and expanded widths. The browser/library split also resizes.

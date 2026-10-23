@@ -266,6 +266,8 @@ mod live {
             command
                 .args(["--hidden", "--name", name, "--runtime-dir"])
                 .arg(runtime)
+                .arg("--preferences")
+                .arg(runtime.join(format!("{name}-layout.json")))
                 .stdout(Stdio::null())
                 .stderr(fs::File::create(runtime.join(format!("{name}.log"))).unwrap());
             #[cfg(windows)]
@@ -351,7 +353,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 10);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

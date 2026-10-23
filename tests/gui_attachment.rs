@@ -17,6 +17,8 @@ impl Gui {
         command
             .args(["--hidden", "--name", name, "--runtime-dir"])
             .arg(directory)
+            .arg("--preferences")
+            .arg(directory.join(format!("{name}-layout.json")))
             .stdout(Stdio::null())
             .stderr(fs::File::create(directory.join(format!("{name}.log"))).unwrap());
         #[cfg(windows)]
@@ -130,7 +132,7 @@ fn live_gui_attachment_capture_and_revision_fences() {
     let other = Client::attach(runtime.path(), second_id).unwrap();
     assert!(Client::attach(runtime.path(), "not-a-session-id").is_err());
     let catalogue = success(request(&client, "session.capabilities", json!({})));
-    assert_eq!(catalogue["commands"].as_array().unwrap().len(), 8);
+    assert_eq!(catalogue["commands"].as_array().unwrap().len(), 10);
     assert!(
         catalogue["capabilities"]
             .as_array()

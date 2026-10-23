@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::presentation::{
-    CaptureParams, CaptureResult, PresentationSnapshot, RenderMetadata, RenderParams, SetModeParams,
+    CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, RenderMetadata,
+    RenderParams, SetLayoutParams, SetModeParams,
 };
 use crate::{CommandError, ErrorCode, PROTOCOL_VERSION, SessionSnapshot};
 
@@ -86,6 +87,8 @@ command_registry! {
     ToggleLoop(EmptyParams) => ("transport.loop.toggle", "Toggle looping without starting audio playback.", true, false, SessionSnapshot),
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, PresentationSnapshot),
+    SetLayout(SetLayoutParams) => ("presentation.layout.set", "Set panel widths, visibility and library/browser split.", true, true, PresentationSnapshot),
+    TogglePanels(PresentationRevisionParams) => ("presentation.panels.toggle", "Hide both panels if either is visible; otherwise restore both.", true, true, PresentationSnapshot),
     RenderBarrier(RenderParams) => ("presentation.barrier", "Wait for a frame reflecting the requested revisions.", false, true, RenderMetadata),
     CapturePng(CaptureParams) => ("capture.png", "Capture the actual GUI client area as PNG.", false, true, CaptureResult),
 }
