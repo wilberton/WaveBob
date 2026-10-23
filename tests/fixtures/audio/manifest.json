@@ -1,0 +1,71 @@
+{
+  "generator": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+  "fixtures": [
+    {
+      "name": "cbr-1ch-44100-tagged",
+      "channels": 1,
+      "sample_rate": 44100,
+      "mode": "cbr",
+      "tags": true,
+      "source_frames": 8192,
+      "decoded_frames": 8192,
+      "mp3_sha256": "696b44749e7c5a6c8fff0532e8ed1a4ba9af31e1c778d7db76fc5c9f9abfa896",
+      "reference_sha256": "3ff1f1fb571215173927a9b3fee2caf93ba485b1dfdddcef6a4c5eab8dbf685a"
+    },
+    {
+      "name": "cbr-2ch-48000-tagged",
+      "channels": 2,
+      "sample_rate": 48000,
+      "mode": "cbr",
+      "tags": true,
+      "source_frames": 8192,
+      "decoded_frames": 8192,
+      "mp3_sha256": "4d70281de4b318ce6650d4d11c3b47a9bd525257ed04136771c98158e66725a6",
+      "reference_sha256": "017395ca87ecd70b18b18c9b64597e2255d36ecb932a4dd7d4f976247a9a196a"
+    },
+    {
+      "name": "vbr-1ch-22050-tagged",
+      "channels": 1,
+      "sample_rate": 22050,
+      "mode": "vbr",
+      "tags": true,
+      "source_frames": 8192,
+      "decoded_frames": 8192,
+      "mp3_sha256": "3f2e09adfe6ebc302924d798c34320c8bffe44c9d67bdd4c2a76693e62e15405",
+      "reference_sha256": "825e829db8ef245b9e9d1736f8b857dbc1832bd95a511f16ec7aeba9cbfe5925"
+    },
+    {
+      "name": "vbr-2ch-44100-tagged",
+      "channels": 2,
+      "sample_rate": 44100,
+      "mode": "vbr",
+      "tags": true,
+      "source_frames": 8192,
+      "decoded_frames": 8192,
+      "mp3_sha256": "95483da1df8113d9c1f12ade6207c600c7e36350236f6869a8184316e32ae984",
+      "reference_sha256": "f658a5c939fee3e586d9891e55c74f88c9abf116d562c0b46631723c4da1f929"
+    },
+    {
+      "name": "cbr-1ch-44100-untagged",
+      "channels": 1,
+      "sample_rate": 44100,
+      "mode": "cbr",
+      "tags": false,
+      "source_frames": 8192,
+      "decoded_frames": 10368,
+      "mp3_sha256": "0bf8b052d3cf1db8916a9731a66670258ec969d0e2019d8a4640db5a96dab6a8",
+      "reference_sha256": "cf1a53e89da171d7ab21d26ccbeecb84c3065b398249df34cb5902a940ad59b3"
+    },
+    {
+      "name": "vbr-2ch-48000-untagged",
+      "channels": 2,
+      "sample_rate": 48000,
+      "mode": "vbr",
+      "tags": false,
+      "source_frames": 8192,
+      "decoded_frames": 10368,
+      "mp3_sha256": "ed3f28f815206d4b7f3135213dc5f8cfdca4e1b38cdec0e507a516e93ddfa530",
+      "reference_sha256": "836c60ea2b27ce0ea91fc167814498d4f1a02a18fadc08c0c64520c8e511e692"
+    }
+  ]
+}

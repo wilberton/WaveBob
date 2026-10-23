@@ -27,7 +27,7 @@ path = "src/bin/mcp.rs"
 eframe = { version = "=0.37.0", optional = true, default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 schemars = "1.2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = {version="1",features=["float_roundtrip"]}
 uuid = { version = "1", features = ["v4"] }
 interprocess = "2.4"
 directories = "6"
@@ -37,6 +37,7 @@ rmcp = { version = "=3.7.0", default-features = false, features = ["server", "tr
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
 base64 = "0.23"
 hound = "=3.5.1"
+symphonia = {version = "=0.6.1", default-features = false, features = ["mp3", "id3v1", "id3v2"]}
 rfd = { version = "0.17", optional = true }
 
 [dev-dependencies]

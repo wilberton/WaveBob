@@ -58,11 +58,11 @@ session identity, revision, result or error. Schema references remain resolvable
 after nesting. No separate editing implementation or handwritten command list
 exists in the adapter.
 
-An independent session advertises eleven tools: session/loop commands, document
-open/get/activate, exact samples/waveforms and job inspection/cancellation.
+An independent session advertises twelve tools: session/loop commands, document
+open/get/activate/close, exact samples/waveforms and job inspection/cancellation.
 An attached GUI also advertises
 `presentation.get`, `presentation.set_mode`, `presentation.layout.set`,
-`presentation.panels.toggle`, `presentation.barrier` and `capture.png` (seventeen tools
+`presentation.panels.toggle`, `presentation.barrier` and `capture.png` (eighteen tools
 in total). See [panel commands and preferences](layout.md) for layout behavior.
 Use `tools/list` for tool discovery or call `session.capabilities` for the full
 application catalogue. There is one catalogue page and no list-change subscription.

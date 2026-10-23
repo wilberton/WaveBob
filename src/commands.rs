@@ -89,6 +89,7 @@ command_registry! {
     OpenDocument(OpenParams) => ("documents.open", "Import an audio file as a background job without changing its source.", true, false, JobInfo),
     GetDocument(DocumentParams) => ("documents.get", "Inspect an open audio document and its immutable revision.", false, false, DocumentInfo),
     ActivateDocument(DocumentParams) => ("documents.activate", "Choose the active audio document.", true, false, DocumentInfo),
+    CloseDocument(CloseParams) => ("documents.close", "Close an audio document; dirty work requires explicit discard intent.", true, false, DocumentInfo),
     ReadSamples(SamplesParams) => ("documents.samples", "Read a bounded range of actual decoded channel samples.", false, false, SamplesData),
     GetWaveform(WaveformParams) => ("documents.waveform", "Query exact per-channel waveform extrema for a frame interval.", false, false, WaveformData),
     GetJob(JobParams) => ("jobs.get", "Inspect background operation progress, result or failure.", false, false, JobInfo),

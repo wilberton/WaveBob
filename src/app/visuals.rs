@@ -271,9 +271,27 @@ pub fn grid(painter: &egui::Painter, rect: Rect) {
 }
 
 pub fn peaks(painter: &egui::Painter, rect: Rect, values: &[Peak], color: Color32) {
+    let individual = !values.is_empty()
+        && values
+            .iter()
+            .all(|peak| peak.end_frame - peak.start_frame == 1);
+    let mut previous = None;
     for (index, peak) in values.iter().enumerate() {
-        let x = rect.left() + (index as f32 + 0.5) * rect.width() / values.len() as f32;
+        let x = rect.left()
+            + (index as f32 + if individual { 0.0 } else { 0.5 }) * rect.width()
+                / values.len() as f32;
         let y = |value: f64| rect.center().y - value as f32 * rect.height() * 0.45;
+        if individual {
+            let point = Pos2::new(x, y(peak.min));
+            if let Some(previous) = previous {
+                painter.line_segment([previous, point], Stroke::new(1.0, color));
+            }
+            if rect.width() / values.len() as f32 > 4.0 {
+                painter.circle_filled(point, 2.0, color);
+            }
+            previous = Some(point);
+            continue;
+        }
         painter.line_segment(
             [Pos2::new(x, y(peak.min)), Pos2::new(x, y(peak.max))],
             Stroke::new((rect.width() / values.len() as f32).max(1.0), color),

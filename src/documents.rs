@@ -14,6 +14,14 @@ pub struct FrameRange {
     pub start: u64,
     pub end: u64,
 }
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct SourceDetails {
+    pub bitrate_mode: Option<String>,
+    pub bitrate_kbps: Option<u32>,
+    /// Decoder-adjusted delay/padding removed according to metadata, never silence detection.
+    pub encoder_delay: Option<u32>,
+    pub encoder_padding: Option<u32>,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct DocumentInfo {
     pub id: String,
@@ -24,6 +32,8 @@ pub struct DocumentInfo {
     pub channels: u16,
     pub frames: u64,
     pub encoding: String,
+    #[serde(default)]
+    pub source_details: SourceDetails,
     pub dirty: bool,
     pub cursor: u64,
     pub selection: Option<FrameRange>,
@@ -80,6 +90,13 @@ pub struct OpenParams {
 #[serde(deny_unknown_fields)]
 pub struct DocumentParams {
     pub document_id: String,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CloseParams {
+    pub document_id: String,
+    #[serde(default)]
+    pub discard_changes: bool,
 }
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -169,6 +186,21 @@ impl Editor {
                     {
                         match result {
                             Ok(audio) => {
+                                let allocated = self
+                                    .revisions
+                                    .values()
+                                    .map(|revision| revision.samples.len() as u64 * 4)
+                                    .sum::<u64>();
+                                if allocated + audio.samples.len() as u64 * 4
+                                    > 2 * 1024 * 1024 * 1024
+                                {
+                                    job.status = JobStatus::Failed;
+                                    job.error = Some(CommandError::new(
+                                        ErrorCode::ResourceLimit,
+                                        "Session decoded audio exceeds the current 2 GiB limit; close documents before importing more",
+                                    ));
+                                    continue;
+                                }
                                 let Some(next) = revision.checked_add(1) else {
                                     job.status = JobStatus::Failed;
                                     job.error = Some(CommandError::new(
@@ -190,6 +222,7 @@ impl Editor {
                                     channels: audio.channels,
                                     frames: audio.frames(),
                                     encoding: audio.encoding.clone(),
+                                    source_details: audio.source.clone(),
                                     dirty: false,
                                     cursor: 0,
                                     selection: None,
@@ -232,6 +265,22 @@ impl Editor {
                 if self.active.as_ref() != Some(&document.id) {
                     advance(revision)?;
                     self.active = Some(document.id.clone());
+                }
+                Ok(CommandResult::Document(document.into()))
+            }
+            Command::CloseDocument(params) => {
+                let document = self.document(&params.document_id)?.clone();
+                if document.dirty && !params.discard_changes {
+                    return Err(CommandError::new(
+                        ErrorCode::DirtyDocument,
+                        "Closing this document requires explicit discard intent",
+                    ));
+                }
+                advance(revision)?;
+                self.documents.retain(|doc| doc.id != document.id);
+                self.revisions.remove(&document.revision_id);
+                if self.active.as_ref() == Some(&document.id) {
+                    self.active = self.documents.last().map(|doc| doc.id.clone());
                 }
                 Ok(CommandResult::Document(document.into()))
             }
@@ -361,10 +410,13 @@ impl Editor {
         let sender = self.sender.clone();
         let wake = self.wake.clone();
         std::thread::spawn(move || {
+            let last = std::cell::Cell::new(255);
             let result = audio::decode(std::path::Path::new(&params.path), &cancel, |percent| {
-                let _ = sender.send(Event::Progress(id.clone(), percent));
-                if let Some(wake) = &wake {
-                    wake();
+                if last.replace(percent) != percent {
+                    let _ = sender.send(Event::Progress(id.clone(), percent));
+                    if let Some(wake) = &wake {
+                        wake();
+                    }
                 }
             });
             let _ = sender.send(Event::Finished(id, result));

@@ -65,6 +65,24 @@ fn response(result: &CallToolResult) -> Value {
     value
 }
 
+fn assert_same_audio(actual: &Value, expected: &Value) {
+    let actual = actual.as_array().unwrap();
+    let expected = expected.as_array().unwrap();
+    assert_eq!(actual.len(), expected.len());
+    for (channel, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+        let actual = actual.as_array().unwrap();
+        let expected = expected.as_array().unwrap();
+        assert_eq!(actual.len(), expected.len());
+        for (frame, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+            assert_eq!(
+                actual.as_f64(),
+                expected.as_f64(),
+                "channel {channel}, frame {frame}"
+            );
+        }
+    }
+}
+
 fn assert_local_refs(schema: &Value, root: &Value) {
     match schema {
         Value::Object(fields) => {
@@ -92,7 +110,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 12);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -224,6 +242,109 @@ async fn target_guards_and_invalid_envelopes_leave_the_session_usable() {
     let snapshot = response(&call(&client, "session.get", json!({})).await);
     assert_eq!(snapshot["revision"], 0);
     assert_eq!(snapshot["result"]["loop_enabled"], false);
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn mp3_import_samples_match_direct_headless_and_mcp_adapters() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::Stdio;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3");
+    let mut session = Session::default();
+    let mut direct = |name: &str, params: Value| {
+        serde_json::to_value(protocol::dispatch_line(
+            &mut session,
+            &json!({"id":"audio","command":name,"params":params}).to_string(),
+        ))
+        .unwrap()
+    };
+    let started = direct("documents.open", json!({"path":path}));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let doc = loop {
+        let job = direct("jobs.get", json!({"job_id":started["result"]["id"]}));
+        if job["result"]["status"] != "running" {
+            assert_eq!(job["result"]["status"], "succeeded");
+            break job["result"]["result"].clone();
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    let expected = direct(
+        "documents.samples",
+        json!({"document_id":doc["id"],"start_frame":500,"frames":4096}),
+    )["result"]["channels"]
+        .clone();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_wavebob-headless"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    let mut wire = |name: &str, params: Value| {
+        writeln!(
+            input,
+            "{}",
+            json!({"id":"audio","command":name,"params":params})
+        )
+        .unwrap();
+        input.flush().unwrap();
+        let mut line = String::new();
+        output.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+    let started = wire("documents.open", json!({"path":path}));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let doc = loop {
+        let job = wire("jobs.get", json!({"job_id":started["result"]["id"]}));
+        if job["result"]["status"] != "running" {
+            assert_eq!(job["result"]["status"], "succeeded");
+            break job["result"]["result"].clone();
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    assert_same_audio(
+        &wire(
+            "documents.samples",
+            json!({"document_id":doc["id"],"start_frame":500,"frames":4096}),
+        )["result"]["channels"],
+        &expected,
+    );
+    drop(wire);
+    drop(input);
+    assert!(child.wait().unwrap().success());
+    let client = connect(ProtocolVersion::V_2026_07_28, &[]).await;
+    let started = response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let doc = loop {
+        let job = response(
+            &call(
+                &client,
+                "jobs.get",
+                json!({"params":{"job_id":started["result"]["id"]}}),
+            )
+            .await,
+        );
+        if job["result"]["status"] != "running" {
+            assert_eq!(job["result"]["status"], "succeeded");
+            break job["result"]["result"].clone();
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    };
+    assert_same_audio(
+        &response(
+            &call(
+                &client,
+                "documents.samples",
+                json!({"params":{"document_id":doc["id"],"start_frame":500,"frames":4096}}),
+            )
+            .await,
+        )["result"]["channels"],
+        &expected,
+    );
     client.cancel().await.unwrap();
 }
 
@@ -691,6 +812,168 @@ mod live {
         }
         client.cancel().await.unwrap();
     }
+    #[tokio::test]
+    #[ignore = "requires a real native GUI renderer; run explicitly on a desktop"]
+    async fn mp3_document_import_and_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "mp3-audio");
+        let client = named_client(runtime.path(), "mp3-audio").await;
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3");
+        let started =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let id = &started["result"]["id"];
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let job = loop {
+            let job = response(&call(&client, "jobs.get", json!({"params":{"job_id":id}})).await);
+            if job["result"]["status"] != "running" {
+                break job;
+            }
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert_eq!(job["result"]["status"], "succeeded", "{job}");
+        assert_eq!(job["result"]["result"]["frames"], 8192);
+        assert_eq!(
+            job["result"]["result"]["source_details"]["bitrate_mode"],
+            "vbr"
+        );
+        let path = runtime.path().join("mp3.png");
+        let result = call(
+            &client,
+            "capture.png",
+            json!({"params":{"path":path,"after_revision":job["revision"]}}),
+        )
+        .await;
+        let capture = response(&result);
+        assert_eq!(capture["status"], "ok");
+        let image = result
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        let png = BASE64_STANDARD.decode(&image.data).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), png);
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(Path::new(&directory).join("mp3.png"), png).unwrap();
+            fs::write(
+                Path::new(&directory).join("mp3-metadata.json"),
+                serde_json::to_vec_pretty(&json!({"job":job,"capture":capture})).unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
+
+    #[cfg(windows)]
+    fn process_memory(pid: u32) -> Value {
+        let mut command = Command::new("powershell.exe");
+        command.args(["-NoProfile","-NonInteractive","-Command",&format!("$wavebobProcess=Get-Process -Id {pid}; @{{working_set_bytes=$wavebobProcess.WorkingSet64;peak_working_set_bytes=$wavebobProcess.PeakWorkingSet64;private_bytes=$wavebobProcess.PrivateMemorySize64}} | ConvertTo-Json -Compress")]);
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+        let output = command.output().unwrap();
+        assert!(output.status.success());
+        serde_json::from_slice(&output.stdout).unwrap()
+    }
+
+    #[tokio::test]
+    #[ignore = "measured large-file native GUI benchmark; run explicitly in release mode"]
+    async fn large_import_keeps_live_navigation_and_cancellation_responsive() {
+        let runtime = tempfile::tempdir().unwrap();
+        let path = runtime.path().join("ten-minutes.wav");
+        let frames = 48000_u64 * 600;
+        let mut writer = hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: 48000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for frame in 0..frames {
+            let sample = ((frame % 1000) as i16 - 500) * 40;
+            writer.write_sample(sample).unwrap();
+            writer.write_sample(-sample).unwrap();
+        }
+        writer.finalize().unwrap();
+        let gui = Gui::start(runtime.path(), "large-audio");
+        let client = named_client(runtime.path(), "large-audio").await;
+        #[cfg(windows)]
+        let before = process_memory(gui.0.id());
+        #[cfg(not(windows))]
+        let before = Value::Null;
+        let began = Instant::now();
+        let started =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let id = &started["result"]["id"];
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut latency = Vec::<f64>::new();
+        let mut progress = Vec::new();
+        let job = loop {
+            let began = Instant::now();
+            let view=response(&call(&client,"presentation.set_mode",json!({"params":{"mode":if latency.len().is_multiple_of(2) {"waveform"} else {"multitrack"}}})).await);
+            assert_eq!(view["status"], "ok");
+            latency.push(began.elapsed().as_secs_f64() * 1000.0);
+            let job = response(&call(&client, "jobs.get", json!({"params":{"job_id":id}})).await);
+            progress.push(job["result"]["progress"].clone());
+            if job["result"]["status"] != "running" {
+                break job;
+            }
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+        let import_ms = began.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(job["result"]["status"], "succeeded", "{job}");
+        assert_eq!(job["result"]["result"]["frames"], frames);
+        let max_ms = latency.iter().copied().fold(0.0_f64, f64::max);
+        assert!(max_ms < 2000.0, "Live navigation stalled for {max_ms} ms");
+        let peak_start = Instant::now();
+        let wave = response(
+            &call(
+                &client,
+                "documents.waveform",
+                json!({"params":{"document_id":job["result"]["result"]["id"],"bins":1024}}),
+            )
+            .await,
+        );
+        assert_eq!(wave["status"], "ok");
+        let waveform_ms = peak_start.elapsed().as_secs_f64() * 1000.0;
+        #[cfg(windows)]
+        let loaded = process_memory(gui.0.id());
+        #[cfg(not(windows))]
+        let loaded = Value::Null;
+        let second =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let cancelled = response(
+            &call(
+                &client,
+                "jobs.cancel",
+                json!({"params":{"job_id":second["result"]["id"]}}),
+            )
+            .await,
+        );
+        assert_eq!(cancelled["result"]["status"], "cancelled", "{cancelled}");
+        let state = response(&call(&client, "session.get", json!({})).await);
+        assert_eq!(state["result"]["documents"].as_array().unwrap().len(), 1);
+        let record = json!({"frames":frames,"channels":2,"sample_rate":48000,"source_bytes":fs::metadata(path).unwrap().len(),"decoded_bytes":frames*2*4,"import_ms":import_ms,"navigation_ms":latency,"max_navigation_ms":max_ms,"progress_observed":progress,"waveform_query_ms":waveform_ms,"before":before,"loaded":loaded,"cancellation":cancelled["result"]["status"]});
+        eprintln!("{}", serde_json::to_string_pretty(&record).unwrap());
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("large-import.json"),
+                serde_json::to_vec_pretty(&record).unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
+        drop(gui);
+    }
     impl Drop for Gui {
         fn drop(&mut self) {
             let _ = self.0.kill();
@@ -766,7 +1049,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 17);
+        assert_eq!(tools.len(), 18);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

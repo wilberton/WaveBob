@@ -92,7 +92,7 @@ impl WaveBob {
         std::thread::spawn(move || {
             let path = rfd::FileDialog::new()
                 .set_title("Open audio")
-                .add_filter("WAV audio", &["wav"])
+                .add_filter("WAV and MP3 audio", &["wav", "mp3"])
                 .pick_file();
             let _ = sender.send(path);
             ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
@@ -229,13 +229,16 @@ impl WaveBob {
                     ui.add_space(12.0);
                     let menu = ui.menu_button("File", |ui| {
                         let response = ui.button("Open audio…");
-                        help.observe(&response, "Open a WAV audio file in a new document.");
+                        help.observe(&response, "Open a WAV or MP3 audio file in a new document.");
                         if response.clicked() && !self.host.frozen() {
                             self.open_requested = true;
                             ui.close();
                         }
                     });
-                    help.observe(&menu.response, "Open a WAV audio file in a new document.");
+                    help.observe(
+                        &menu.response,
+                        "Open a WAV or MP3 audio file in a new document.",
+                    );
                     for name in ["Edit", "View", "Help"] {
                         help.observe(
                             &ui.add_enabled(false, egui::Button::new(name).frame(false)),
@@ -369,7 +372,7 @@ impl WaveBob {
             ),
             egui::Button::new("+").frame(false),
         );
-        help.observe(&add, "Open a WAV audio file in a new document.");
+        help.observe(&add, "Open a WAV or MP3 audio file in a new document.");
         if add.clicked() && !self.host.frozen() {
             self.open_requested = true;
         }
@@ -399,29 +402,48 @@ impl WaveBob {
                             .color(MUTED),
                     );
                     let response = ui.button("Open audio…");
-                    help.observe(&response, "Open a WAV audio file in a new document.");
+                    help.observe(&response, "Open a WAV or MP3 audio file in a new document.");
                     if response.clicked() && !self.host.frozen() {
                         self.open_requested = true;
                     }
                 }
                 for document in snapshot.documents {
-                    let response = visuals::file_row(
-                        ui,
-                        &document.name,
-                        snapshot.active_document_id.as_ref() == Some(&document.id),
-                        false,
-                        true,
-                    );
-                    help.observe(
-                        &response,
-                        "Show this document in the waveform editing view.",
-                    );
-                    if response.clicked() {
-                        self.dispatch(Command::ActivateDocument(DocumentParams {
-                            document_id: document.id,
-                        }));
-                        self.set_mode(ViewMode::Waveform);
-                    }
+                    ui.horizontal(|ui| {
+                        let width = (ui.available_width() - 29.0).max(30.0);
+                        let response = ui
+                            .allocate_ui_with_layout(
+                                Vec2::new(width, 24.0),
+                                egui::Layout::top_down(Align::Min),
+                                |ui| {
+                                    visuals::file_row(
+                                        ui,
+                                        &document.name,
+                                        snapshot.active_document_id.as_ref() == Some(&document.id),
+                                        false,
+                                        true,
+                                    )
+                                },
+                            )
+                            .inner;
+                        help.observe(
+                            &response,
+                            "Show this document in the waveform editing view.",
+                        );
+                        if response.clicked() {
+                            self.dispatch(Command::ActivateDocument(DocumentParams {
+                                document_id: document.id.clone(),
+                            }));
+                            self.set_mode(ViewMode::Waveform);
+                        }
+                        let close = ui.add_sized([22.0, 22.0], egui::Button::new("×").frame(false));
+                        help.observe(&close, "Close this audio document.");
+                        if close.clicked() {
+                            self.dispatch(Command::CloseDocument(CloseParams {
+                                document_id: document.id.clone(),
+                                discard_changes: false,
+                            }));
+                        }
+                    });
                 }
                 for job in snapshot
                     .jobs
@@ -621,13 +643,14 @@ impl WaveBob {
             ui.label(RichText::new(&document.name).strong());
             ui.label(
                 RichText::new(format!(
-                    "{} kHz / {} / 16-bit   |   {}",
+                    "{} kHz / {} / {}   |   {}",
                     document.sample_rate as f64 / 1000.0,
                     if document.channels == 1 {
                         "Mono"
                     } else {
                         "Stereo"
                     },
+                    encoding_label(&document),
                     time(document.frames, document.sample_rate)
                 ))
                 .small()
@@ -799,6 +822,26 @@ fn panel_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(SURFACE)
         .stroke(Stroke::new(1.0, BORDER))
+}
+fn encoding_label(document: &DocumentInfo) -> String {
+    if document.encoding == "mp3" {
+        format!(
+            "MP3 {}",
+            document
+                .source_details
+                .bitrate_mode
+                .as_deref()
+                .unwrap_or("")
+        )
+    } else {
+        document
+            .encoding
+            .trim_start_matches("wav_")
+            .replace("pcm", "")
+            .replace("float", "float ")
+            .to_string()
+            + "-bit"
+    }
 }
 fn time(frame: u64, rate: u32) -> String {
     let millis = frame.saturating_mul(1000) / rate.max(1) as u64;

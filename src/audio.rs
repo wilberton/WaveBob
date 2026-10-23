@@ -1,5 +1,6 @@
 //! Immutable decoded audio and revision-local waveform acceleration.
 use crate::documents::Peak;
+use crate::documents::SourceDetails;
 use crate::{CommandError, ErrorCode};
 use std::path::Path;
 use std::sync::{
@@ -9,12 +10,14 @@ use std::sync::{
 
 const BLOCK: usize = 256;
 const MAX_VALUES: usize = 128 * 1024 * 1024;
+mod mp3;
 
 #[derive(Debug)]
 pub(crate) struct Audio {
     pub rate: u32,
     pub channels: u16,
     pub encoding: String,
+    pub source: SourceDetails,
     pub samples: Arc<[f32]>,
     peaks: Vec<Vec<Vec<(f32, f32)>>>,
 }
@@ -75,6 +78,12 @@ pub(crate) fn decode(
     cancel: &AtomicBool,
     progress: impl Fn(u8),
 ) -> Result<Audio, CommandError> {
+    if path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("mp3"))
+    {
+        return mp3::decode(path, cancel, &progress);
+    }
     let error = |error: hound::Error| match error {
         hound::Error::IoError(error) => CommandError::new(
             if error.kind() == std::io::ErrorKind::UnexpectedEof
@@ -92,12 +101,14 @@ pub(crate) fn decode(
     let spec = reader.spec();
     if ![1, 2].contains(&spec.channels)
         || spec.sample_rate == 0
-        || spec.bits_per_sample != 16
-        || spec.sample_format != hound::SampleFormat::Int
+        || !matches!(
+            (spec.sample_format, spec.bits_per_sample),
+            (hound::SampleFormat::Int, 16 | 24 | 32) | (hound::SampleFormat::Float, 32)
+        )
     {
         return Err(CommandError::new(
             ErrorCode::UnsupportedFormat,
-            "This milestone supports mono/stereo 16-bit PCM WAV files",
+            "Supported WAV encodings are mono/stereo PCM 16/24/32-bit or float32",
         ));
     }
     let length = reader.len() as usize;
@@ -120,14 +131,31 @@ pub(crate) fn decode(
     samples
         .try_reserve_exact(length)
         .map_err(|error| CommandError::new(ErrorCode::ResourceLimit, error.to_string()))?;
-    for (index, sample) in reader.samples::<i16>().enumerate() {
+    let divisor = 2.0_f64.powi(spec.bits_per_sample as i32 - 1);
+    let values: Box<dyn Iterator<Item = Result<f32, hound::Error>> + '_> = match spec.sample_format
+    {
+        hound::SampleFormat::Int => Box::new(
+            reader
+                .samples::<i32>()
+                .map(move |sample| sample.map(|value| (value as f64 / divisor) as f32)),
+        ),
+        hound::SampleFormat::Float => Box::new(reader.samples::<f32>()),
+    };
+    for (index, sample) in values.enumerate() {
         if index.is_multiple_of(16384) {
             if cancel.load(Ordering::Acquire) {
                 return Err(CommandError::new(ErrorCode::Cancelled, "Import cancelled"));
             }
             progress(((index as u64 * 90) / length as u64) as u8);
         }
-        samples.push(sample.map_err(error)? as f32 / 32768.0);
+        let value = sample.map_err(error)?;
+        if !value.is_finite() {
+            return Err(CommandError::new(
+                ErrorCode::DecodeFailed,
+                "Audio contains non-finite samples",
+            ));
+        }
+        samples.push(value);
     }
     if samples.len() != length || !length.is_multiple_of(spec.channels as usize) {
         return Err(CommandError::new(
@@ -135,9 +163,37 @@ pub(crate) fn decode(
             "Incomplete sample frames in WAV data",
         ));
     }
+    prepare(
+        spec.sample_rate,
+        spec.channels,
+        format!(
+            "wav_{}{}",
+            if spec.sample_format == hound::SampleFormat::Int {
+                "pcm"
+            } else {
+                "float"
+            },
+            spec.bits_per_sample
+        ),
+        SourceDetails::default(),
+        samples,
+        cancel,
+        progress,
+    )
+}
+
+pub(crate) fn prepare(
+    rate: u32,
+    channels: u16,
+    encoding: String,
+    source: SourceDetails,
+    samples: Vec<f32>,
+    cancel: &AtomicBool,
+    progress: impl Fn(u8),
+) -> Result<Audio, CommandError> {
     let mut peaks = Vec::new();
-    let frames = length / spec.channels as usize;
-    for channel in 0..spec.channels as usize {
+    let frames = samples.len() / channels as usize;
+    for channel in 0..channels as usize {
         let mut levels = vec![Vec::new()];
         for first in (0..frames).step_by(BLOCK) {
             if cancel.load(Ordering::Acquire) {
@@ -146,11 +202,17 @@ pub(crate) fn decode(
             let mut min = f32::INFINITY;
             let mut max = f32::NEG_INFINITY;
             for frame in first..(first + BLOCK).min(frames) {
-                let sample = samples[frame * spec.channels as usize + channel];
+                let sample = samples[frame * channels as usize + channel];
                 min = min.min(sample);
                 max = max.max(sample);
             }
             levels[0].push((min, max));
+            if first.is_multiple_of(16384) {
+                progress(
+                    90 + ((channel * frames + first) * 9 / (frames * channels as usize).max(1))
+                        as u8,
+                );
+            }
         }
         while levels.last().unwrap().len() > 1 {
             let next = levels
@@ -167,12 +229,13 @@ pub(crate) fn decode(
             levels.push(next);
         }
         peaks.push(levels);
-        progress(90 + ((channel + 1) * 9 / spec.channels as usize) as u8);
+        progress(90 + ((channel + 1) * 9 / channels as usize) as u8);
     }
     Ok(Audio {
-        rate: spec.sample_rate,
-        channels: spec.channels,
-        encoding: "wav_pcm16".into(),
+        rate,
+        channels,
+        encoding,
+        source,
         samples: samples.into(),
         peaks,
     })

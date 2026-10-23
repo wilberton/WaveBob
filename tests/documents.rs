@@ -189,14 +189,14 @@ fn malformed_missing_empty_unsupported_and_truncated_imports_publish_no_document
         },
     )
     .unwrap();
-    writer.write_sample(0.1_f32).unwrap();
+    writer.write_sample(f32::NAN).unwrap();
     writer.finalize().unwrap();
     for (path, code) in [
         (directory.path().join("missing.wav"), "io_error"),
         (bad, "decode_failed"),
         (empty, "decode_failed"),
         (surround, "unsupported_format"),
-        (float, "unsupported_format"),
+        (float, "decode_failed"),
         (truncated, "decode_failed"),
     ] {
         let mut session = Session::default();
@@ -279,5 +279,196 @@ fn inaccessible_audio_is_an_observable_failed_job() {
     let mut session = Session::default();
     let job = open(&mut session, &path);
     assert_eq!(job["error"]["code"], "io_error");
+    assert!(session.snapshot().documents.is_empty());
+}
+
+#[test]
+fn all_supported_wav_encodings_preserve_levels_and_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    for channels in [1, 2] {
+        for (kind, bits) in [
+            (hound::SampleFormat::Int, 16),
+            (hound::SampleFormat::Int, 24),
+            (hound::SampleFormat::Int, 32),
+            (hound::SampleFormat::Float, 32),
+        ] {
+            let path = directory
+                .path()
+                .join(format!("{channels}-{kind:?}-{bits}.wav"));
+            let mut writer = hound::WavWriter::create(
+                &path,
+                hound::WavSpec {
+                    channels,
+                    sample_rate: 44100,
+                    bits_per_sample: bits,
+                    sample_format: kind,
+                },
+            )
+            .unwrap();
+            for value in [-1.0_f64, -0.5, 0.0, 0.5] {
+                for _ in 0..channels {
+                    if kind == hound::SampleFormat::Float {
+                        writer.write_sample(value as f32).unwrap();
+                    } else {
+                        writer
+                            .write_sample((value * 2.0_f64.powi(bits as i32 - 1)) as i32)
+                            .unwrap();
+                    }
+                }
+            }
+            writer.finalize().unwrap();
+            let mut session = Session::default();
+            let job = open(&mut session, &path);
+            assert_eq!(job["status"], "succeeded", "{job}");
+            assert_eq!(job["result"]["frames"], 4);
+            let encoding = format!(
+                "wav_{}{bits}",
+                if kind == hound::SampleFormat::Int {
+                    "pcm"
+                } else {
+                    "float"
+                }
+            );
+            assert_eq!(job["result"]["encoding"], encoding);
+            let samples = success(send(
+                &mut session,
+                "documents.samples",
+                json!({"document_id":job["result"]["id"],"frames":4}),
+            ));
+            for channel in samples["channels"].as_array().unwrap() {
+                assert_eq!(*channel, json!([-1.0, -0.5, 0.0, 0.5]));
+            }
+        }
+    }
+}
+
+#[test]
+fn mp3_cbr_vbr_and_metadata_free_streams_match_independent_ffmpeg_pcm() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audio");
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(root.join("manifest.json")).unwrap()).unwrap();
+    for fixture in manifest["fixtures"].as_array().unwrap() {
+        let name = fixture["name"].as_str().unwrap();
+        let mut session = Session::default();
+        let job = open(&mut session, &root.join(format!("{name}.mp3")));
+        assert_eq!(job["status"], "succeeded", "{name}: {job}");
+        let doc = &job["result"];
+        for field in ["channels", "sample_rate"] {
+            assert_eq!(doc[field], fixture[field], "{name}");
+        }
+        assert_eq!(doc["frames"], fixture["decoded_frames"], "{name}");
+        assert_eq!(doc["encoding"], "mp3");
+        assert_eq!(doc["source_details"]["bitrate_mode"], fixture["mode"]);
+        assert_eq!(
+            !doc["source_details"]["encoder_delay"].is_null(),
+            fixture["tags"].as_bool().unwrap()
+        );
+        let frames = doc["frames"].as_u64().unwrap();
+        let channels = doc["channels"].as_u64().unwrap() as usize;
+        let expected = std::fs::read(root.join(format!("{name}.f32"))).unwrap();
+        let expected: Vec<f64> = expected
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| f32::from_le_bytes(*chunk) as f64)
+            .collect();
+        let mut square = 0.0;
+        let mut max = 0.0_f64;
+        for start in (0..frames).step_by(4096) {
+            let count = 4096.min(frames - start);
+            let read = success(send(
+                &mut session,
+                "documents.samples",
+                json!({"document_id":doc["id"],"start_frame":start,"frames":count}),
+            ));
+            for channel in 0..channels {
+                for frame in 0..count as usize {
+                    let difference = read["channels"][channel][frame].as_f64().unwrap()
+                        - expected[(start as usize + frame) * channels + channel];
+                    square += difference * difference;
+                    max = max.max(difference.abs());
+                }
+            }
+        }
+        let rmse = (square / expected.len() as f64).sqrt();
+        eprintln!("{name}: independent decode max={max}, RMSE={rmse}");
+        assert!(
+            max < 0.002 && rmse < 0.0001,
+            "{name}: independent decode max={max}, RMSE={rmse}"
+        );
+    }
+}
+
+#[test]
+fn malformed_and_truncated_mp3s_never_publish_partial_audio() {
+    let original = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/cbr-1ch-44100-tagged.mp3"),
+    )
+    .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    for (name, bytes) in [
+        ("bad.mp3", b"not audio".to_vec()),
+        ("truncated.mp3", original[..original.len() - 1].to_vec()),
+        ("short.mp3", original[..original.len() / 2].to_vec()),
+    ] {
+        let path = directory.path().join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let mut session = Session::default();
+        let job = open(&mut session, &path);
+        assert_eq!(job["status"], "failed", "{job}");
+        assert_eq!(job["error"]["code"], "decode_failed");
+        assert!(session.snapshot().documents.is_empty());
+    }
+}
+
+#[test]
+fn close_releases_document_identity_and_reopening_cannot_reuse_stale_peaks() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("changing.wav");
+    fixture(&path, 1, &[0, 16384, 0]);
+    let mut session = Session::default();
+    let first = open(&mut session, &path)["result"].clone();
+    success(send(
+        &mut session,
+        "documents.close",
+        json!({"document_id":first["id"]}),
+    ));
+    assert!(session.snapshot().documents.is_empty());
+    assert_eq!(
+        send(
+            &mut session,
+            "documents.waveform",
+            json!({"document_id":first["id"]})
+        )["error"]["code"],
+        "not_found"
+    );
+    fixture(&path, 1, &[-16384, 0]);
+    let second = open(&mut session, &path)["result"].clone();
+    assert_ne!(first["id"], second["id"]);
+    assert_ne!(first["revision_id"], second["revision_id"]);
+    let wave = success(send(
+        &mut session,
+        "documents.waveform",
+        json!({"document_id":second["id"],"bins":1}),
+    ));
+    assert_eq!(wave["channels"][0][0]["min"], -0.5);
+    assert_eq!(wave["channels"][0][0]["max"], 0.0);
+}
+
+#[test]
+fn oversized_declared_audio_fails_before_allocating_or_publishing_a_document() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("too-large.wav");
+    fixture(&path, 1, &[0]);
+    let mut bytes = std::fs::read(&path).unwrap();
+    let data = 600 * 1024 * 1024_u32;
+    bytes[4..8].copy_from_slice(&(data + 36).to_le_bytes());
+    bytes[40..44].copy_from_slice(&data.to_le_bytes());
+    std::fs::write(&path, bytes).unwrap();
+    let mut session = Session::default();
+    let job = open(&mut session, &path);
+    assert_eq!(job["status"], "failed", "{job}");
+    assert_eq!(job["error"]["code"], "resource_limit");
     assert!(session.snapshot().documents.is_empty());
 }

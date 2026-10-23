@@ -373,4 +373,8 @@ fn open_action_real_channels_document_switching_and_failed_jobs_use_shared_state
     }
     assert_eq!(h.app.host.snapshot().documents.len(), 2);
     assert_eq!(h.app.active_document().unwrap().name, "Stereo.wav");
+    let close = h.text_rect("×").center();
+    h.click(close);
+    assert_eq!(h.app.host.snapshot().documents.len(), 1);
+    assert_eq!(h.app.active_document().unwrap().name, "Mono.wav");
 }

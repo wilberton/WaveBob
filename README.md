@@ -1,10 +1,10 @@
 # WaveBob
 
 A native Rust + egui audio editor for Windows, macOS and Linux.
-The first five implementation milestones provide shared session commands, a
+The first six implementation milestones provide shared session commands, a
 GUI-free JSON runner, attachment to named GUI instances, revision-fenced PNG
 screenshots, stdio MCP support, persistent panel layout and status-bar help.
-WAV files open as background jobs and display real mono/stereo waveforms.
+WAV and MP3 files open as background jobs and display real mono/stereo waveforms.
 Destructive audio editing and playback are not implemented yet.
 
 ## Run
@@ -65,18 +65,18 @@ waveform and arrangement captures at wide, compact, narrow and 150% scale.
 - Newline-delimited JSON runner with structured responses and recoverable errors.
 - Explicit GUI instance discovery/attachment, mode commands and actual PNG captures.
 - Stdio MCP tools generated from the command registry, including PNG image delivery.
-- Background 16-bit PCM WAV import, exact sample queries and cached waveform peaks.
+- Background PCM/float WAV and CBR/VBR MP3 import, exact sample queries and cached waveform peaks.
 - Native Open action, multiple documents and real overview/channel waveforms.
 - Clearly labeled synthetic arrangement preview until track editing lands.
 - Resizable/collapsible panels, a remembered library/browser split and bottom status help.
 - Library, browser, effects and transport placeholders with truthful empty-state readouts.
-- No playback, destructive editing, MP3, export or project persistence yet.
+- No playback, destructive editing, export or project persistence yet.
 - The generated design sheet is a visual proposal, not a screenshot of the shell.
 
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
-current execution status. Tickets 01–05 are complete; derive subsequent
+current execution status. Tickets 01–06 and 22 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 

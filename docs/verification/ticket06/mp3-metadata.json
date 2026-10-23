@@ -1,0 +1,58 @@
+{
+  "capture": {
+    "id": "3",
+    "protocol_version": 1,
+    "result": {
+      "metadata": {
+        "frame_number": 5,
+        "height": 900,
+        "mode": "waveform",
+        "pending_resources": [],
+        "presentation_revision": 0,
+        "rendered_revision": 1,
+        "scale": 1.0,
+        "session_id": "4df18687-1b70-4960-8cac-6dc49bdd0b65",
+        "width": 1440
+      },
+      "mime_type": "image/png",
+      "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmp81UMJ2\\mp3.png"
+    },
+    "revision": 1,
+    "session_id": "4df18687-1b70-4960-8cac-6dc49bdd0b65",
+    "status": "ok"
+  },
+  "job": {
+    "id": "2",
+    "protocol_version": 1,
+    "result": {
+      "error": null,
+      "id": "ab61b739-e422-4975-9c32-0c456981f779",
+      "kind": "import",
+      "path": "C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests/fixtures/audio/vbr-2ch-44100-tagged.mp3",
+      "progress": 100,
+      "result": {
+        "channels": 2,
+        "cursor": 0,
+        "dirty": false,
+        "encoding": "mp3",
+        "frames": 8192,
+        "id": "41fd3fbe-7c22-4ce7-add5-623340c3dc4c",
+        "name": "vbr-2ch-44100-tagged.mp3",
+        "path": "C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests/fixtures/audio/vbr-2ch-44100-tagged.mp3",
+        "revision_id": "f7267c38-df7a-49a1-a8bb-0f36efed0db6",
+        "sample_rate": 44100,
+        "selection": null,
+        "source_details": {
+          "bitrate_kbps": null,
+          "bitrate_mode": "vbr",
+          "encoder_delay": 1105,
+          "encoder_padding": 1071
+        }
+      },
+      "status": "succeeded"
+    },
+    "revision": 1,
+    "session_id": "4df18687-1b70-4960-8cac-6dc49bdd0b65",
+    "status": "ok"
+  }
+}

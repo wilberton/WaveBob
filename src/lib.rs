@@ -106,6 +106,7 @@ pub enum ErrorCode {
     ResourceLimit,
     Cancelled,
     Busy,
+    DirtyDocument,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
