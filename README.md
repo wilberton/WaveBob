@@ -1,10 +1,10 @@
 # WaveBob
 
 A native Rust + egui audio editor for Windows, macOS and Linux.
-The first two implementation milestones provide shared session commands, a
+The first three implementation milestones provide shared session commands, a
 GUI-free JSON runner, attachment to named GUI instances, revision-fenced PNG
-screenshots and a demo-data egui shell. Audio editing and playback are not
-implemented yet.
+screenshots, stdio MCP support and a demo-data egui shell. Audio editing and
+playback are not implemented yet.
 
 ## Run
 
@@ -16,6 +16,7 @@ cargo run --locked
 
 ```sh
 cargo run --locked --no-default-features --bin wavebob-headless
+cargo run --locked --no-default-features --bin wavebob-mcp
 cargo fmt --all --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
@@ -48,6 +49,9 @@ See [the command protocol](docs/commands.md) for discovery, request examples,
 revision/error semantics and GUI-free build instructions. The
 [ticket 02 verification record](docs/verification/ticket02/README.md) includes
 captures from the running release app.
+See [MCP setup and tools](docs/mcp.md) to configure an AI client and retrieve
+screenshots as image content. The [MCP verification record](docs/verification/ticket03/README.md)
+includes images retrieved from the release app.
 
 ## This milestone
 
@@ -55,6 +59,7 @@ captures from the running release app.
 - Typed session commands, snapshots, schema discovery and revision checks.
 - Newline-delimited JSON runner with structured responses and recoverable errors.
 - Explicit GUI instance discovery/attachment, mode commands and actual PNG captures.
+- Stdio MCP tools generated from the command registry, including PNG image delivery.
 - Synthetic waveform drawings and static multitrack lanes.
 - Library, browser, effects and transport layout placeholders.
 - No real file access, audio decoding, playback, editing, export or persistence.
@@ -63,7 +68,7 @@ captures from the running release app.
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
-current execution status. Tickets 01 and 02 are complete; derive subsequent
+current execution status. Tickets 01–03 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 

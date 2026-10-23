@@ -1,9 +1,10 @@
 # Shared commands and headless execution
 
-Tickets 01 and 02 implement shared session commands, GUI attachment, presentation
-commands and actual framebuffer PNG capture. Playback, file editing and MCP arrive
-in later tickets. The GUI and headless runner share command definitions and core
-behavior. Snapshots are owned read models; views cannot change core state directly.
+Tickets 01–03 implement shared session commands, GUI attachment, presentation
+commands, actual framebuffer PNG capture and a [stdio MCP adapter](mcp.md).
+Playback and file editing arrive in later tickets. All adapters share command
+definitions and core behavior. Snapshots are owned read models; views cannot
+change core state directly.
 
 ## Run
 
@@ -44,7 +45,7 @@ cargo run --locked --no-default-features --bin wavebob-headless -- --attach SESS
 Send the normal JSON requests on stdin after attachment. These operate on the
 selected window's session, including its real loop state and active mode. The
 client verifies session identity on every response; no instance is silently chosen.
-MCP transport is a later ticket; attachment already works without it.
+The MCP adapter uses the same explicit attachment mechanism.
 
 The registry defaults to the current user's runtime/cache directory. For isolated
 workspaces/tests, pass `--runtime-dir DIRECTORY` to both executables or set
@@ -156,7 +157,8 @@ creates a unique PNG under the selected runtime directory's `captures` folder.
 Relative paths resolve against the GUI process's working directory.
 
 IPC frames are limited to 2 MiB. PNG bytes are stored in the reported artifact,
-not embedded in JSON; MCP image delivery will be implemented in its own ticket.
+not embedded in command JSON. The MCP adapter additionally delivers the artifact's
+PNG bytes as image content with the same response metadata.
 
 ## Responses and state
 
