@@ -5,7 +5,7 @@ switches mode through commands and captures the resulting client area as PNG.
 
 **Blocked by:** 01 — Command-driven session and headless runner.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Local instance discovery and explicit attachment target one named session;
   attached commands affect the visible session rather than a second core.

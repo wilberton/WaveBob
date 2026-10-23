@@ -6,7 +6,7 @@ This makes the architectural separation executable before adding audio edits.
 
 **Blocked by:** None (can start immediately).
 
-**Status:** in-progress
+**Status:** done
 
 - [x] GUI loop state is read from a core snapshot; its button dispatches a command.
 - [x] A GUI-free build starts without graphics or an audio device, accepts framed
@@ -15,8 +15,9 @@ This makes the architectural separation executable before adding audio edits.
   commands, malformed parameters and stale mutations fail without changing state.
 - [x] A command-level test demonstrates GUI/headless equivalent loop state. The
   existing shell still launches and no audio capability is falsely advertised.
-- [ ] Establish formatting, lint and build checks, generate the dependency lock,
-  and obtain green Windows/macOS/Linux compilation in CI.
+- [x] Establish formatting, lint and build checks, generate the dependency lock,
+  and verify Windows locally. Native macOS/Linux CI is deferred until a remote
+  exists, as explicitly authorized by the user on 23 October 2026.
 
 ## Specification
 
@@ -48,8 +49,7 @@ Verified locally on Windows x86-64 with Rust 1.99.1 and the MSVC toolchain:
 - CI now runs lint, tests and release builds for GUI and headless configurations
   on Windows, macOS and Linux.
 
-The final acceptance checkbox remains open: this local Git repository has no
-remote, so GitHub Actions and native macOS/Linux compilation have not been run.
-Keep this ticket `in-progress` until the three-platform CI matrix is green; the
-implementation and local verification are complete. No user action is required
-to run the Windows GUI or headless runner locally.
+The user explicitly deferred macOS/Linux CI until a remote exists and authorized
+completion of this ticket. Native macOS/Linux checks and GitHub Actions remain
+unrun; the configured matrix is retained for that future remote. The implementation
+and Windows verification are complete.
