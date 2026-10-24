@@ -2,7 +2,7 @@
   "repository": "https://github.com/ItsAlphaNeon/Lemon-Studio",
   "commit": "0af860dfd31c7ee9cbf8af6747617e031a1a7742",
   "retrieved_on": "2026-10-24",
-  "purpose": "Pinned algorithm, parameter and UI source verification; no reference renders generated yet",
+  "purpose": "Pinned algorithm, parameter and UI source verification; per-effect render manifests record measured cases",
   "sha256": {
     "crates/os-engine/src/effects/balance.rs": "65d2845cc03100aeecb29ee25f59547430ed33fd2e88b2986049010eb4386b42",
     "crates/os-engine/src/effects/chorus.rs": "c1058f431e3c963ffd9ca8821b56b11a931a020b955723b9d7d910c39f0c9fd5",
@@ -70,6 +70,15 @@
     "plugins/lemon-soft-clipper/src/lib.rs": "740498f136d34f3f9ebc9045ea038049db71a373dc6b9775848b0ae0eff15f8f",
     "plugins/lemon-stereo-enhancer/src/lib.rs": "b1f8142c8c7c8e31f840ad57e2ec5bbd7c01e07a1769ad30af364c14e72eb0db",
     "plugins/lemon-stereo-shaper/src/lib.rs": "987a42f940c8d7ab660bb0273a9f0943dc9fb2ede031a4fcd6a50188f4082e0c",
-    "plugins/lemon-transient-processor/src/lib.rs": "717cfdcefbd9cd179709af264c147c41acf00e263a34d1ee27e142233c7a4df5"
+    "plugins/lemon-transient-processor/src/lib.rs": "717cfdcefbd9cd179709af264c147c41acf00e263a34d1ee27e142233c7a4df5",
+    "crates/os-dsp/src/articulator.rs": "80668f0041a472d430e3a627616b41766439cdd90880aeec56ca6c4cb057ceca",
+    "crates/os-dsp/src/channel_filter.rs": "f68c3aa96ede6bad428ee4df3b399abe26054df8e76077d8edfe00774c0a2d7a",
+    "crates/os-dsp/src/glide.rs": "e1ab4d3726104556191fa432f71314ca5d4454ea8b79dc9cf3491c454f8e0c1d",
+    "crates/os-dsp/src/level.rs": "c10763371e0fef1f95886610563d08938cf73257b1fee7f46ad9241002ede9ba",
+    "crates/os-dsp/src/lib.rs": "961caa00b271441c3938c64f9002159c94a963a2774f0d0a443f31f82042fc63",
+    "crates/os-dsp/src/mixer.rs": "41de996c74f5b8429ce9e32f457c72689cb114205b8e49308dad664cbc306b6f",
+    "crates/os-dsp/src/resample.rs": "3c46c493c55a5fd3d65ab5acb615b0b31bbcef199e3c5c40640c328fdf48619b",
+    "crates/os-dsp/src/stretch.rs": "42a9e5ef24aa26951a40c0d7f5f2a80b0e064865f8980b67ade4e281cb02e391",
+    "crates/os-dsp/src/tone.rs": "d367884ff9fd6d8ec66375a94af8a7a5d6f0ff7d811e782ed83e81a7ebaa2f97"
   }
 }

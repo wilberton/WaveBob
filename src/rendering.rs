@@ -258,7 +258,15 @@ impl Chain {
                 "Effect tempo must be 20..400 BPM",
             ));
         }
-        let mut chain = Self::with_processors(state, rate, channels, Vec::new())?;
+        let processors = state
+            .effects
+            .iter()
+            .map(|instance| {
+                crate::dsp::prepare(instance, rate, tempo)
+                    .map(|processor| (processor, instance.bypassed))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut chain = Self::with_processors(state, rate, channels, processors)?;
         chain.tempo = tempo;
         Ok(chain)
     }

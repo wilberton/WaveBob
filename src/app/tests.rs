@@ -1292,7 +1292,7 @@ fn reverse_and_shared_history_remain_edit_actions_with_the_current_selection() {
     assert_eq!(h.app.host.history().undo_count, 1);
     let edit = h.text_rect("Edit").center();
     h.click(edit);
-    let undo = h.text_rect("Undo").center();
+    let undo = h.text_rect("Undo    Ctrl/Cmd+Z").center();
     h.click(undo);
     assert_eq!(
         h.app.active_document().unwrap().revision_id,

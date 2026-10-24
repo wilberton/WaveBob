@@ -29,7 +29,7 @@ outside audio history/projects. Sizes use logical points and clamp to the curren
 monitor; invalid/oversized geometry is rejected. Positions are clamped when
 restored, and a backend without window coordinates still retains the size.
 Minimized/occluded editors skip controls and visualization work except when a
-capture explicitly requests paint. No FFT or renderer work enters the callback.
+capture explicitly requests paint. No FFT or visualization work enters the callback.
 
 `transport.get.analyzer` contains at most 128 recent actual stereo output frames.
 A preallocated ring and atomic snapshot transfer keep callback allocations, frees,
@@ -38,7 +38,7 @@ native display explicitly labels this shared monitor as Transport output; it doe
 not claim to measure an inactive instance. Per-effect analyzer presentations use
 the shared bounded display/input surface as their implementation is introduced.
 
-`gui.capture` and `gui.render_barrier` accept optional `editor_id`; omission selects
+`capture.png` and `presentation.barrier` accept optional `editor_id`; omission selects
 the main viewport. Readback is requested on the selected viewport's egui context.
 Metadata includes editor/owner/instance IDs, committed processing revision, effective
 processing identity, preview ID, session/presentation revisions and pending
@@ -47,3 +47,11 @@ Captures freeze mutations through framebuffer readback and publish PNGs atomical
 A closed target fails explicitly. A main capture never substitutes for a native
 editor capture. Actual production-editor screenshots and visual inspection begin
 with Soft Clipper (ticket 30); multiwindow/platform review is ticket 44.
+
+Native windows use eframe's deferred viewport renderer and share the serialized UI
+model through a GUI-only mutex. The bundled eframe immediate-window path paints
+but does not complete screenshot actions; the first production-effect regression
+exposed this. Deferred rendering delivers the actual child framebuffer readback.
+Capture input locking retains normal control opacity, so capture requests do not
+visually dim the editor. The real native regression covers open, changed controls,
+window reuse, close and refusal to capture a closed target.

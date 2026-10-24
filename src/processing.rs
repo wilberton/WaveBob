@@ -143,10 +143,13 @@ pub struct EffectInfo {
 pub fn catalogue() -> Vec<EffectInfo> {
     EffectKind::ALL
         .into_iter()
-        .map(|kind| EffectInfo {
-            kind,
-            available: false,
-            parameters: Vec::new(),
+        .map(|kind| match kind {
+            EffectKind::SoftClipper => crate::dsp::soft_clipper::info(),
+            _ => EffectInfo {
+                kind,
+                available: false,
+                parameters: Vec::new(),
+            },
         })
         .collect()
 }

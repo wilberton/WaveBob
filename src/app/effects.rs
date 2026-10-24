@@ -3,9 +3,10 @@ use wavebob::processing::{self, Action, Owner, ParameterValue};
 #[derive(Default)]
 pub(super) struct NativeEditor {
     focus: u64,
+    close_requested: bool,
     preview: Option<String>,
     control: Option<String>,
-    help: Option<String>,
+    pub(super) help: Option<String>,
 }
 impl WaveBob {
     pub(super) fn selected_clip(&self) -> Option<wavebob::arrangement::Clip> {
@@ -164,7 +165,6 @@ impl WaveBob {
             else {
                 continue;
             };
-            let mut native = self.native_editors.remove(&window.id).unwrap_or_default();
             let geometry = presentation
                 .layout
                 .editor_geometry
@@ -194,97 +194,152 @@ impl WaveBob {
                     y.clamp(0.0, (monitor.y - geometry.height).max(0.0)),
                 ]);
             }
-            ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of(&window.id),
+            let shared = self.shared_self.clone();
+            let id = window.id.clone();
+            ctx.show_viewport_deferred(
+                egui::ViewportId::from_hash_of(&id),
                 builder,
-                |ctx, class| {
+                move |ui, class| {
                     if class == egui::ViewportClass::EmbeddedWindow {
-                        self.error =
-                            Some("This GUI backend cannot create native effect windows.".into());
+                        ui.label("Native effect windows require a desktop renderer.");
                         return;
                     }
-                    if native.focus != window.focus_generation {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                        native.focus = window.focus_generation;
+                    if let Some(shared) = shared.upgrade() {
+                        shared.lock().unwrap().native_effect_frame(ui, &id);
                     }
-                    if ctx.input(|i| i.viewport().close_requested()) {
-                        self.dispatch(Command::CloseEffectEditor(EditorParams {
-                            owner: window.owner.clone(),
-                            instance_id: window.instance_id.clone(),
-                            expected_presentation_revision: None,
-                        }));
-                        return;
-                    }
-                    self.shortcuts(ctx);
-                    let capture = self.host.editor_capture_requested(&window.id);
-                    if ctx.input(|i| i.viewport().visible() == Some(false)) && !capture {
-                        return;
-                    }
-                    if !self.host.frozen() {
-                        let size = ctx.viewport_rect().size();
-                        let position =
-                            ctx.input(|input| input.viewport().inner_rect.map(|rect| rect.min));
-                        let next = WindowGeometry {
-                            width: size.x.clamp(320.0, 4096.0),
-                            height: size.y.clamp(240.0, 2160.0),
-                            x: position.map(|point| point.x),
-                            y: position.map(|point| point.y),
-                        };
-                        if next != geometry {
-                            self.dispatch(Command::SetEditorGeometry(EditorGeometryParams {
-                                editor_id: window.id.clone(),
-                                geometry: next,
-                                expected_presentation_revision: None,
-                            }));
-                        }
-                    }
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        if self.host.frozen() {
-                            ui.disable();
-                        }
-                        ui.heading(instance.kind.label());
-                        ui.label(RichText::new(self.host.owner_name(&window.owner)).color(MUTED));
-                        ui.separator();
-                        native.help = None;
-                        self.native_parameters(ui, &window, &instance, &mut native);
-                        let transport = self.host.transport();
-                        ui.label(
-                            RichText::new(format!(
-                                "Transport output · {:.1} dBFS",
-                                if transport.peak_level > 0.0 {
-                                    20.0 * transport.peak_level.log10()
-                                } else {
-                                    -120.0
-                                }
-                            ))
-                            .small()
-                            .color(MUTED),
-                        );
-                        let values: Vec<_> = transport
-                            .analyzer
-                            .iter()
-                            .take(128)
-                            .map(|sample| (sample[0] * 0.5 + 0.5).clamp(0.0, 1.0))
-                            .collect();
-                        effect_controls::graph(ui, &values, 64.0);
-                        ui.separator();
-                        ui.label(
-                            RichText::new(native.help.as_deref().unwrap_or(
-                                "Changes are heard live · double-click a control to reset",
-                            ))
-                            .small()
-                            .color(MUTED),
-                        );
-                        if let Some(error) = &self.error {
-                            ui.colored_label(Color32::LIGHT_RED, error);
-                        }
-                    });
-                    self.host.end_editor_frame(ctx, &window.id);
                 },
             );
-            self.native_editors.insert(window.id, native);
         }
     }
+    fn native_effect_frame(&mut self, ui: &mut egui::Ui, id: &str) {
+        self.host.begin_frame(ui.ctx());
+        let presentation = self.host.presentation();
+        let Some(window) = presentation
+            .editor_windows
+            .iter()
+            .find(|window| window.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        let Ok(snapshot) = self.host.processing(window.owner.clone()) else {
+            return;
+        };
+        let state = snapshot.preview.as_ref().unwrap_or(&snapshot.committed);
+        let Some(instance) = state
+            .effects
+            .iter()
+            .find(|effect| effect.id == window.instance_id)
+            .cloned()
+        else {
+            return;
+        };
+        let geometry = presentation
+            .layout
+            .editor_geometry
+            .get(id)
+            .cloned()
+            .unwrap_or_default();
+        let mut native = self.native_editors.remove(id).unwrap_or_default();
+        if native.focus != window.focus_generation {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
+            native.focus = window.focus_generation;
+        }
+        native.close_requested |= ui.input(|input| input.viewport().close_requested());
+        if native.close_requested {
+            if self.host.frozen() {
+                self.native_editors.insert(window.id, native);
+                ui.ctx().request_repaint();
+                return;
+            }
+            self.dispatch(Command::CloseEffectEditor(EditorParams {
+                owner: window.owner.clone(),
+                instance_id: window.instance_id.clone(),
+                expected_presentation_revision: None,
+            }));
+            ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
+            return;
+        }
+        self.shortcuts(ui.ctx());
+        let capture = self.host.editor_capture_requested(&window.id);
+
+        if ui.input(|i| i.viewport().visible() == Some(false)) && !capture {
+            self.native_editors.insert(window.id, native);
+            return;
+        }
+        if !self.host.frozen() {
+            let size = ui.ctx().viewport_rect().size();
+            let position = ui.input(|input| input.viewport().inner_rect.map(|rect| rect.min));
+            let next = WindowGeometry {
+                width: size.x.clamp(320.0, 4096.0),
+                height: size.y.clamp(240.0, 2160.0),
+                x: position.map(|point| point.x),
+                y: position.map(|point| point.y),
+            };
+            if next != geometry {
+                self.dispatch(Command::SetEditorGeometry(EditorGeometryParams {
+                    editor_id: window.id.clone(),
+                    geometry: next,
+                    expected_presentation_revision: None,
+                }));
+            }
+        }
+        egui::CentralPanel::default().show(ui, |ui| {
+            if self.host.frozen() {
+                ui.visuals_mut().disabled_alpha = 1.0;
+                ui.disable();
+            }
+            ui.heading(instance.kind.label());
+            ui.label(RichText::new(self.host.owner_name(&window.owner)).color(MUTED));
+            ui.separator();
+            native.help = None;
+            self.native_parameters(ui, &window, &instance, &mut native);
+            let transport = self.host.transport();
+            ui.label(
+                RichText::new(format!(
+                    "Transport output · {:.1} dBFS",
+                    if transport.peak_level > 0.0 {
+                        20.0 * transport.peak_level.log10()
+                    } else {
+                        -120.0
+                    }
+                ))
+                .small()
+                .color(MUTED),
+            );
+            let values: Vec<_> = transport
+                .analyzer
+                .iter()
+                .take(128)
+                .map(|sample| (sample[0] * 0.5 + 0.5).clamp(0.0, 1.0))
+                .collect();
+            effect_controls::graph(ui, &values, 64.0);
+            ui.separator();
+            ui.label(
+                RichText::new(
+                    native
+                        .help
+                        .as_deref()
+                        .unwrap_or("Changes are heard live · double-click a control to reset"),
+                )
+                .small()
+                .color(MUTED),
+            );
+            if let Some(error) = &self.error {
+                ui.colored_label(Color32::LIGHT_RED, error);
+            }
+        });
+        self.host.end_editor_frame(ui.ctx(), &window.id);
+        self.native_editors.insert(window.id, native);
+        if ui.input(|input| !input.events.is_empty()) || self.host.frozen() {
+            ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
+        }
+        if self.host.transport().applied.playing || self.host.transport().processing.pending {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(16));
+        }
+    }
+
     fn native_parameters(
         &mut self,
         ui: &mut egui::Ui,
@@ -298,6 +353,10 @@ impl WaveBob {
             self.dispatch(Command::CancelProcessingPreview(
                 processing::PreviewParams { preview_id: id },
             ));
+            return;
+        }
+        if instance.kind == processing::EffectKind::SoftClipper {
+            self.soft_clipper_controls(ui, window, instance, native);
             return;
         }
         let Some(info) = processing::catalogue()
@@ -434,7 +493,7 @@ impl WaveBob {
             }
         });
     }
-    fn edit_native_control(
+    pub(super) fn edit_native_control(
         &mut self,
         window: &EditorWindow,
         instance_id: &str,

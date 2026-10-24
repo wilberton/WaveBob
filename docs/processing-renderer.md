@@ -52,8 +52,8 @@ Processors must bound retained-state activity, including silence inside a delay;
 output amplitude alone cannot establish that a predelay has drained. Nonfinite
 output/state becomes a visible render error and silence, never device NaNs.
 
-All eleven production processors remain unavailable until their algorithm/editor
-tickets register a verified constructor and parameter metadata. Test-only delay,
+Production processors become available only when their algorithm/editor tickets
+register a verified constructor and parameter metadata. Test-only delay,
 feedback and continuous-control probes are never advertised as shipping effects.
 Actual-effect load/input-latency/dropout measurements are required by ticket 44.
 The final linked arrangement refresh and sample/project export integration belong

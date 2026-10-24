@@ -7,6 +7,7 @@ mod commands;
 #[cfg(feature = "gui")]
 pub mod desktop;
 pub mod documents;
+pub mod dsp;
 pub mod edits;
 pub mod effects;
 pub mod exports;

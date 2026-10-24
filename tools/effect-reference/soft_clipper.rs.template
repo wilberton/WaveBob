@@ -1,0 +1,26 @@
+// Copyright (C) 2026 ItsAlphaNeon (included reference DSP)
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Isolated adapters only. The original pinned files are compiled unchanged.
+#![allow(dead_code)]
+extern crate self as os_dsp;
+#[path = "@ROOT@/crates/os-dsp/src/level.rs"]
+pub mod level;
+mod engine {
+    pub trait Effect { fn process(&mut self, buf: &mut [f32]); }
+    pub fn ints<const N: usize>(bytes:&[u8], offset:usize) -> Option<[i32;N]> {
+        let values=bytes.get(offset..offset+N*4)?;
+        Some(std::array::from_fn(|i|i32::from_le_bytes(values[i*4..i*4+4].try_into().unwrap())))
+    }
+    pub fn state_of(values:&[i32]) -> Vec<u8> {values.iter().flat_map(|value|value.to_le_bytes()).collect()}
+    #[path = "@ROOT@/crates/os-engine/src/effects/soft_clipper.rs"]
+    pub mod soft_clipper;
+}
+fn main() {
+    let args:Vec<_>=std::env::args().collect();
+    let threshold=args[3].parse::<i32>().unwrap();
+    let post=args[4].parse::<i32>().unwrap();
+    let clipper=engine::soft_clipper::SoftClipper::with_settings(&engine::soft_clipper::Settings{v:[threshold,post]});
+    let input=std::fs::read(&args[1]).unwrap();
+    let output:Vec<_>=input.chunks_exact(4).flat_map(|bytes|clipper.sample(f32::from_le_bytes(bytes.try_into().unwrap())).to_le_bytes()).collect();
+    std::fs::write(&args[2],output).unwrap();
+}

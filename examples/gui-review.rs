@@ -4,7 +4,7 @@
 mod app;
 use eframe::egui;
 struct Review {
-    app: app::WaveBob,
+    app: app::DesktopApp,
     input: std::path::PathBuf,
     focus_sent: bool,
     drop_sequence: Option<u64>,
@@ -117,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(move |cc| {
             cc.egui_ctx.set_zoom_factor(scale);
             Ok(Box::new(Review {
-                app: app::WaveBob::new(cc, &directory, name, preferences)?,
+                app: app::DesktopApp::new(app::WaveBob::new(cc, &directory, name, preferences)?),
                 input,
                 focus_sent: false,
                 drop_sequence: None,

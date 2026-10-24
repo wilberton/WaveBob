@@ -55,16 +55,6 @@ impl WaveBob {
         }
     }
     pub(super) fn edit_menu(&mut self, ui: &mut egui::Ui, help: &mut Help) {
-        let history = self.host.history();
-        for (label, enabled, command) in [
-            ("Undo", history.can_undo, Command::Undo(EmptyParams {})),
-            ("Redo", history.can_redo, Command::Redo(EmptyParams {})),
-        ] {
-            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-                self.dispatch(command);
-                ui.close();
-            }
-        }
         let reverse = ui.add_enabled(
             self.active_document().is_some() && self.host.presentation().mode == ViewMode::Waveform,
             egui::Button::new("Reverse"),

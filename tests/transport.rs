@@ -821,3 +821,131 @@ fn analyzer_snapshots_are_finite_bounded_actual_stereo_output() {
         assert_eq!(*frame, json!([0.5, -0.25]));
     }
 }
+
+#[test]
+fn soft_clipper_live_parameter_cancel_and_commit_are_callback_safe() {
+    let (mut session, mut output, _directory, id) = fixture(48000, 1, &[16384; 8192]);
+    let original_source = ok(send(
+        &mut session,
+        "documents.get",
+        json!({"document_id":id}),
+    ))["revision_id"]
+        .clone();
+    let owner = json!({"kind":"document","id":id});
+    let processing_state = ok(send(&mut session, "processing.get", json!({"owner":owner})));
+    let added = ok(send(
+        &mut session,
+        "processing.edit",
+        json!({"owner":owner,"expected_edit_revision":processing_state["committed"]["edit_revision_id"],"change":{"action":"add","kind":"soft_clipper"}}),
+    ));
+    let effect = added["committed"]["effects"][0]["id"].clone();
+    let pump = |session: &mut Session, output: &mut ManualOutput| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            ALLOCS.set(0);
+            FREES.set(0);
+            CHECK.set(true);
+            output.render_into(&mut []);
+            CHECK.set(false);
+            assert_eq!((ALLOCS.get(), FREES.get()), (0, 0));
+            let snapshot = state(session);
+            assert!(
+                snapshot["processing"]["preparation_error"].is_null(),
+                "{snapshot}"
+            );
+            if snapshot["processing"]["requested_generation"]
+                == snapshot["processing"]["applied_generation"]
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    };
+    ok(send(
+        &mut session,
+        "transport.loop.set",
+        json!({"enabled":true}),
+    ));
+    ok(send(
+        &mut session,
+        "transport.play",
+        json!({"document_id":id}),
+    ));
+    pump(&mut session, &mut output);
+    output.render_into(&mut [[0.0; 2]; 64]);
+    let committed = ok(send(&mut session, "processing.get", json!({"owner":owner})));
+    let history = ok(send(&mut session, "history.get", json!({})))["undo_count"].clone();
+    let preview = ok(send(
+        &mut session,
+        "processing.preview.begin",
+        json!({"owner":owner,"expected_edit_revision":committed["committed"]["edit_revision_id"]}),
+    ));
+    ok(send(
+        &mut session,
+        "processing.preview.update",
+        json!({"preview_id":preview["preview_id"],"change":{"action":"set_parameter","effect_id":effect,"parameter_id":"post","value":0}}),
+    ));
+    pump(&mut session, &mut output);
+    let mut frames = [[0.0; 2]; 600];
+    ALLOCS.set(0);
+    FREES.set(0);
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    assert_eq!((ALLOCS.get(), FREES.get()), (0, 0));
+    assert_eq!(frames[0], [0.5; 2]);
+    assert_eq!(frames[599], [0.0; 2]);
+    assert!(
+        frames
+            .windows(2)
+            .all(|pair| pair[1][0] <= pair[0][0] && (pair[1][0] - pair[0][0]).abs() < 0.002)
+    );
+    ok(send(
+        &mut session,
+        "processing.preview.cancel",
+        json!({"preview_id":preview["preview_id"]}),
+    ));
+    pump(&mut session, &mut output);
+    output.render_into(&mut frames);
+    assert_eq!(frames[599], [0.5; 2]);
+    assert_eq!(
+        ok(send(&mut session, "history.get", json!({})))["undo_count"],
+        history
+    );
+    let begin = ok(send(
+        &mut session,
+        "processing.preview.begin",
+        json!({"owner":owner,"expected_edit_revision":committed["committed"]["edit_revision_id"]}),
+    ));
+    for value in [64, 32, 0] {
+        ok(send(
+            &mut session,
+            "processing.preview.update",
+            json!({"preview_id":begin["preview_id"],"change":{"action":"set_parameter","effect_id":effect,"parameter_id":"post","value":value}}),
+        ));
+    }
+    ok(send(
+        &mut session,
+        "processing.preview.commit",
+        json!({"preview_id":begin["preview_id"]}),
+    ));
+    assert_eq!(
+        ok(send(&mut session, "history.get", json!({})))["undo_count"]
+            .as_u64()
+            .unwrap(),
+        history.as_u64().unwrap() + 1
+    );
+    ok(send(&mut session, "history.undo", json!({})));
+    assert_eq!(
+        ok(send(&mut session, "processing.get", json!({"owner":owner})))["committed"]["effects"][0]
+            ["parameters"]["post"],
+        128
+    );
+    let source = ok(send(
+        &mut session,
+        "documents.get",
+        json!({"document_id":id}),
+    ));
+    assert_eq!(source["revision_id"], original_source);
+}

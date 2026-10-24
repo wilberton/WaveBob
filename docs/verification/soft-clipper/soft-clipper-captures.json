@@ -1,0 +1,48 @@
+{
+  "default": {
+    "image": "soft-clipper-default.png",
+    "metadata": {
+      "editor_id": "a816bd8fa733eb6fe447f43ce228f0cbb65ec3f5d1d428a597c14ac8f2332801",
+      "frame_number": 7,
+      "height": 460,
+      "instance_id": "3810282a-04ac-4804-a309-6b5d665e2b17",
+      "mode": "waveform",
+      "owner": {
+        "id": "f260c2f2-cc62-423a-ab4e-8f67bbfcd26a",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "preview_id": null,
+      "processing_identity": "8d9144633fa10ab8999eabdd8617476d70d5f2f650ebe7dce211ec1a7fff93f4",
+      "processing_revision": "be9432a5-9070-493f-b812-5db187003555",
+      "rendered_revision": 2,
+      "scale": 1.0,
+      "session_id": "313fad33-8b87-4767-a54b-f253875bd6d7",
+      "width": 720
+    }
+  },
+  "threshold_32": {
+    "image": "soft-clipper-threshold-32.png",
+    "metadata": {
+      "editor_id": "a816bd8fa733eb6fe447f43ce228f0cbb65ec3f5d1d428a597c14ac8f2332801",
+      "frame_number": 25,
+      "height": 460,
+      "instance_id": "3810282a-04ac-4804-a309-6b5d665e2b17",
+      "mode": "waveform",
+      "owner": {
+        "id": "f260c2f2-cc62-423a-ab4e-8f67bbfcd26a",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 8,
+      "preview_id": null,
+      "processing_identity": "8d9c4430ad0c15e4f33fe1935a22a2ebf07da5a8620d568ccdc2add67c9bffb3",
+      "processing_revision": "0a261f86-c40e-4dfc-8bcb-25c9dc9139a9",
+      "rendered_revision": 3,
+      "scale": 1.0,
+      "session_id": "313fad33-8b87-4767-a54b-f253875bd6d7",
+      "width": 720
+    }
+  }
+}

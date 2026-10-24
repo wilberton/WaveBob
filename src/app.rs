@@ -18,6 +18,8 @@ mod effects;
 mod projecting;
 #[path = "app/saving.rs"]
 mod saving;
+#[path = "app/soft_clipper.rs"]
+mod soft_clipper;
 #[path = "app/visuals.rs"]
 mod visuals;
 #[path = "app/waveform.rs"]
@@ -32,6 +34,7 @@ const MUTED: Color32 = Color32::from_rgb(145, 160, 179);
 #[derive(Default)]
 pub struct WaveBob {
     host: DesktopHost,
+    shared_self: std::sync::Weak<std::sync::Mutex<WaveBob>>,
     error: Option<String>,
     waveform: Option<WaveformData>,
     detail: Option<WaveformData>,
@@ -1005,6 +1008,27 @@ impl WaveBob {
                 egui::Label::new(RichText::new(help.text()).size(11.0).color(MUTED)).truncate(),
             );
         }
+    }
+}
+
+/// Native viewports share the same UI model while rendering independently.
+/// This mutex never enters the audio callback.
+pub struct DesktopApp {
+    state: std::sync::Arc<std::sync::Mutex<WaveBob>>,
+}
+impl DesktopApp {
+    pub fn new(app: WaveBob) -> Self {
+        let state = std::sync::Arc::new(std::sync::Mutex::new(app));
+        state.lock().unwrap().shared_self = std::sync::Arc::downgrade(&state);
+        Self { state }
+    }
+}
+impl eframe::App for DesktopApp {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        eframe::App::raw_input_hook(&mut *self.state.lock().unwrap(), ctx, input);
+    }
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        eframe::App::ui(&mut *self.state.lock().unwrap(), ui, frame);
     }
 }
 
