@@ -171,3 +171,16 @@ preserved Windows kit from a fresh Unicode extraction. This complements shared
 automated DPI/gesture/shortcut tests; physical device/listening checks stay
 unverified under the user's accepted automated acceptance. The next native run
 will retain both default- and raised-scale captures.
+
+### Native light-theme contrast regression
+
+The raised-scale macOS capture at source `49112a4` passed functional checks but
+visual inspection found black text/white default widgets on the fixed dark
+background. `cargo test --offline --bin wavebob native_light_system_theme`
+reproduces the exact palette switch using a real egui system-theme event, with
+no stored preferences or second viewport. It fails before the fix and passes
+after explicitly selecting WaveBob's approved dark theme before installing its
+visuals. The test also alternates light/dark/light system events and checks text
+and panel colors. This prevents the one-time custom dark style from being
+replaced by an unstyled light theme bank. `.tools/test21-theme-{red,green}.log`
+retain the local red/green result. Native recapture will verify the final result.

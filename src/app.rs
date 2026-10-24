@@ -1149,6 +1149,9 @@ fn child(ui: &mut egui::Ui, rect: Rect) -> egui::Ui {
 }
 
 fn theme(ctx: &egui::Context) {
+    // The approved palette is dark. Native system-theme events must not switch
+    // to an unstyled light bank after this one-time setup.
+    ctx.set_theme(egui::ThemePreference::Dark);
     ctx.options_mut(|options| {
         options.input_options.zoom_modifier = egui::Modifiers {
             ctrl: true,

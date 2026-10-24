@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn native_light_system_theme_does_not_override_the_approved_dark_editor_palette() {
+    let ctx = egui::Context::default();
+    theme(&ctx);
+    for system_theme in [egui::Theme::Light, egui::Theme::Dark, egui::Theme::Light] {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                system_theme: Some(system_theme),
+                ..Default::default()
+            },
+            |ui| {
+                assert!(
+                    ui.visuals().dark_mode,
+                    "A native system-theme event replaced WaveBob's palette"
+                );
+                assert_eq!(
+                    ui.visuals().override_text_color,
+                    Some(Color32::from_rgb(209, 220, 235))
+                );
+                assert_eq!(ui.visuals().panel_fill, SURFACE);
+            },
+        );
+        output.textures_delta.clear();
+    }
+}
+
+#[test]
 fn synced_reverb_exposes_shared_project_bpm_and_commits_exact_entry_once() {
     use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
     let (mut h, _directory) = audio_harness();
