@@ -5,17 +5,23 @@ mixed-rate source clips, timeline looping and visible output levels.
 
 **Blocked by:** 06 — WAV and MP3 import with scalable waveform jobs; 08 — Waveform playback, seeking and loop transport; 11 — Cut, copy, paste, delete and trim samples; 14 — Arrange document clips on editable tracks.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] GUI track controls and commands implement the specified mute-over-solo rules,
+- [x] GUI track controls and commands implement the specified mute-over-solo rules,
   dB gain, mono pan/stereo balance, and queryable effective track state.
-- [ ] Reuse the shared resampling capability for sources at different rates;
+- [x] Reuse the shared resampling capability for sources at different rates;
   timing follows the fixed project clock without rewriting source revisions.
-- [ ] Live playback and an internal offline-render query use one prepared mixer,
+- [x] Live playback and an internal offline-render query use one prepared mixer,
   respecting source ranges, silence gaps and any available clip processing.
-- [ ] Fixtures verify mixing, positions, mute/solo combinations, pan, loop bounds,
+- [x] Fixtures verify mixing, positions, mute/solo combinations, pan, loop bounds,
   master overload indication and audio-block handoff during control changes.
 
 ## Specification
 
 [WaveBob editor specification](../spec.md).
+
+## Verification
+
+107 GUI-enabled and 73 GUI-free tests pass, both Clippy variants and formatting.
+Native MCP mixed-rate playback, offline PCM inspection and framebuffer capture pass.
+See [the verification record](../../../docs/verification/ticket16/README.md).

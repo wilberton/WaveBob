@@ -1,0 +1,142 @@
+use super::*;
+impl Session {
+    pub fn mix_snapshot(&self) -> mixing::MixState {
+        let transport = self.playback.snapshot();
+        let active =
+            transport.requested.document_id.as_ref() == Some(&self.editor.arrangement().id);
+        let mut snapshot = self.editor.mix_state(
+            self.pending_mix_play || (active && transport.requested.playing),
+            if active { transport.peak_level } else { 0.0 },
+        );
+        if let Some((revision, error)) = &self.mix_failure
+            && revision == &snapshot.revision_id
+        {
+            snapshot.preparation_error = Some(error.clone());
+        }
+        snapshot
+    }
+    pub(super) fn play_mix(&mut self, toggle: bool) -> Result<CommandResult, CommandError> {
+        self.playback.ready()?;
+        let arrangement = self.editor.arrangement();
+        let active =
+            self.playback.snapshot().requested.document_id.as_ref() == Some(&arrangement.id);
+        if toggle
+            && (self.pending_mix_play || (active && self.playback.snapshot().requested.playing))
+        {
+            self.pause_output()?;
+            return Ok(CommandResult::Mix(self.mix_snapshot().into()));
+        }
+        if active && self.playback.snapshot().requested.playing {
+            return Ok(CommandResult::Mix(self.mix_snapshot().into()));
+        }
+        if arrangement.frames() == 0 {
+            return Err(CommandError::new(
+                ErrorCode::InvalidParams,
+                "An empty arrangement cannot play",
+            ));
+        }
+        let revision = self.next_revision()?;
+        self.editor.ensure_mix(true)?;
+        self.mix_failure = None;
+        self.browser.stop();
+        self.playback.pause()?;
+        self.pending_mix_play = true;
+        self.last_active_document = self.editor.active();
+        if arrangement.cursor >= self.editor.mix_document(self.snapshot.loop_enabled).frames {
+            let _ = self.editor.execute(
+                Command::NavigateArrangement(arrangement::NavigateParams {
+                    cursor: 0,
+                    selection: arrangement.selection,
+                    selected_clip_ids: arrangement.selected_clip_ids,
+                }),
+                &mut self.snapshot.revision,
+            )?;
+        }
+        self.snapshot.revision = revision;
+        self.synchronize_mix(None);
+        Ok(CommandResult::Mix(self.mix_snapshot().into()))
+    }
+    pub(super) fn seek_mix(&mut self, frame: u64) -> Result<CommandResult, CommandError> {
+        let arrangement = self.editor.arrangement();
+        let before = self.snapshot.revision;
+        let result = self.editor.execute(
+            Command::NavigateArrangement(arrangement::NavigateParams {
+                cursor: frame,
+                selection: arrangement.selection,
+                selected_clip_ids: arrangement.selected_clip_ids,
+            }),
+            &mut self.snapshot.revision,
+        )?;
+        let seek = self.output_seek_needed(&arrangement.id, frame);
+        if seek && self.snapshot.revision == before {
+            self.snapshot.revision = self.next_revision()?;
+        }
+        self.synchronize_mix(Some(&(arrangement.id, frame)));
+        Ok(result)
+    }
+    /// Returns true when arrangement transport owns synchronization this frame.
+    pub(super) fn synchronize_mix(&mut self, seek: Option<&(String, u64)>) -> bool {
+        let arrangement = self.editor.arrangement();
+        let transport = self.playback.snapshot();
+        if !self.pending_mix_play
+            && transport.requested.document_id.as_ref() != Some(&arrangement.id)
+        {
+            return false;
+        }
+        if self
+            .mix_failure
+            .as_ref()
+            .is_some_and(|(revision, _)| revision == &arrangement.revision_id)
+        {
+            return true;
+        }
+        if arrangement.frames() == 0 {
+            self.pending_mix_play = false;
+            let _ = self.playback.clear();
+            return true;
+        }
+        let Some(graph) = self.editor.prepared_mix() else {
+            if let Err(error) = self.editor.ensure_mix(false)
+                && error.code != ErrorCode::Busy
+            {
+                self.mix_failure = Some((arrangement.revision_id, error));
+                self.pending_mix_play = false;
+                let _ = self.playback.pause();
+            }
+            return true;
+        };
+        let document = self.editor.mix_document(self.snapshot.loop_enabled);
+        let explicit = seek
+            .filter(|(id, _)| id == &arrangement.id)
+            .map(|(_, frame)| *frame);
+        if self.pending_mix_play
+            || explicit.is_some()
+            || self
+                .playback
+                .needs_refresh(&document, self.snapshot.loop_enabled)
+        {
+            let position = if self.pending_mix_play {
+                Some(document.cursor)
+            } else {
+                explicit.or_else(|| {
+                    (transport.requested.audio_revision_id.as_ref() != Some(&document.revision_id))
+                        .then_some(transport.applied.frame)
+                })
+            };
+            match self.playback.request_mix(
+                &document,
+                graph,
+                self.snapshot.loop_enabled,
+                self.pending_mix_play || transport.requested.playing,
+                position,
+            ) {
+                Ok(()) => self.pending_mix_play = false,
+                Err(error) => {
+                    self.mix_failure = Some((arrangement.revision_id, error));
+                    self.pending_mix_play = false;
+                }
+            }
+        }
+        true
+    }
+}

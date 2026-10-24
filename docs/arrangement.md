@@ -30,7 +30,7 @@ drags move it in time or between tracks. Release commits once; Escape, stale
 session state or off-track release cancels. Click empty space for a cursor and
 drag it for a time selection. Ctrl/Cmd-click toggles selected clips. Rename tracks
 in their header and right-click the track number to reorder or remove a track.
-Track slider/knob releases commit one change. Audible mixing arrives in ticket 16.
+Track slider/knob releases commit one change. See [mixing and playback](mixing.md).
 
 `clips.trim` takes clip_id, edit_revision_id, source_start and source_end, and
 returns a job. Bounds address the original pinned revision. Moving the left
@@ -43,8 +43,8 @@ job. It uses the same gain/fade/reverse/reverb DSP as waveform edits. Each clip
 retains its ordered processing steps (up to 32) and a prepared immutable result.
 Trimming rebuilds those steps over the new interval; reverb state resets at its
 start and the tail ends at its boundary. The original source revision stays pinned.
-Other clips and open documents remain unchanged. Playback/export use that same
-prepared result when mixing is available.
+Other clips and open documents remain unchanged. Mixer playback and offline
+inspection consume that same prepared result.
 
 Completed clip jobs return `output.kind: clip_edit` and the clip in `details`.
 `clips.samples` inspects up to 4096 processed source-rate frames, relative to the

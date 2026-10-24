@@ -12,6 +12,8 @@ pub mod effects;
 pub mod exports;
 pub mod ipc;
 pub mod mcp;
+mod mix_session;
+pub mod mixing;
 #[cfg(feature = "gui")]
 mod preferences;
 pub mod presentation;
@@ -78,6 +80,8 @@ pub enum CommandResult {
     History(effects::HistoryInfo),
     Clipboard(edits::ClipboardInfo),
     Arrangement(Box<arrangement::Arrangement>),
+    Mix(Box<mixing::MixState>),
+    MixSamples(mixing::MixSamples),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -150,6 +154,8 @@ pub struct Session {
     browser: browser::Browser,
     last_active_document: Option<String>,
     wake: Option<documents::Wake>,
+    pending_mix_play: bool,
+    mix_failure: Option<(String, CommandError)>,
 }
 
 impl Default for Session {
@@ -169,6 +175,8 @@ impl Default for Session {
             browser: browser::Browser::default(),
             last_active_document: None,
             wake: None,
+            pending_mix_play: false,
+            mix_failure: None,
         }
     }
 }
@@ -280,6 +288,11 @@ impl Session {
                 Ok(CommandResult::Transport(self.playback.snapshot().into()))
             }
             Command::PlayDocument(params) => self.play_document(&params.document_id, false),
+            Command::GetMix(_) => Ok(CommandResult::Mix(self.mix_snapshot().into())),
+            Command::PlayMix(_) => self.play_mix(false),
+            Command::ToggleMixPlayback(_) => self.play_mix(true),
+            Command::SeekMix(params) => self.seek_mix(params.frame),
+            Command::RewindMix(_) => self.seek_mix(0),
             Command::TogglePlayback(params) => self.play_document(&params.document_id, true),
             Command::PausePlayback(_) => self
                 .pause_output()
@@ -362,16 +375,22 @@ impl Session {
             command => {
                 let seek = if let Command::SetCursor(params) = &command {
                     Some((params.document_id.clone(), params.frame))
+                } else if let Command::NavigateArrangement(params) = &command {
+                    Some((self.editor.arrangement().id, params.cursor))
                 } else {
                     None
                 };
                 let before = self.snapshot.revision;
+                let prepare_mix = matches!(&command, Command::PrepareMix(_));
                 let stop_preview = matches!(
                     &command,
                     Command::ActivateDocument(_) | Command::CloseDocument(_)
                 );
                 let result = self.editor.execute(command, &mut self.snapshot.revision);
                 if result.is_ok() {
+                    if prepare_mix {
+                        self.mix_failure = None;
+                    }
                     if stop_preview {
                         let _ = self.stop_audition();
                     }
@@ -466,19 +485,28 @@ impl Session {
         };
         self.playback
             .request(&document, audio, self.snapshot.loop_enabled, true, seek)?;
+        self.pending_mix_play = false;
         self.editor.activate_for_transport(id);
         self.last_active_document = Some(id.into());
         self.snapshot.revision = revision;
         Ok(CommandResult::Transport(self.playback.snapshot().into()))
     }
     pub(crate) fn pause_output(&mut self) -> Result<bool, CommandError> {
+        let pending_mix = self.pending_mix_play;
+        if pending_mix {
+            self.next_revision()?;
+        }
+        self.pending_mix_play = false;
         let audition = self.browser.snapshot().audition;
         if audition.id.is_some() {
             self.stop_audition()?;
             return Ok(true);
         }
         if !self.playback.snapshot().requested.playing {
-            return Ok(false);
+            if pending_mix {
+                self.snapshot.revision = self.next_revision()?;
+            }
+            return Ok(pending_mix);
         }
         let revision = self.next_revision()?;
         let changed = self.playback.pause()?;
@@ -491,6 +519,7 @@ impl Session {
         self.playback.ready()?;
         let revision = self.next_revision()?;
         let state = self.browser.start(path)?;
+        self.pending_mix_play = false;
         self.playback.pause()?;
         self.snapshot.revision = revision;
         Ok(CommandResult::Browser(state.into()))
@@ -529,7 +558,11 @@ impl Session {
         let active = self.editor.active();
         if active != self.last_active_document {
             let _ = self.playback.pause();
+            self.pending_mix_play = false;
             self.last_active_document = active;
+        }
+        if self.synchronize_mix(seek.as_ref()) {
+            return;
         }
         if let Some(id) = self.playback.snapshot().requested.document_id {
             if Some(id.as_str()) == self.browser.source_id() {

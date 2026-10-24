@@ -183,7 +183,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 49);
+        assert_eq!(tools.len(), 55);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -264,6 +264,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
                             object.get_mut("arrangement").and_then(Value::as_object_mut)
                         {
                             arrangement.remove("revision_id");
+                            arrangement.remove("id");
                             arrangement.remove("saved_revision_id");
                         }
                     }
@@ -562,6 +563,166 @@ mod live {
             ],
         )
         .await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn native_multitrack_playback_mix_inspection_and_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "mix-check");
+        let client = named_client(runtime.path(), "mix-check").await;
+        let path = runtime.path().join("Quiet ambience.wav");
+        let mut writer = hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: 24000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for frame in 0..120000 {
+            let t = frame as f64 / 24000.0;
+            writer
+                .write_sample(((t * 220.0 * std::f64::consts::TAU).sin() * 1000.0) as i16)
+                .unwrap();
+        }
+        writer.finalize().unwrap();
+        let opened =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let mono = finish_mcp_job(&client, opened).await;
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3");
+        let opened =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let mp3 = finish_mcp_job(&client, opened).await;
+        for (index, doc) in [&mono, &mp3].iter().enumerate() {
+            let arr = response(
+                &call(
+                    &client,
+                    "tracks.add",
+                    json!({"params":{"name":if index==0{"Ambience"}else{"Texture"}}}),
+                )
+                .await,
+            );
+            let track = &arr["result"]["tracks"][index]["id"];
+            assert_eq!(response(&call(&client,"clips.insert",json!({"params":{"track_id":track,"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":0,"source_end":doc["frames"],"position":index as u64*96000}})).await)["status"],"ok");
+            response(&call(&client,"tracks.update",json!({"params":{"track_id":track,"gain_db":-12.0,"pan":if index==0{-0.3}else{0.4}}})).await);
+        }
+        let arr = response(&call(&client, "arrangement.get", json!({})).await)["result"].clone();
+        let prepared = response(
+            &call(
+                &client,
+                "mix.prepare",
+                json!({"params":{"revision_id":arr["revision_id"]}}),
+            )
+            .await,
+        );
+        finish_mcp_output(&client, prepared).await;
+        let offline=response(&call(&client,"mix.samples",json!({"params":{"revision_id":arr["revision_id"],"start_frame":48000,"frames":512}})).await);
+        assert!(offline["result"]["peak_level"].as_f64().unwrap() > 0.001);
+        response(
+            &call(
+                &client,
+                "arrangement.navigate",
+                json!({"params":{"cursor":48000,"selection":{"start":48000,"end":192000}}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "transport.loop.set",
+                json!({"params":{"enabled":true}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "presentation.set_mode",
+                json!({"params":{"mode":"multitrack"}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "presentation.timeline.set",
+                json!({"params":{"start_frame":0,"end_frame":288000}}),
+            )
+            .await,
+        );
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let state = response(&call(&client, "transport.get", json!({})).await);
+            if state["result"]["output"]["status"] == "ready" {
+                break;
+            }
+            assert_ne!(state["result"]["output"]["status"], "failed", "{state}");
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            response(&call(&client, "mix.play", json!({})).await)["status"],
+            "ok"
+        );
+        let playing = loop {
+            let state =
+                response(&call(&client, "transport.get", json!({})).await)["result"].clone();
+            if state["applied"]["playing"] == true && state["peak_level"].as_f64().unwrap() > 0.001
+            {
+                break state;
+            }
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert_eq!(playing["applied"]["document_id"], arr["id"]);
+        assert!((48000..192000).contains(&playing["applied"]["frame"].as_u64().unwrap()));
+        let captured = call(
+            &client,
+            "capture.png",
+            json!({"params":{"path":runtime.path().join("mix.png")}}),
+        )
+        .await;
+        let metadata = response(&captured);
+        assert_eq!(metadata["status"], "ok");
+        let image = captured
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("mix.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                Path::new(&directory).join("mix.json"),
+                serde_json::to_vec_pretty(
+                    &json!({"playing":playing,"offline":offline,"capture":metadata}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        response(&call(&client, "transport.pause", json!({})).await);
+        loop {
+            let state =
+                response(&call(&client, "transport.get", json!({})).await)["result"].clone();
+            if state["applied"]["playing"] == false && state["pending"] == false {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        client.cancel().await.unwrap();
     }
 
     #[tokio::test]
@@ -2261,7 +2422,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 64);
+        assert_eq!(tools.len(), 72);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

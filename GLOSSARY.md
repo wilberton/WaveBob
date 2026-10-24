@@ -37,7 +37,7 @@ session, which may await the audio output boundary.
 **Applied transport**: The playback source and frame position currently adopted
 by the output renderer, identified by its handoff generation.
 
-**History entry**: One committed audio edit with the before and after states
+**History entry**: One committed sample or arrangement edit with before and after states
 needed for undo and redo. Navigation and playback are outside edit history.
 
 **Overload**: A floating-point audio value whose absolute amplitude exceeds
@@ -63,6 +63,13 @@ identity. The pinned source audio revision remains separate.
 **Clip processing**: Ordered instance-only DSP applied over the clip's source
 interval, with an immutable prepared result. Trimming rebuilds the processing
 over the new bounds; reverb resets at the start and ends at the clip boundary.
+
+**Prepared mix**: An immutable arrangement revision with resampled clip buffers,
+track/master gains and active timeline segments, shared by playback and offline
+inspection. Preparation is derived work outside audio undo history.
+
+**Effective track**: A track's current controls and whether it contributes under
+the mute-over-solo rule. Mono pan and stereo balance depend on each clip's layout.
 
 **Project frame**: An integer arrangement time boundary at the project sample
 rate, initially 48 kHz. Source-to-project duration conversion rounds once to the

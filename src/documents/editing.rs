@@ -120,9 +120,15 @@ impl Editor {
         let mut seen = std::collections::BTreeSet::new();
         self.revisions
             .values()
-            .chain(self.clipboard.iter().map(|clipboard| &clipboard.audio))
-            .filter(|audio| seen.insert(Arc::as_ptr(audio)))
-            .map(|audio| audio.samples.len() as u64 * 4)
+            .map(|audio| &audio.samples)
+            .chain(
+                self.clipboard
+                    .iter()
+                    .map(|clipboard| &clipboard.audio.samples),
+            )
+            .chain(self.mix.iter().flat_map(|graph| graph.buffers()))
+            .filter(|samples| seen.insert(samples.as_ptr() as usize))
+            .map(|samples| samples.len() as u64 * 4)
             .sum()
     }
     pub fn history_snapshot(&self) -> HistoryInfo {

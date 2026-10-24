@@ -29,6 +29,13 @@ impl Editor {
         }
         let mut next = self.arrangement.clone();
         let label = match command {
+            Command::SetMasterGain(params) => {
+                if !params.gain_db.is_finite() || !(-120.0..=24.0).contains(&params.gain_db) {
+                    return Err(invalid("Master gain must be -120..24 dB"));
+                }
+                next.master_gain_db = params.gain_db;
+                "Master gain"
+            }
             Command::GetArrangement(_) => return Ok(CommandResult::Arrangement(next.into())),
             Command::AddTrack(params) => {
                 let index = params.index.unwrap_or(next.tracks.len());

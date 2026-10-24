@@ -94,6 +94,14 @@ macro_rules! command_registry {
 }
 
 command_registry! {
+    GetMix(EmptyParams) => ("mix.get", "Inspect prepared mix revision, effective tracks and output levels.", false, false, false, crate::mixing::MixState),
+    PrepareMix(crate::mixing::PrepareMixParams) => ("mix.prepare", "Prepare immutable clip resampling and a project-clock mixer without an audio device.", true, false, false, JobInfo),
+    ReadMixSamples(crate::mixing::MixSamplesParams) => ("mix.samples", "Render a bounded project-frame interval through the same mixer as live playback.", false, false, false, crate::mixing::MixSamples),
+    SetMasterGain(crate::mixing::MasterGainParams) => ("mix.master.set", "Change arrangement master gain as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
+    PlayMix(EmptyParams) => ("mix.play", "Prepare and play the arrangement from its timeline cursor.", true, false, true, crate::mixing::MixState),
+    ToggleMixPlayback(EmptyParams) => ("mix.play_pause", "Prepare/play or pause the arrangement from its timeline cursor.", true, false, true, crate::mixing::MixState),
+    SeekMix(crate::mixing::MixSeekParams) => ("mix.seek", "Seek the arrangement while preserving selection and playing state.", true, false, false, crate::arrangement::Arrangement),
+    RewindMix(EmptyParams) => ("mix.rewind", "Rewind the arrangement to absolute start, retaining playing state.", true, false, false, crate::arrangement::Arrangement),
     TrimClip(crate::arrangement::TrimClipParams) => ("clips.trim", "Trim a clip's pinned source interval and rebuild its instance processing as one background edit.", true, false, false, JobInfo),
     ApplyClipEffect(crate::arrangement::ClipEffectParams) => ("clips.effects.apply", "Apply shared DSP only to one pinned clip instance as one cancellable background edit.", true, false, false, JobInfo),
     ReadClipSamples(crate::arrangement::ClipSamplesParams) => ("clips.samples", "Inspect a bounded interval of a clip's processed source-rate audio.", false, false, false, SamplesData),
@@ -175,6 +183,7 @@ pub(crate) fn capabilities(gui: bool, device: bool) -> Capabilities {
         "edit".into(),
         "audio.export".into(),
         "arrangement".into(),
+        "mix".into(),
     ];
     if device {
         capabilities.push("audio.output".into());

@@ -357,6 +357,85 @@ fn transport_shortcuts_drive_the_shared_output_and_mode_switch_pauses() {
 }
 
 #[test]
+fn multitrack_space_rewind_loop_track_mute_and_master_meter_use_shared_mix() {
+    use wavebob::arrangement::*;
+    let (mut h, directory) = audio_harness();
+    let (session, mut output) = wavebob::Session::with_manual_output(48000).unwrap();
+    h.app.host = DesktopHost::with_session(session);
+    h.app.open_path(directory.path().join("Gestures.wav"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.active_document().is_none() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    let doc = h.app.active_document().unwrap();
+    h.app.dispatch(Command::AddTrack(AddTrackParams::default()));
+    let track = h.app.host.snapshot().arrangement.tracks[0].id.clone();
+    h.app.dispatch(Command::InsertClip(InsertClipParams {
+        track_id: track.clone(),
+        document_id: doc.id,
+        revision_id: doc.revision_id,
+        source_start: 0,
+        source_end: doc.frames,
+        position: 0,
+    }));
+    h.app.set_mode(ViewMode::Multitrack);
+    h.frame(vec![]);
+    let tap = |h: &mut Harness, key| {
+        for pressed in [true, false] {
+            h.frame(vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+    };
+    tap(&mut h, egui::Key::Slash);
+    tap(&mut h, egui::Key::Space);
+    while h.app.host.mix().prepared_revision_id.as_ref()
+        != Some(&h.app.host.snapshot().arrangement.revision_id)
+    {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    let mut pcm = [[0.0; 2]; 128];
+    output.render_into(&mut pcm);
+    let frame = h.frame(vec![]);
+    assert!(pcm.iter().flatten().any(|value| *value != 0.0));
+    assert_eq!(h.app.host.snapshot().arrangement.cursor, 128);
+    assert!(
+        text_shapes(&frame)
+            .iter()
+            .any(|(_, text)| text.starts_with("Master "))
+    );
+    let mute = h.text_rect("M").center();
+    h.click(mute);
+    while h.app.host.mix().prepared_revision_id.as_ref()
+        != Some(&h.app.host.snapshot().arrangement.revision_id)
+    {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    output.render_into(&mut pcm);
+    h.frame(vec![]);
+    assert_eq!(pcm, [[0.0; 2]; 128]);
+    tap(&mut h, egui::Key::Space);
+    output.render_into(&mut []);
+    h.frame(vec![]);
+    assert!(!h.app.host.transport().applied.playing);
+    tap(&mut h, egui::Key::Enter);
+    output.render_into(&mut []);
+    h.frame(vec![]);
+    assert_eq!(h.app.host.snapshot().arrangement.cursor, 0);
+    assert!(h.app.host.snapshot().loop_enabled);
+}
+
+#[test]
 fn chevrons_restore_independently_and_backtick_preserves_widths_in_both_modes() {
     for mode in [ViewMode::Waveform, ViewMode::Multitrack] {
         let mut h = Harness::new();

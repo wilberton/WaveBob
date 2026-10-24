@@ -331,6 +331,100 @@ fn bounded_handoffs_converge_to_latest_seek_without_callback_allocation_or_free(
 }
 
 #[test]
+fn mixer_graph_and_control_handoffs_never_allocate_or_free_in_the_callback() {
+    let (mut session, mut output, _directory, id) = fixture(48000, 1, &[16384; 8]);
+    let doc = ok(send(
+        &mut session,
+        "documents.get",
+        json!({"document_id":id}),
+    ));
+    let arr = ok(send(&mut session, "tracks.add", json!({})));
+    let track = arr["tracks"][0]["id"].clone();
+    ok(send(
+        &mut session,
+        "clips.insert",
+        json!({"track_id":track,"document_id":id,"revision_id":doc["revision_id"],"source_start":0,"source_end":8,"position":0}),
+    ));
+    ok(send(
+        &mut session,
+        "transport.loop.set",
+        json!({"enabled":true}),
+    ));
+    ok(send(&mut session, "mix.play", json!({})));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let mix = ok(send(&mut session, "mix.get", json!({})));
+        if mix["prepared_revision_id"] == mix["revision_id"] {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    output.render_into(&mut [[0.0; 2]; 1]);
+    state(&mut session);
+    ok(send(
+        &mut session,
+        "tracks.update",
+        json!({"track_id":track,"gain_db":12.041199826559248}),
+    ));
+    loop {
+        let mix = ok(send(&mut session, "mix.get", json!({})));
+        if mix["prepared_revision_id"] == mix["revision_id"] {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let mut frames = [[0.0; 2]; 1];
+    ALLOCS.set(0);
+    FREES.set(0);
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    assert_eq!(ALLOCS.get(), 0);
+    assert_eq!(FREES.get(), 0);
+    assert!((frames[0][0] - std::f32::consts::SQRT_2).abs() < 1e-6);
+    assert_eq!(
+        ok(send(&mut session, "mix.get", json!({})))["overloaded"],
+        true
+    );
+    for frame in 0..200 {
+        ok(send(&mut session, "mix.seek", json!({"frame":frame%8})));
+    }
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    state(&mut session);
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    assert_eq!(ALLOCS.get(), 0);
+    assert_eq!(FREES.get(), 0);
+    assert_eq!(state(&mut session)["pending"], false);
+}
+
+#[test]
+fn fractional_device_phase_interpolates_across_whole_sample_loop_boundary() {
+    let (mut session, mut output, _directory, id) = fixture_at_rate(2, 3, 1, &[0, 24576]);
+    ok(send(
+        &mut session,
+        "transport.loop.set",
+        json!({"enabled":true}),
+    ));
+    ok(send(
+        &mut session,
+        "transport.play",
+        json!({"document_id":id}),
+    ));
+    let mut frames = [[0.0; 2]; 6];
+    output.render_into(&mut frames);
+    for (actual, expected) in frames.iter().zip([0.0, 0.5, 0.5, 0.0, 0.5, 0.5]) {
+        assert!((actual[0] - expected).abs() < 1e-6);
+        assert_eq!(actual[0], actual[1]);
+    }
+}
+
+#[test]
 fn device_loss_is_recoverable_and_headless_editing_needs_no_output() {
     let mut headless = Session::default();
     assert_eq!(state(&mut headless)["output"]["status"], "disabled");

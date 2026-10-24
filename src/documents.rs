@@ -11,6 +11,7 @@ use std::sync::{
 mod arranging;
 mod clip_processing;
 mod editing;
+mod mixing;
 mod saving;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -75,6 +76,7 @@ pub struct JobInfo {
 pub enum JobOutput {
     AudioExport(crate::exports::ExportSummary),
     ClipEdit(crate::arrangement::Clip),
+    MixPrepared(crate::mixing::MixPrepared),
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Peak {
@@ -167,6 +169,7 @@ enum Event {
     Finished(String, Result<audio::Audio, CommandError>),
     Edited(String, Result<Option<audio::Audio>, CommandError>),
     ClipProcessed(String, Result<audio::Audio, CommandError>),
+    MixPrepared(String, Result<audio::mix::Graph, CommandError>),
     OutputPrepared(String, mpsc::SyncSender<bool>),
     OutputFinished(String, Result<crate::exports::ExportSummary, CommandError>),
 }
@@ -185,6 +188,9 @@ pub(crate) struct Editor {
     pending_outputs: BTreeMap<String, saving::PendingOutput>,
     arrangement: crate::arrangement::Arrangement,
     pending_clips: BTreeMap<String, clip_processing::PendingClip>,
+    mix: Option<Arc<audio::mix::Graph>>,
+    mix_attempt: Option<String>,
+    mix_bases: BTreeMap<String, String>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -203,6 +209,9 @@ impl Default for Editor {
             pending_outputs: BTreeMap::new(),
             arrangement: crate::arrangement::Arrangement::default(),
             pending_clips: BTreeMap::new(),
+            mix: None,
+            mix_attempt: None,
+            mix_bases: BTreeMap::new(),
         }
     }
 }
@@ -251,6 +260,10 @@ impl Editor {
         self.active = Some(id.into());
     }
     pub fn update_playback_cursor(&mut self, id: &str, audio_revision: &str, frame: u64) {
+        if id == self.arrangement.id && audio_revision == self.arrangement.revision_id {
+            self.arrangement.cursor = frame.min(crate::arrangement::MAX_TIMELINE_FRAME);
+            return;
+        }
         if let Some(document) = self
             .documents
             .iter_mut()
@@ -284,6 +297,7 @@ impl Editor {
             match event {
                 Event::Edited(id, result) => self.finish_edit(id, result, revision),
                 Event::ClipProcessed(id, result) => self.finish_clip(id, result, revision),
+                Event::MixPrepared(id, result) => self.finish_mix(id, result),
                 Event::OutputPrepared(id, permit) => self.approve_output(id, permit, *revision),
                 Event::OutputFinished(id, result) => self.finish_output(id, result, revision),
                 Event::Progress(id, percent) => {
@@ -376,10 +390,23 @@ impl Editor {
         revision: &mut u64,
     ) -> Result<CommandResult, CommandError> {
         match command {
+            Command::PrepareMix(params) => {
+                if params.revision_id != self.arrangement.revision_id {
+                    Err(CommandError::new(
+                        ErrorCode::StaleRevision,
+                        "Arrangement changed",
+                    ))
+                } else {
+                    self.ensure_mix(true)
+                        .map(|job| CommandResult::Job(job.into()))
+                }
+            }
+            Command::ReadMixSamples(params) => self.mix_samples(params),
             Command::TrimClip(params) => self.trim_clip(params),
             Command::ApplyClipEffect(params) => self.process_clip(params),
             Command::ReadClipSamples(params) => self.clip_samples(params),
             command @ (Command::GetArrangement(_)
+            | Command::SetMasterGain(_)
             | Command::AddTrack(_)
             | Command::UpdateTrack(_)
             | Command::RemoveTrack(_)

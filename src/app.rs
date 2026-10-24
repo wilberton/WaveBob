@@ -42,6 +42,7 @@ pub struct WaveBob {
     clip_waves: std::collections::BTreeMap<String, WaveformData>,
     track_drafts: std::collections::BTreeMap<String, arranging::TrackDraft>,
     clip_trim_draft: Option<arranging::ClipTrimDraft>,
+    master_gain_draft: Option<(String, f64)>,
 }
 
 #[derive(Default)]
@@ -182,6 +183,9 @@ impl WaveBob {
             self.detail = None;
         }
         for job in self.host.snapshot().jobs {
+            if job.kind == "Prepare mix" {
+                continue;
+            }
             if job.status == JobStatus::Failed && self.reported_jobs.insert(job.id) {
                 self.error = job.error.map(|error| error.message);
             }
@@ -221,8 +225,8 @@ impl WaveBob {
             self.dispatch(Command::TogglePlayback(DocumentParams {
                 document_id: document.id,
             }));
-        } else if self.host.transport().requested.playing {
-            self.dispatch(Command::PausePlayback(EmptyParams {}));
+        } else if self.host.presentation().mode == ViewMode::Multitrack {
+            self.dispatch(Command::ToggleMixPlayback(EmptyParams {}));
         }
     }
     fn rewind(&mut self) {
@@ -236,6 +240,8 @@ impl WaveBob {
             self.dispatch(Command::RewindDocument(DocumentParams {
                 document_id: document.id,
             }));
+        } else if self.host.presentation().mode == ViewMode::Multitrack {
+            self.dispatch(Command::RewindMix(EmptyParams {}));
         }
     }
     fn set_mode(&mut self, mode: ViewMode) {
@@ -429,7 +435,7 @@ impl WaveBob {
             self.arrangement_gesture = None;
         }
         let mut help = Help::default();
-        let error = self.error.clone().or(self.host.transport().output.error).or_else(|| match &presentation.preferences {
+        let error = self.error.clone().or(self.host.transport().output.error).or_else(||self.host.mix().preparation_error.map(|error|error.message)).or_else(|| match &presentation.preferences {
             PreferenceStatus::Error { .. } => Some("Layout preferences could not be saved or loaded. Check the preferences file and its permissions.".into()),
             _ => None,
         });
@@ -617,15 +623,17 @@ impl WaveBob {
         egui::Panel::bottom("transport").exact_size(48.0).frame(panel_frame()).show(ui,|ui| {
             let output=self.host.transport();
             let document=self.active_document();
-            let target=mode==ViewMode::Waveform && document.as_ref().is_some_and(|doc|doc.frames>0);
+            let arrangement=self.host.snapshot().arrangement;
+            let mix=self.host.mix();
+            let target=if mode==ViewMode::Waveform {document.as_ref().is_some_and(|doc|doc.frames>0)} else {arrangement.frames()>0};
             let ready=output.output.status==wavebob::transport::OutputStatus::Ready;
-            let playing=output.requested.playing;
+            let playing=output.requested.playing||(mode==ViewMode::Multitrack&&mix.requested_playing);
             let area=ui.max_rect();
             let group=Rect::from_center_size(area.center(),Vec2::new(340.0,32.0));
             let mut controls=child(ui,group);
             controls.horizontal(|ui| {
                 let rewind=icon_button(ui,Icon::Start,"Rewind to start",false,target);
-                help.observe(&rewind,if target {"Rewind to absolute start and preserve playing/paused state and selection. Shortcut: Enter or comma."} else {"Rewind is unavailable: no audio document is open in waveform mode. Shortcut: Enter or comma."});
+                help.observe(&rewind,if target {"Rewind to absolute start and preserve playing/paused state and selection. Shortcut: Enter or comma."} else {"Open audio or arrange a clip to enable rewind. Shortcut: Enter or comma."});
                 if rewind.clicked() {self.rewind();}
                 if output.output.status==wavebob::transport::OutputStatus::Failed {
                     let retry=ui.button("Retry output");
@@ -633,16 +641,24 @@ impl WaveBob {
                     if retry.clicked() {self.dispatch(Command::RetryOutput(EmptyParams{}));}
                 } else {
                     let play=icon_button(ui,if playing {Icon::Pause} else {Icon::Play},if playing {"Pause"} else {"Play"},true,ready && (target || playing));
-                    help.observe(&play,if !target && !playing {"Playback is unavailable: no audio document is open in waveform mode. Shortcut: Space."} else if !ready {"Playback is unavailable while audio output initializes or in a session without an output adapter."} else {"Play or pause from the current cursor. Loop follows the selection or whole sample. Shortcut: Space."});
+                    help.observe(&play,if !target && !playing {"Playback is unavailable: open audio or arrange a clip. Shortcut: Space."} else if !ready {"Playback is unavailable while audio output initializes or in a session without an output adapter."} else {"Play or pause from the current cursor. Loop follows the time selection or complete audio. Shortcut: Space."});
                     if play.clicked() {self.toggle_playback();}
                 }
                 let response=icon_button(ui,Icon::Loop,"Loop",self.host.snapshot().loop_enabled,true);
                 help.observe(&response,"Toggle looping without starting playback or changing selection. Shortcut: /.");
                 if response.clicked() {self.toggle_loop();}
                 ui.add_space(12.0);
-                let timing=self.active_document().map(|doc|format!("{}  /  {}",time(doc.cursor,doc.sample_rate),time(doc.frames,doc.sample_rate))).unwrap_or_else(||"—  /  —".into());
+                let timing=if mode==ViewMode::Multitrack {format!("{}  /  {}",time(arrangement.cursor,arrangement.sample_rate),time(arrangement.frames(),arrangement.sample_rate))}else{self.active_document().map(|doc|format!("{}  /  {}",time(doc.cursor,doc.sample_rate),time(doc.frames,doc.sample_rate))).unwrap_or_else(||"—  /  —".into())};
                 ui.label(RichText::new(timing).monospace().size(12.0));
             });
+            if mode==ViewMode::Multitrack&&area.width()>650.0 {
+                let meter=Rect::from_min_size(area.min+Vec2::new(14.0,9.0),Vec2::new(130.0,8.0));
+                let peak=mix.peak_level;let fraction=if peak>0.0 {((20.0*peak.log10()+60.0)/60.0).clamp(0.0,1.0) as f32}else{0.0};
+                ui.painter().rect_filled(meter,2.0,SURFACE);ui.painter().rect_filled(Rect::from_min_size(meter.min,Vec2::new(meter.width()*fraction,meter.height())),2.0,if mix.overloaded{Color32::LIGHT_RED}else{visuals::TEAL});
+                let label=if mix.requested_playing&&mix.pending_job_id.is_some(){"Preparing mix…".into()}else if mix.overloaded {format!("Master overload {:+.1} dB",20.0*peak.log10())}else if peak>0.0 {format!("Master {:+.1} dB",20.0*peak.log10())}else{"Master −∞ dB".into()};
+                ui.painter().text(meter.left_bottom()+Vec2::new(0.0,5.0),egui::Align2::LEFT_TOP,label,egui::FontId::proportional(10.0),if mix.overloaded{Color32::LIGHT_RED}else{MUTED});
+                let response=ui.interact(meter.expand(4.0),ui.scope_id().with("master-meter"),Sense::hover());help.observe(&response,"Master output peak before device clipping. Red indicates floating-point overload; lower track or master gain.");
+            }
             if area.width()>980.0 {
                 let mut hints=child(ui,Rect::from_min_max(Pos2::new(area.right()-300.0,area.top()+13.0),area.max));
                 hints.horizontal(|ui| {ui.label(RichText::new("Space  Play / pause    Enter or ,  Start    /  Loop").size(10.0).color(MUTED));});
@@ -686,6 +702,7 @@ impl WaveBob {
             || transport.output.status == wavebob::transport::OutputStatus::Initializing
             || self.close_flow.is_some()
             || self.host.presentation().close_requested
+            || self.host.mix().requested_playing
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(16));

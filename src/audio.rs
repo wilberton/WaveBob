@@ -10,6 +10,7 @@ use std::sync::{
 
 const BLOCK: usize = 256;
 const MAX_VALUES: usize = 128 * 1024 * 1024;
+pub(crate) mod mix;
 mod mp3;
 pub(crate) mod resample;
 

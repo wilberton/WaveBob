@@ -123,9 +123,61 @@ impl Shared {
 }
 
 #[derive(Debug)]
+pub(crate) enum Source {
+    Audio(Arc<Audio>),
+    Mix {
+        graph: Arc<crate::audio::mix::Graph>,
+        frames: u64,
+    },
+}
+impl Clone for Source {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Audio(audio) => Self::Audio(audio.clone()),
+            Self::Mix { graph, frames } => Self::Mix {
+                graph: graph.clone(),
+                frames: *frames,
+            },
+        }
+    }
+}
+impl Source {
+    fn frames(&self) -> u64 {
+        match self {
+            Self::Audio(audio) => audio.frames(),
+            Self::Mix { frames, .. } => *frames,
+        }
+    }
+    fn rate(&self) -> u32 {
+        match self {
+            Self::Audio(audio) => audio.rate,
+            Self::Mix { graph, .. } => graph.rate,
+        }
+    }
+    fn frame(&self, frame: u64) -> [f32; 2] {
+        match self {
+            Self::Audio(audio) => {
+                let offset = frame as usize * audio.channels as usize;
+                [
+                    audio.samples[offset],
+                    audio.samples[offset + usize::from(audio.channels == 2)],
+                ]
+            }
+            Self::Mix { graph, .. } => graph.frame(frame),
+        }
+    }
+    fn same(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Audio(a), Self::Audio(b)) => Arc::ptr_eq(a, b),
+            (Self::Mix { graph: a, .. }, Self::Mix { graph: b, .. }) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+#[derive(Debug)]
 struct Plan {
     generation: u64,
-    source: Option<Arc<Audio>>,
+    source: Option<Source>,
     ids: (u128, u128),
     seek: Option<u64>,
     bounds: Option<FrameRange>,
@@ -155,7 +207,7 @@ impl Renderer {
                 self.current
                     .as_ref()
                     .is_some_and(|old| match (&old.source, &next.source) {
-                        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                        (Some(a), Some(b)) => a.same(b),
                         _ => false,
                     });
             if next.seek.is_none() && carry {
@@ -206,22 +258,25 @@ impl Renderer {
             return [0.0; 2];
         };
         let first = plan.position;
-        let mut second = (first + 1).min(audio.frames() - 1);
+        let mut second = first + 1;
         if let Some(bounds) = &plan.bounds
             && second >= bounds.end
         {
             second = bounds.start;
+        } else {
+            second = second.min(audio.frames() - 1);
         }
         let fraction = plan.phase as f32 / self.rate as f32;
+        let first = audio.frame(first);
+        let second = audio.frame(second);
         let sample = |channel: usize| {
-            let channel = channel.min(audio.channels as usize - 1);
-            let a = audio.samples[first as usize * audio.channels as usize + channel];
-            let b = audio.samples[second as usize * audio.channels as usize + channel];
+            let a = first[channel];
+            let b = second[channel];
             (a as f64 + (b as f64 - a as f64) * fraction as f64) as f32
         };
         let output = [sample(0) * plan.gain, sample(1) * plan.gain];
         self.peak = self.peak.max(output[0].abs()).max(output[1].abs());
-        plan.phase += audio.rate as u64;
+        plan.phase += audio.rate() as u64;
         plan.position += plan.phase / self.rate as u64;
         plan.phase %= self.rate as u64;
         if let Some(bounds) = &plan.bounds {
@@ -270,7 +325,7 @@ pub(crate) struct Playback {
     shared: Arc<Shared>,
     state: TransportSnapshot,
     pending: Option<Box<Plan>>,
-    source: Option<Arc<Audio>>,
+    source: Option<Source>,
     bounds: Option<FrameRange>,
     ids: (u128, u128),
     gain: f32,
@@ -381,6 +436,35 @@ impl Playback {
         playing: bool,
         seek: Option<u64>,
     ) -> Result<(), CommandError> {
+        self.request_source(document, Source::Audio(audio), looped, playing, seek)
+    }
+    pub fn request_mix(
+        &mut self,
+        document: &DocumentInfo,
+        graph: Arc<crate::audio::mix::Graph>,
+        looped: bool,
+        playing: bool,
+        seek: Option<u64>,
+    ) -> Result<(), CommandError> {
+        self.request_source(
+            document,
+            Source::Mix {
+                graph,
+                frames: document.frames,
+            },
+            looped,
+            playing,
+            seek,
+        )
+    }
+    fn request_source(
+        &mut self,
+        document: &DocumentInfo,
+        source: Source,
+        looped: bool,
+        playing: bool,
+        seek: Option<u64>,
+    ) -> Result<(), CommandError> {
         if playing {
             self.ready()?;
         }
@@ -398,11 +482,11 @@ impl Playback {
             })
         });
         self.gain = 1.0;
-        self.submit(Some(audio), ids, bounds, playing, seek)
+        self.submit(Some(source), ids, bounds, playing, seek)
     }
     fn submit(
         &mut self,
-        source: Option<Arc<Audio>>,
+        source: Option<Source>,
         ids: (u128, u128),
         bounds: Option<FrameRange>,
         playing: bool,

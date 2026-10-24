@@ -7,7 +7,9 @@ pub const MAX_TIMELINE_FRAME: u64 = 48_000 * 60 * 60 * 24;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Arrangement {
+    pub id: String,
     pub revision_id: String,
+    pub master_gain_db: f64,
     pub sample_rate: u32,
     pub tracks: Vec<Track>,
     pub cursor: u64,
@@ -20,6 +22,8 @@ impl Default for Arrangement {
     fn default() -> Self {
         let revision_id = uuid::Uuid::new_v4().to_string();
         Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            master_gain_db: 0.0,
             saved_revision_id: Some(revision_id.clone()),
             revision_id,
             sample_rate: 48_000,

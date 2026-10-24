@@ -132,6 +132,9 @@ impl DesktopHost {
     pub fn browser(&self) -> crate::browser::BrowserSnapshot {
         self.session.browser_snapshot()
     }
+    pub fn mix(&self) -> crate::mixing::MixState {
+        self.session.mix_snapshot()
+    }
     pub fn history(&self) -> crate::effects::HistoryInfo {
         self.session.history_snapshot()
     }

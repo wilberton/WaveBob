@@ -100,6 +100,14 @@ impl WaveBob {
             ui.label(RichText::new(if arrangement.dirty {"Arrangement *"} else {"Arrangement"}).strong());
             let add=ui.button("+ Track");help.observe(&add,"Create an empty track. Drag open audio onto its timeline.");
             if add.clicked()&&!frozen {self.dispatch(Command::AddTrack(AddTrackParams::default()));}
+            if ui.available_width()>300.0 {
+                let draft=self.master_gain_draft.get_or_insert_with(||(arrangement.revision_id.clone(),arrangement.master_gain_db));
+                if draft.0!=arrangement.revision_id {draft.0=arrangement.revision_id.clone();draft.1=arrangement.master_gain_db;}
+                ui.label(RichText::new("Master").small().color(MUTED));
+                let response=ui.add(egui::DragValue::new(&mut draft.1).range(-120.0..=24.0).speed(0.1).suffix(" dB"));
+                let gain=draft.1;help.observe(&response,"Master output gain. Drag to adjust; release commits one undoable edit.");
+                if !frozen&&(response.drag_stopped()||(response.changed()&&!response.dragged())) {self.dispatch(Command::SetMasterGain(wavebob::mixing::MasterGainParams{gain_db:gain}));}
+            }
             ui.with_layout(egui::Layout::right_to_left(Align::Center),|ui| {
                 for (label,factor) in [("Fit",0.0),("+",2.0),("−",0.5)] {
                     let response=ui.button(label);help.observe(&response,"Fit the arrangement, or zoom its timeline. Ctrl/Cmd-wheel zooms; wheel pans.");
@@ -192,7 +200,7 @@ impl WaveBob {
                     ui.with_layout(egui::Layout::right_to_left(Align::Center),|ui| {
                         for (label,state) in [("S",track.solo),("M",track.mute)] {
                             let response=ui.add(egui::Button::new(label).selected(state).min_size(Vec2::new(21.0,21.0)));
-                            help.observe(&response,"Track solo/mute state. Audible mix playback is added in the mixing ticket.");
+                            help.observe(&response,"Solo includes only soloed tracks; mute always takes precedence over solo.");
                             if response.clicked(){if label=="S"{update.solo=Some(!state);}else{update.mute=Some(!state);}}
                         }
                     });
@@ -206,7 +214,7 @@ impl WaveBob {
                     if gain.drag_stopped() || (gain.changed()&&!gain.dragged()) {update.gain_db=Some(draft.gain);}
                     ui.label(RichText::new(format!("{:.1} dB",draft.gain)).size(10.0).color(MUTED));
                     let (knob,response)=ui.allocate_exact_size(Vec2::splat(25.0),Sense::drag());
-                    if response.dragged(){draft.pan=(track.pan+response.drag_delta().x as f64/50.0).clamp(-1.0,1.0);}
+                    if response.dragged(){draft.pan=(draft.pan+response.drag_delta().x as f64/50.0).clamp(-1.0,1.0);}
                     if response.drag_stopped(){update.pan=Some(draft.pan);}
                     let center=knob.center();ui.painter().circle(center,10.0,SURFACE,Stroke::new(1.0,BORDER));
                     let angle=draft.pan as f32*2.3;ui.painter().line_segment([center,center+Vec2::new(angle.sin(),-angle.cos())*8.0],Stroke::new(1.5,BLUE));
