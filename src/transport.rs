@@ -1151,4 +1151,134 @@ mod processing_tests {
         assert_eq!(frames, [[0.0; 2], [0.0; 2], [0.0; 2], [1.0; 2]]);
         assert_eq!(playback.state.applied.frame, 8);
     }
+    struct Affine {
+        gain: f32,
+        offset: f32,
+    }
+    impl crate::rendering::Processor for Affine {
+        fn frame(&mut self, input: [f32; 2]) -> [f32; 2] {
+            [
+                input[0] * self.gain + self.offset,
+                input[1] * self.gain + self.offset,
+            ]
+        }
+        fn reset(&mut self) {}
+    }
+    #[test]
+    fn prepared_bypass_reorder_and_remove_transition_to_the_correct_signal() {
+        // Unregistered arithmetic probes exercise host topology, not effect fidelity.
+        let cancel = AtomicBool::new(false);
+        let audio = Arc::new(
+            crate::audio::prepare(
+                48000,
+                1,
+                "float32".into(),
+                Default::default(),
+                vec![0.5; 8192],
+                &cancel,
+                |_| {},
+            )
+            .unwrap(),
+        );
+        let (mut control, renderer) = Playback::pair(48000);
+        let mut output = ManualOutput { renderer };
+        let gain = crate::processing::Instance {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: crate::processing::EffectKind::SoftClipper,
+            bypassed: false,
+            parameters: Default::default(),
+        };
+        let bias = crate::processing::Instance {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: crate::processing::EffectKind::Balance,
+            bypassed: false,
+            parameters: Default::default(),
+        };
+        let mut bypassed = gain.clone();
+        bypassed.bypassed = true;
+        for (step, effects, expected) in [
+            (0, vec![gain.clone(), bias.clone()], 0.35),
+            (1, vec![bias.clone(), gain.clone()], 0.3),
+            (2, vec![bypassed, bias], 0.6),
+            (3, vec![gain], 0.25),
+        ] {
+            let state = Arc::new(crate::processing::Processing {
+                effects: effects.clone(),
+                ..Default::default()
+            });
+            let processors = effects
+                .iter()
+                .map(|effect| {
+                    let value = if effect.kind == crate::processing::EffectKind::SoftClipper {
+                        Affine {
+                            gain: 0.5,
+                            offset: 0.0,
+                        }
+                    } else {
+                        Affine {
+                            gain: 1.0,
+                            offset: 0.1,
+                        }
+                    };
+                    (
+                        Box::new(value) as Box<dyn crate::rendering::Processor>,
+                        effect.bypassed,
+                    )
+                })
+                .collect();
+            let chain = crate::rendering::Chain::with_processors(
+                &state,
+                48000,
+                crate::rendering::Channels::Mono,
+                processors,
+            )
+            .unwrap();
+            let position = output.renderer.current.as_ref().map_or(0, |p| p.position);
+            let bounds = Some(FrameRange {
+                start: 0,
+                end: 8192,
+            });
+            let voice = crate::rendering::Voice::with_chain(
+                chain,
+                &audio,
+                position,
+                bounds.clone(),
+                || false,
+            )
+            .unwrap();
+            let source = Some(Source::Processed {
+                audio: audio.clone(),
+                state,
+                tempo: 120.0,
+            });
+            let key = processing_key(source.as_ref(), bounds.as_ref());
+            let plan = Box::new(Plan {
+                generation: step + 1,
+                source,
+                ids: (1, 2),
+                seek: if step == 0 { Some(0) } else { None },
+                bounds,
+                playing: true,
+                position: 0,
+                phase: 0,
+                gain: 1.0,
+                voice: Some(voice),
+                prepared_position: position,
+                processing_key: key,
+            });
+            control
+                .control
+                .as_mut()
+                .unwrap()
+                .incoming
+                .push(plan)
+                .unwrap();
+            let mut frames = [[0.0; 2]; 1024];
+            output.render_into(&mut frames);
+            control.poll();
+            assert!((frames[1023][0] - expected).abs() < 1e-6);
+            assert!(frames.iter().all(|f| f.iter().all(|v| v.is_finite())));
+            assert_eq!(control.state.applied.generation, step + 1);
+        }
+    }
 }

@@ -52,8 +52,8 @@ coalescing preparation, generation/error queries and callback resource retiremen
 are implemented. A 256 MiB shared prepared-state budget complements the per-chain
 64 MiB / one-second latency limits. See [renderer contract](../../../docs/processing-renderer.md).
 
-Focused verification passes: nine library tests, five public processing tests and
-12 manual transport tests. Public rendered PCM and live envelope output agree
+Focused verification passes: 12 library tests, six public processing tests and
+13 manual transport tests. Public rendered PCM and live envelope output agree
 exactly at 44.1/48/96 kHz with 1/7/64-frame blocks. Callback instrumentation records
 zero allocations/frees for preview gain, cancel and fade topology transitions.
 Test-only probes verify latency compensation (including intentional delay), deterministic
@@ -65,3 +65,23 @@ Clippy passes with warnings denied. No production effect is enabled by these tes
 
 The ticket remains in-progress while final integration/verification is completed;
 its acceptance boxes are intentionally not claimed from this checkpoint alone.
+
+Additional boundary checks reject sample/project saves during a preview and reject
+unimplemented rendered sample exports instead of writing dry PCM. Two signal probes
+exercise bypass/reorder/removal and independently delayed sources mixed through an
+arrangement crossfade. Pause/tail-resume tests retain the streaming position and
+state; the explicit pause ramp does not consume source frames.
+
+Still required before completion: integrate owner processing into the live
+arrangement clip path (not only document playback and explicit clip renders),
+verify the prepared mix/control update path and complete the remaining adapter
+and readiness/error checks against that path. Production-effect measurement and
+editors remain owned by 29–40/44; linked-source freshness and final body/tail
+geometry are owned by 42. Keep 29 blocked until this foundation is complete.
+
+Final checkpoint verification: `cargo fmt --all -- --check`, the complete
+`cargo test --offline --no-default-features` suite (104 passed; existing opt-in
+native/independent-decoder checks remain opt-in), and both GUI-enabled and GUI-free
+all-target Clippy variants with `-D warnings` pass. The complete direct/headless/MCP
+WAV/MP3 baseline workflow also passes. This is a verified implementation checkpoint,
+not completion of the remaining live arrangement processing integration above.

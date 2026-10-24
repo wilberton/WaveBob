@@ -351,3 +351,48 @@ fn offline_envelopes_and_manual_streaming_agree_across_blocks_and_rates() {
         }
     }
 }
+
+#[test]
+fn unfinished_export_integration_cannot_write_dry_audio_or_mark_processing_saved() {
+    let (mut s, dir, doc) = fixture();
+    let owner = owner(&doc);
+    let state = get(&mut s, &owner);
+    let preview = ok(
+        &mut s,
+        "processing.preview.begin",
+        json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"]}),
+    );
+    let path = dir.path().join("must-not-write.wav");
+    let params = json!({"document_id":doc["id"],"revision_id":doc["revision_id"],"path":path,"overwrite":false});
+    assert_eq!(
+        send(&mut s, "documents.save", params.clone())["error"]["code"],
+        "busy"
+    );
+    assert_eq!(
+        send(
+            &mut s,
+            "project.save",
+            json!({"path":dir.path().join("preview.wbob")})
+        )["error"]["code"],
+        "busy"
+    );
+    ok(
+        &mut s,
+        "processing.preview.cancel",
+        json!({"preview_id":preview["preview_id"]}),
+    );
+    ok(
+        &mut s,
+        "processing.edit",
+        json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"],"change":envelope(-6.0)}),
+    );
+    assert_eq!(
+        send(&mut s, "documents.save", params)["error"]["code"],
+        "missing_capability"
+    );
+    assert!(!path.exists());
+    assert_eq!(
+        ok(&mut s, "documents.get", json!({"document_id":doc["id"]}))["dirty"],
+        true
+    );
+}

@@ -30,6 +30,12 @@ impl Editor {
             }
         }
     }
+    pub(super) fn has_active_preview(&self) -> bool {
+        self.preview
+            .as_ref()
+            .and_then(|preview| self.processing_snapshot(preview.owner.clone()).ok())
+            .is_some_and(|snapshot| snapshot.preview_id.is_some())
+    }
     pub fn audible_audio(
         &self,
         id: &str,

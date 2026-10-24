@@ -967,4 +967,115 @@ mod tests {
         let reset = Voice::with_chain(echo(), &source, 0, None, || false).unwrap();
         assert_eq!(reset.values[0], [0.0; 2]);
     }
+    #[test]
+    fn differently_delayed_paths_align_in_the_arrangement_crossfade() {
+        use crate::arrangement::{Arrangement, Clip, Track};
+        use std::sync::Arc;
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut pcm = vec![0.0; 256];
+        pcm[64] = 1.0;
+        let source = crate::audio::prepare(
+            48000,
+            1,
+            "float32".into(),
+            Default::default(),
+            pcm,
+            &cancel,
+            |_| {},
+        )
+        .unwrap();
+        let render = |delay| {
+            let chain = Chain::with_processors(
+                &Processing::default(),
+                48000,
+                Channels::Mono,
+                vec![(
+                    Box::new(Probe {
+                        delay: DelayLine::new(delay).unwrap(),
+                        frames: delay,
+                    }),
+                    false,
+                )],
+            )
+            .unwrap();
+            let mut voice = Voice::with_chain(chain, &source, 0, None, || false).unwrap();
+            let pcm = (0..256)
+                .map(|_| {
+                    let value = voice.values[0][0];
+                    voice.advance(&source, 1);
+                    value
+                })
+                .collect();
+            Arc::new(
+                crate::audio::prepare(
+                    48000,
+                    1,
+                    "float32".into(),
+                    Default::default(),
+                    pcm,
+                    &cancel,
+                    |_| {},
+                )
+                .unwrap(),
+            )
+        };
+        let clip = |order| Clip {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "latency probe".into(),
+            document_id: uuid::Uuid::new_v4().to_string(),
+            revision_id: uuid::Uuid::new_v4().to_string(),
+            edit_revision_id: uuid::Uuid::new_v4().to_string(),
+            insertion_order: order,
+            processed_revision_id: None,
+            effects: Vec::new(),
+            source_frames: 256,
+            source_start: 0,
+            source_end: 256,
+            source_rate: 48000,
+            channels: 1,
+            position: 0,
+            frames: 256,
+            processing: Processing::default(),
+            linked: false,
+            full_document: true,
+        };
+        let first = clip(0);
+        let second = clip(1);
+        let arrangement = Arrangement {
+            next_clip_order: 2,
+            tracks: vec![Track {
+                id: uuid::Uuid::new_v4().to_string(),
+                name: "aligned".into(),
+                mute: false,
+                solo: false,
+                gain_db: 0.0,
+                pan: 0.0,
+                clips: vec![first.clone(), second.clone()],
+            }],
+            ..Arrangement::default()
+        };
+        let inputs = vec![
+            crate::audio::mix::Input {
+                clip: first,
+                audio: render(7),
+                range: crate::documents::FrameRange { start: 0, end: 256 },
+            },
+            crate::audio::mix::Input {
+                clip: second,
+                audio: render(19),
+                range: crate::documents::FrameRange { start: 0, end: 256 },
+            },
+        ];
+        let graph =
+            crate::audio::mix::prepare(&arrangement, inputs, None, &cancel, |_| {}).unwrap();
+        let gains = arrangement.crossfades().regions[0].gains(64);
+        let expected = (gains[0] + gains[1]) * std::f64::consts::FRAC_1_SQRT_2;
+        assert!((graph.frame(64)[0] as f64 - expected).abs() < 1e-7);
+        assert!(
+            (0..256)
+                .filter(|n| *n != 64)
+                .all(|n| graph.frame(n) == [0.0; 2])
+        );
+        assert_eq!(graph.frames, 256);
+    }
 }

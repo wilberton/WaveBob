@@ -113,6 +113,12 @@ impl Editor {
         params: projects::SaveProjectParams,
         loop_enabled: bool,
     ) -> Result<CommandResult, CommandError> {
+        if self.has_active_preview() {
+            return Err(CommandError::new(
+                ErrorCode::Busy,
+                "Commit or cancel processing previews before saving a project",
+            ));
+        }
         let key = self.project_key();
         let revision_id = key.revision();
         if params

@@ -58,3 +58,9 @@ feedback and continuous-control probes are never advertised as shipping effects.
 Actual-effect load/input-latency/dropout measurements are required by ticket 44.
 The final linked arrangement refresh and sample/project export integration belong
 to tickets 42 and 43; this foundation does not claim those workflows complete.
+
+During this implementation checkpoint, sample Save/export explicitly rejects a
+non-unity live processing state. It cannot silently write dry PCM or mark the
+processed document saved. Use `processing.render`/`processing.samples` for current
+render inspection. Rendered WAV/MP3 export is integrated by ticket 43. Sample and
+project saves require previews to be committed or cancelled first.

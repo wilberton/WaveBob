@@ -72,6 +72,21 @@ impl Editor {
     ) -> Result<CommandResult, CommandError> {
         let (id, base) = params.target.ids();
         let (document, audio) = self.playback_audio(id)?;
+        if self.has_active_preview() {
+            return Err(CommandError::new(
+                ErrorCode::Busy,
+                "Commit or cancel processing previews before saving or exporting",
+            ));
+        }
+        if !document
+            .processing
+            .same_sound(&crate::processing::Processing::default())
+        {
+            return Err(CommandError::new(
+                ErrorCode::MissingCapability,
+                "Rendered sample save/export is not available for live processing yet; use processing.render to inspect committed audio",
+            ));
+        }
         if document.revision_id != base {
             return Err(CommandError::new(
                 ErrorCode::StaleRevision,

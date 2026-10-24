@@ -24,10 +24,11 @@ GUI, headless and MCP launch instructions and documented platform prerequisites.
 
 ## Execution scope
 
-The user deferred macOS/Linux CI until a remote exists. This local repository
-still has no remote. Prepare repeatable packaging and CI artifacts, verify the
-Windows build locally and document the remaining native platform checks; do not
-claim unavailable macOS/Linux or CI executions as verified.
+The user originally deferred macOS/Linux CI until a remote exists. The configured
+remote is now `https://github.com/wilberton/WaveBob.git` (observed 24 October 2026).
+Prepare repeatable packaging and CI artifacts, verify the Windows build locally
+and record native platform/CI executions when actually run. A configured remote
+alone does not verify artifacts, desktop behavior or MP3 workflows.
 
 ## Local delivery and remaining acceptance
 
@@ -47,3 +48,12 @@ on this Windows host. `.github/workflows/release.yml` is prepared for native
 Windows/macOS/Linux packaging and shipped-binary smoke checks. No remote, push,
 public release, signing or installer was created. Keep this ticket in-progress
 until the deferred platform verification is performed; local work is complete.
+
+## Current execution note — 24 October 2026
+
+The repository now has an `origin` remote, so the original no-remote condition is
+no longer current. No CI dispatch, remote push or new macOS/Linux native run was
+performed during the live-processing foundation implementation. The first three
+acceptance boxes remain open. The existing local-delivery verification above is
+historical evidence for the baseline build, not evidence for the new processing
+work. Rebuild and reverify release artifacts after the new implementation is ready.
