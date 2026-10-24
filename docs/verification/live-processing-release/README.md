@@ -49,3 +49,20 @@ are pending. The release workflow now runs shipped GUI/headless/MCP MP3 scenario
 retains actual PNGs and uses Xvfb for Linux X11 and headless Weston for Wayland.
 Physical trackpad/audio checks remain distinct from those automated checks.
 Ticket 21 remains in-progress until its acceptance is actually established.
+
+### Confirmed Unix IPC result
+
+The original 500 ms large-schema regression and the new 40 ms stalled-peer read/
+write checks pass on both native Linux and native macOS in the
+[formatted native release run](https://github.com/wilberton/WaveBob/actions/runs/40116010625).
+The Linux full Rust job also passed. The causal fix is replacing sleep polling
+with Unix socket readiness waiting under the remaining deadline; larger writes
+alone were insufficient. Temporary test-only byte/timing probes were removed,
+and local GUI/GUI-free IPC tests and both all-target Clippy configurations pass.
+
+That release run found a missing Linux `libxkbcommon-x11` runtime (now included in
+CI/build prerequisites) and an attached macOS GUI workflow failure. The smoke
+harness now exposes child stderr on failure to make the latter diagnosable.
+The artifact uploader explicitly includes the selected hidden-directory evidence
+paths; it does not upload runtime instance/authentication records. Native GUI
+acceptance is still pending those reruns.

@@ -4,6 +4,7 @@ import hashlib
 import json
 import pathlib
 import subprocess
+import sys
 import time
 import zipfile
 
@@ -47,8 +48,14 @@ def executable(name):
 
 
 def command(*items, **kwargs):
-    return subprocess.run(items, check=True, capture_output=True, text=True,
-                          creationflags=creationflags, timeout=240, **kwargs)
+    result = subprocess.run(items, capture_output=True, text=True,
+                            creationflags=creationflags, timeout=240, **kwargs)
+    if result.returncode:
+        print(result.stderr[-16000:], file=sys.stderr)
+        if result.stdout:
+            print(result.stdout[-16000:], file=sys.stderr)
+    result.check_returncode()
+    return result
 
 
 results = {}

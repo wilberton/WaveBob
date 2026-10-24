@@ -15,7 +15,9 @@ bundled; neither FFmpeg nor a user-installed LAME is needed. Native playback use
 the default audio device and reports failure/retry without preventing editing.
 
 macOS builds need the system window/audio frameworks and an OpenGL-capable desktop.
-Linux GUI builds use X11 or Wayland, OpenGL and ALSA. The Debian/Ubuntu native build
+Linux GUI builds use X11 or Wayland, OpenGL and ALSA. X11 also needs the
+`libxkbcommon-x11` runtime (`libxkbcommon-x11-0` on Debian/Ubuntu); the documented
+build package `libxkbcommon-x11-dev` installs it. The Debian/Ubuntu native build
 packages are in the root README. Prepared release CI uses Windows x86-64,
 macOS ARM64 and Linux x86-64 native runners; host identity is recorded by rustc.
 No macOS/Linux binary or X11/Wayland execution is claimed locally. Cross-platform

@@ -90,17 +90,11 @@ fn write_frame(stream: &mut Stream, bytes: &[u8], deadline: Instant) -> io::Resu
     let mut remaining = bytes;
     while !remaining.is_empty() {
         if Instant::now() >= deadline {
-            #[cfg(test)]
-            eprintln!(
-                "[DEBUG-ipc21] write timeout total={} remaining={}",
-                bytes.len(),
-                remaining.len()
-            );
             return Err(io::ErrorKind::TimedOut.into());
         }
         // Windows peers may use the backend's default 512-byte pipe buffers.
-        // Unix sockets support bulk partial writes; tiny writes there exhaust
-        // macOS socket buffers through per-write overhead and stall large schemas.
+        // Unix sockets accept bulk partial writes and wait for readiness using
+        // their socket timeout, avoiding sleep polling between buffer refills.
         let chunk = if cfg!(windows) { 512 } else { 64 * 1024 };
         #[cfg(unix)]
         stream.set_send_timeout(Some(
@@ -129,8 +123,6 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
     let mut chunk = [0; 4096];
     loop {
         if Instant::now() >= deadline {
-            #[cfg(test)]
-            eprintln!("[DEBUG-ipc21] read timeout received={}", frame.len());
             return Err(io::ErrorKind::TimedOut.into());
         }
         #[cfg(unix)]
@@ -480,19 +472,9 @@ mod tests {
         let worker = thread::spawn(move || {
             let incoming = incoming.recv_timeout(Duration::from_secs(2)).unwrap();
             assert!(incoming.deadline > Instant::now());
-            let started = Instant::now();
-            eprintln!(
-                "[DEBUG-ipc21] worker received, budget={:?}",
-                incoming.deadline.saturating_duration_since(started)
-            );
             let response =
                 crate::protocol::dispatch_line(&mut crate::Session::default(), &incoming.line);
-            let bytes = serde_json::to_vec(&response).unwrap().len();
-            eprintln!(
-                "[DEBUG-ipc21] worker serialized {bytes} bytes in {:?}",
-                started.elapsed()
-            );
-            assert!(bytes > 64 * 1024);
+            assert!(serde_json::to_vec(&response).unwrap().len() > 64 * 1024);
             incoming.reply.send(response).unwrap();
         });
         let response = exchange(
