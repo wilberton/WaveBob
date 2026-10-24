@@ -7,6 +7,12 @@ fn default_geometry(kind: processing::EffectKind) -> WindowGeometry {
             height: 700.0,
             ..Default::default()
         }
+    } else if kind == processing::EffectKind::FastDistortion {
+        WindowGeometry {
+            width: 900.0,
+            height: 430.0,
+            ..Default::default()
+        }
     } else if kind == processing::EffectKind::Reverb {
         WindowGeometry {
             width: 1050.0,
@@ -27,6 +33,7 @@ pub(super) struct NativeEditor {
     pub(super) eq_band: usize,
     pub(super) eq_drag: Option<(usize, bool)>,
     pub(super) tempo_text: Option<String>,
+    pub(super) fast_dist_curve: Option<([i32; 5], wavebob::dsp::fast_distortion::Curve)>,
     cancelled_drag: bool,
 }
 impl WaveBob {
@@ -401,6 +408,10 @@ impl WaveBob {
         }
         if instance.kind == processing::EffectKind::ParametricEq {
             self.parametric_eq_controls(ui, window, instance, native);
+            return;
+        }
+        if instance.kind == processing::EffectKind::FastDistortion {
+            self.fast_distortion_controls(ui, window, instance, native);
             return;
         }
         let Some(info) = processing::catalogue()

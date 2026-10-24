@@ -1,0 +1,48 @@
+{
+  "default": {
+    "image": "fast-distortion-default.png",
+    "metadata": {
+      "editor_id": "8bd17f60c43a2847a100ea99c17ab93202b86860363d891745d53acedbb38e7e",
+      "frame_number": 7,
+      "height": 430,
+      "instance_id": "f141bc09-aa3a-43c8-b267-cc6fecde28bc",
+      "mode": "waveform",
+      "owner": {
+        "id": "dfc217dd-0810-4c46-bcb2-9c0913462136",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "preview_id": null,
+      "processing_identity": "304c53dd575fcd3d1e9cf6641b78ec37701737eff4ad63d556926ec673c475bc",
+      "processing_revision": "09503962-48c7-4b5a-867c-4ef96d06e83c",
+      "rendered_revision": 2,
+      "scale": 1.0,
+      "session_id": "ceb13c93-faa3-4822-a4c0-1ba2d3c8fca5",
+      "width": 900
+    }
+  },
+  "type_b": {
+    "image": "fast-distortion-type-b.png",
+    "metadata": {
+      "editor_id": "8bd17f60c43a2847a100ea99c17ab93202b86860363d891745d53acedbb38e7e",
+      "frame_number": 28,
+      "height": 430,
+      "instance_id": "f141bc09-aa3a-43c8-b267-cc6fecde28bc",
+      "mode": "waveform",
+      "owner": {
+        "id": "dfc217dd-0810-4c46-bcb2-9c0913462136",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 9,
+      "preview_id": null,
+      "processing_identity": "a9fe5a61592ec0fddf83c650e555d16c5949bc0dba74a95045d1c77560dab9da",
+      "processing_revision": "e3f9e315-9461-4525-a0e1-be6a37053fcd",
+      "rendered_revision": 3,
+      "scale": 1.0,
+      "session_id": "ceb13c93-faa3-4822-a4c0-1ba2d3c8fca5",
+      "width": 900
+    }
+  }
+}
