@@ -80,13 +80,13 @@ fn fixture() -> (Session, tempfile::TempDir, Value, Value) {
     let clip = &arr["tracks"][0]["clips"][1];
     let started = ok(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"reverb","room_size":0.4,"decay_seconds":0.7,"wet":0.2}}),
     );
     success(&mut session, started);
     let edited = ok(
         &mut session,
-        "effects.apply",
+        "edit.process",
         json!({"target":{"scope":"whole","document_id":mp3["id"],"revision_id":mp3["revision_id"]},"effect":{"kind":"gain","db":-3.0}}),
     );
     let edited = success(&mut session, edited)["result"].clone();
@@ -185,7 +185,7 @@ fn portable_project_roundtrip_preserves_working_pinned_processed_audio_and_no_mp
         json!({"document_id":mp3["id"]}),
     );
     assert_eq!(closed["dirty"], true);
-    assert_eq!(ok(&mut loaded, "project.get", json!({}))["dirty"], true);
+    assert_eq!(ok(&mut loaded, "project.get", json!({}))["dirty"], false);
 }
 
 #[test]

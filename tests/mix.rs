@@ -426,7 +426,7 @@ fn timeline_loops_silence_and_processed_clips_share_live_mixing() {
     let clip = &arr["tracks"][0]["clips"][0];
     let started = call(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"gain","db":6.020599913279624}}),
     );
     job(&mut session, started);

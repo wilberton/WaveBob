@@ -458,7 +458,8 @@ pub(crate) fn load(
         let audio = &revisions[&doc.revision_id];
         doc.peak_level = audio.peak_level;
         doc.overloaded_samples = audio.overloaded_samples;
-        doc.dirty = doc.saved_revision_id.as_ref() != Some(&doc.revision_id);
+        doc.dirty = doc.saved_revision_id.as_ref() != Some(&doc.revision_id)
+            || !doc.processing.same_sound(&doc.saved_processing);
     }
     file.payload.arrangement.saved_revision_id = Some(file.payload.arrangement.revision_id.clone());
     file.payload.arrangement.dirty = false;
@@ -504,6 +505,9 @@ fn validate_payload(
     for doc in &payload.documents {
         canonical_id(&doc.id)?;
         canonical_id(&doc.revision_id)?;
+        doc.processing
+            .validate(doc.frames)
+            .map_err(|error| invalid(&error.message))?;
         if !ids.insert(doc.id.clone()) {
             return Err(invalid("Duplicate document ID"));
         }
@@ -540,7 +544,9 @@ fn validate_payload(
     let arr = &payload.arrangement;
     canonical_id(&arr.id)?;
     canonical_id(&arr.revision_id)?;
-    if arr.sample_rate != 48000
+    if !arr.effect_tempo.is_finite()
+        || !(20.0..=400.0).contains(&arr.effect_tempo)
+        || arr.sample_rate != 48000
         || !arr.master_gain_db.is_finite()
         || !(-120.0..=24.0).contains(&arr.master_gain_db)
         || arr.cursor > crate::arrangement::MAX_TIMELINE_FRAME
@@ -570,6 +576,12 @@ fn validate_payload(
             canonical_id(&clip.id)?;
             canonical_id(&clip.document_id)?;
             canonical_id(&clip.edit_revision_id)?;
+            clip.processing
+                .validate(clip.source_end.saturating_sub(clip.source_start))
+                .map_err(|error| invalid(&error.message))?;
+            if clip.linked && !ids.contains(&clip.document_id) {
+                return Err(invalid("Linked clip document is missing"));
+            }
             if !clip_ids.insert(&clip.id)
                 || !orders.insert(clip.insertion_order)
                 || clip.insertion_order >= arr.next_clip_order

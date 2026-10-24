@@ -75,7 +75,7 @@ fn clip_effects_trim_and_history_are_independent_of_shared_source_instances() {
         .clone();
     let started = ok(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":a["id"],"edit_revision_id":a["edit_revision_id"],"effect":{"kind":"reverse"}}),
     );
     let reversed = clip_job(&mut session, started);
@@ -149,7 +149,7 @@ fn clip_effects_trim_and_history_are_independent_of_shared_source_instances() {
     assert_eq!(
         dispatch(
             &mut session,
-            "clips.effects.apply",
+            "clips.pcm.process",
             json!({"clip_id":a["id"],"edit_revision_id":a["edit_revision_id"],"effect":{"kind":"fade_in"}})
         )["error"]["code"],
         "stale_revision"
@@ -171,14 +171,14 @@ fn cancelled_clip_processing_cannot_publish_and_unity_is_a_noop() {
     let history = ok(&mut session, "history.get", json!({}));
     let started = ok(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"gain","db":0.0}}),
     );
     clip_job(&mut session, started);
     assert_eq!(ok(&mut session, "history.get", json!({})), history);
     let started = ok(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"reverse"}}),
     );
     // Cancellation dispatch deliberately skips job polling so it wins before publication.
@@ -211,13 +211,13 @@ fn every_clip_effect_matches_the_shared_waveform_dsp() {
         let clip = &arr["tracks"][0]["clips"][0];
         let started = ok(
             &mut session,
-            "clips.effects.apply",
+            "clips.pcm.process",
             json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":effect}),
         );
         clip_job(&mut session, started);
         let started = ok(
             &mut session,
-            "effects.apply",
+            "edit.process",
             json!({"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":effect}),
         );
         finish(&mut session, started);
@@ -253,7 +253,7 @@ fn pinned_audio_survives_edits_close_track_removal_and_chronological_history() {
     assert_eq!(clip["frames"], 6);
     let job = ok(
         &mut session,
-        "effects.apply",
+        "edit.process",
         json!({"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":{"kind":"reverse"}}),
     );
     finish(&mut session, job);

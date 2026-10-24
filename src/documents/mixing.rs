@@ -339,6 +339,9 @@ impl Editor {
             0
         });
         DocumentInfo {
+            processing: crate::processing::Processing::default(),
+            saved_processing: crate::processing::Processing::default(),
+            tab_open: true,
             id: self.arrangement.id.clone(),
             revision_id: self.arrangement.revision_id.clone(),
             path: String::new(),

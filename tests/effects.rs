@@ -57,7 +57,7 @@ fn samples(s: &mut Session, id: &Value, frames: u64) -> Value {
         .clone()
 }
 fn apply(s: &mut Session, target: Value, effect: Value) -> Value {
-    let job = ok(s, "effects.apply", json!({"target":target,"effect":effect}));
+    let job = ok(s, "edit.process", json!({"target":target,"effect":effect}));
     let job = wait(s, &job["id"]);
     assert_eq!(job["status"], "succeeded", "{job}");
     job["result"].clone()
@@ -164,7 +164,7 @@ fn noops_invalid_targets_stale_requests_and_cancelled_jobs_do_not_enter_history(
         assert_eq!(
             send(
                 &mut s,
-                "effects.apply",
+                "edit.process",
                 json!({"target":target,"effect":effect})
             )["error"]["code"],
             code
@@ -172,7 +172,7 @@ fn noops_invalid_targets_stale_requests_and_cancelled_jobs_do_not_enter_history(
     }
     let job = ok(
         &mut s,
-        "effects.apply",
+        "edit.process",
         json!({"target":target(&doc,0,4),"effect":{"kind":"reverse"}}),
     );
     ok(&mut s, "jobs.cancel", json!({"job_id":job["id"]}));
@@ -182,7 +182,7 @@ fn noops_invalid_targets_stale_requests_and_cancelled_jobs_do_not_enter_history(
     assert_eq!(
         send(
             &mut s,
-            "effects.apply",
+            "edit.process",
             json!({"target":target(&doc,0,4),"effect":{"kind":"reverse"}})
         )["error"]["code"],
         "stale_revision"
@@ -221,12 +221,12 @@ fn concurrent_results_based_on_a_superseded_revision_are_rejected() {
     let (mut s, _d, doc) = fixture(1, &values);
     let first = ok(
         &mut s,
-        "effects.apply",
+        "edit.process",
         json!({"target":target(&doc,0,2_000_000),"effect":{"kind":"gain","db":6.0}}),
     );
     let second = ok(
         &mut s,
-        "effects.apply",
+        "edit.process",
         json!({"target":target(&doc,0,2),"effect":{"kind":"reverse"}}),
     );
     let first = wait(&mut s, &first["id"]);
@@ -388,7 +388,7 @@ fn reverb_bounds_silence_and_cancellation_leave_history_atomic() {
         assert_eq!(
             send(
                 &mut s,
-                "effects.apply",
+                "edit.process",
                 json!({"target":target(&doc,0,4096),"effect":{"kind":"reverb","room_size":room,"decay_seconds":decay,"wet":wet}})
             )["error"]["code"],
             "invalid_params"
@@ -400,7 +400,7 @@ fn reverb_bounds_silence_and_cancellation_leave_history_atomic() {
     );
     let job = ok(
         &mut s,
-        "effects.apply",
+        "edit.process",
         json!({"target":target(&doc,0,4096),"effect":reverb(0.5,1.5)}),
     );
     ok(&mut s, "jobs.cancel", json!({"job_id":job["id"]}));

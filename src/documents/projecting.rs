@@ -46,9 +46,11 @@ impl Editor {
     }
     pub(super) fn document_in_project(&self, document: &DocumentInfo) -> bool {
         self.project.saved_key.as_ref().is_some_and(|key| {
-            key.documents
-                .iter()
-                .any(|doc| doc.id == document.id && doc.revision_id == document.revision_id)
+            key.documents.iter().any(|doc| {
+                doc.id == document.id
+                    && doc.revision_id == document.revision_id
+                    && doc.processing.same_sound(&document.processing)
+            })
         })
     }
     pub fn take_project_loop(&mut self) -> Option<bool> {

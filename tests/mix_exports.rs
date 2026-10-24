@@ -70,7 +70,7 @@ fn fixture() -> (Session, tempfile::TempDir, Value, Value) {
     let clip = &arr["tracks"][0]["clips"][1];
     let edited = ok(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"fade_out"}}),
     );
     succeeded(&mut session, edited);
@@ -303,7 +303,7 @@ fn independent_decoder_verifies_resampled_crossfaded_processed_mp3_mix() {
     let clip = &arr["tracks"][0]["clips"][1];
     let started = ok(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"reverb","room_size":0.4,"decay_seconds":0.7,"wet":0.2}}),
     );
     succeeded(&mut session, started);

@@ -64,6 +64,9 @@ impl WaveBob {
             .into_owned();
         let frames = arrangement.frames();
         let document = DocumentInfo {
+            processing: wavebob::processing::Processing::default(),
+            saved_processing: wavebob::processing::Processing::default(),
+            tab_open: true,
             id: arrangement.id,
             revision_id: arrangement.revision_id,
             path: path.clone(),

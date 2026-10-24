@@ -12,8 +12,13 @@ mod arranging;
 mod clip_processing;
 mod editing;
 mod mixing;
+mod processing;
 mod projecting;
 mod saving;
+
+fn tab_open_default() -> bool {
+    true
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct FrameRange {
@@ -30,6 +35,10 @@ pub struct SourceDetails {
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct DocumentInfo {
+    pub processing: crate::processing::Processing,
+    pub saved_processing: crate::processing::Processing,
+    #[serde(default = "tab_open_default")]
+    pub tab_open: bool,
     pub id: String,
     pub revision_id: String,
     pub path: String,
@@ -206,6 +215,7 @@ pub(crate) struct Editor {
     project: projecting::ProjectState,
     pending_projects: BTreeMap<String, projecting::PendingProject>,
     loaded_loop: Option<bool>,
+    preview: Option<processing::Preview>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -230,6 +240,7 @@ impl Default for Editor {
             project: projecting::ProjectState::default(),
             pending_projects: BTreeMap::new(),
             loaded_loop: None,
+            preview: None,
         }
     }
 }
@@ -257,7 +268,11 @@ impl Editor {
         Ok(())
     }
     pub fn documents(&self) -> Vec<DocumentInfo> {
-        self.documents.clone()
+        self.documents
+            .iter()
+            .filter(|doc| doc.tab_open)
+            .cloned()
+            .collect()
     }
     pub fn jobs(&self) -> Vec<JobInfo> {
         self.jobs.values().map(|(info, _)| info.clone()).collect()
@@ -355,6 +370,9 @@ impl Editor {
                                     continue;
                                 };
                                 let mut document = DocumentInfo {
+                                    processing: crate::processing::Processing::default(),
+                                    saved_processing: crate::processing::Processing::default(),
+                                    tab_open: true,
                                     id: uuid::Uuid::new_v4().to_string(),
                                     revision_id: uuid::Uuid::new_v4().to_string(),
                                     path: job.path.clone(),
@@ -411,7 +429,38 @@ impl Editor {
         command: Command,
         revision: &mut u64,
     ) -> Result<CommandResult, CommandError> {
+        let cancel_preview = command.mutates()
+            && !matches!(
+                &command,
+                Command::UpdateProcessingPreview(_)
+                    | Command::CommitProcessingPreview(_)
+                    | Command::CancelProcessingPreview(_)
+                    | Command::BeginProcessingPreview(_)
+                    | Command::CancelJob(_)
+            );
+        let result = self.execute_inner(command, revision);
+        if result.is_ok() && cancel_preview {
+            self.preview = None;
+        }
+        result
+    }
+    fn execute_inner(
+        &mut self,
+        command: Command,
+        revision: &mut u64,
+    ) -> Result<CommandResult, CommandError> {
         match command {
+            command @ (Command::GetProcessing(_)
+            | Command::EditProcessing(_)
+            | Command::BeginProcessingPreview(_)
+            | Command::UpdateProcessingPreview(_)
+            | Command::CommitProcessingPreview(_)
+            | Command::CancelProcessingPreview(_)
+            | Command::SetEffectTempo(_)
+            | Command::MakeClipIndependent(_)) => self.processing_command(command, revision),
+            Command::GetEffectCatalogue(_) => Ok(CommandResult::EffectCatalogue(
+                crate::processing::catalogue(),
+            )),
             Command::PrepareMix(params) => {
                 if params.revision_id != self.arrangement.revision_id {
                     Err(CommandError::new(
@@ -461,6 +510,11 @@ impl Editor {
                     advance(revision)?;
                     self.active = Some(document.id.clone());
                 }
+                self.documents
+                    .iter_mut()
+                    .find(|d| d.id == document.id)
+                    .unwrap()
+                    .tab_open = true;
                 Ok(CommandResult::Document(document.into()))
             }
             Command::CloseDocument(params) => {
@@ -473,11 +527,30 @@ impl Editor {
                     ));
                 }
                 advance(revision)?;
-                self.documents.retain(|doc| doc.id != document.id);
-                self.history.remove_document(&document.id);
+                if self
+                    .arrangement
+                    .tracks
+                    .iter()
+                    .flat_map(|t| &t.clips)
+                    .any(|c| c.linked && c.document_id == document.id)
+                {
+                    self.documents
+                        .iter_mut()
+                        .find(|d| d.id == document.id)
+                        .unwrap()
+                        .tab_open = false;
+                } else {
+                    self.documents.retain(|doc| doc.id != document.id);
+                    self.history.remove_document(&document.id);
+                }
                 self.collect_revisions();
                 if self.active.as_ref() == Some(&document.id) {
-                    self.active = self.documents.last().map(|doc| doc.id.clone());
+                    self.active = self
+                        .documents
+                        .iter()
+                        .rev()
+                        .find(|doc| doc.tab_open)
+                        .map(|doc| doc.id.clone());
                 }
                 Ok(CommandResult::Document(document.into()))
             }

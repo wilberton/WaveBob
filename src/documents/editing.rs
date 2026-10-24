@@ -84,6 +84,16 @@ pub(super) struct History {
     redo: Vec<Change>,
 }
 impl History {
+    pub fn push_document(&mut self, before: DocumentInfo, after: DocumentInfo, label: &str) {
+        self.undo.push(Change {
+            state: ChangeState::Document {
+                before: before.into(),
+                after: after.into(),
+            },
+            label: label.into(),
+        });
+        self.redo.clear();
+    }
     pub fn snapshot(&self) -> HistoryInfo {
         HistoryInfo {
             can_undo: !self.undo.is_empty(),
@@ -470,8 +480,13 @@ impl Editor {
             }
             let mut after = before.clone();
             after.revision_id = uuid::Uuid::new_v4().to_string();
+            after.processing.edit_revision_id = uuid::Uuid::new_v4().to_string();
             after.dirty = true;
             after.frames = audio.frames();
+            after.processing.envelope.fade_in_frames =
+                after.processing.envelope.fade_in_frames.min(after.frames);
+            after.processing.envelope.fade_out_frames =
+                after.processing.envelope.fade_out_frames.min(after.frames);
             after.peak_level = audio.peak_level;
             after.overloaded_samples = audio.overloaded_samples;
             pending.navigation.apply(&mut after);
@@ -550,9 +565,11 @@ impl Editor {
                 restored.path = current.path.clone();
                 restored.name = current.name.clone();
                 restored.saved_revision_id = current.saved_revision_id.clone();
+                restored.saved_processing = current.saved_processing.clone();
                 restored.save_format = current.save_format.clone();
                 restored.save_sample_rate = current.save_sample_rate;
-                restored.dirty = restored.saved_revision_id.as_ref() != Some(&restored.revision_id);
+                restored.dirty = restored.saved_revision_id.as_ref() != Some(&restored.revision_id)
+                    || !restored.processing.same_sound(&restored.saved_processing);
                 *self
                     .documents
                     .iter_mut()

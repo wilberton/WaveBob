@@ -17,6 +17,7 @@ pub mod mixing;
 #[cfg(feature = "gui")]
 mod preferences;
 pub mod presentation;
+pub mod processing;
 pub mod projects;
 pub mod protocol;
 pub mod transport;
@@ -86,6 +87,8 @@ pub enum CommandResult {
     MixSamples(mixing::MixSamples),
     Crossfades(arrangement::CrossfadeData),
     Project(projects::ProjectInfo),
+    Processing(Box<processing::Snapshot>),
+    EffectCatalogue(Vec<processing::EffectInfo>),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]

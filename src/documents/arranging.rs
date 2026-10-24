@@ -126,6 +126,9 @@ impl Editor {
                     .find(|t| t.id == params.track_id)
                     .ok_or_else(|| not_found("track"))?;
                 let clip = Clip {
+                    processing: crate::processing::Processing::default(),
+                    linked: true,
+                    full_document: params.source_start == 0 && params.source_end == audio.frames(),
                     id: uuid::Uuid::new_v4().to_string(),
                     name: doc.name.clone(),
                     document_id: doc.id.clone(),

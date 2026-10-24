@@ -56,6 +56,7 @@ pub(crate) struct StateKey {
 pub(crate) struct DocumentKey {
     pub id: String,
     pub revision_id: String,
+    pub processing: crate::processing::Processing,
     path: String,
     name: String,
     saved_revision_id: Option<String>,
@@ -71,6 +72,7 @@ impl StateKey {
                 .map(|doc| DocumentKey {
                     id: doc.id.clone(),
                     revision_id: doc.revision_id.clone(),
+                    processing: doc.processing.clone(),
                     path: doc.path.clone(),
                     name: doc.name.clone(),
                     saved_revision_id: doc.saved_revision_id.clone(),

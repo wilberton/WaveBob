@@ -7,6 +7,7 @@ pub const MAX_TIMELINE_FRAME: u64 = 48_000 * 60 * 60 * 24;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Arrangement {
+    pub effect_tempo: f64,
     pub id: String,
     pub revision_id: String,
     pub master_gain_db: f64,
@@ -23,6 +24,7 @@ impl Default for Arrangement {
     fn default() -> Self {
         let revision_id = uuid::Uuid::new_v4().to_string();
         Self {
+            effect_tempo: 120.0,
             id: uuid::Uuid::new_v4().to_string(),
             master_gain_db: 0.0,
             next_clip_order: 0,
@@ -113,6 +115,11 @@ pub struct Track {
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Clip {
+    pub processing: crate::processing::Processing,
+    #[serde(default)]
+    pub linked: bool,
+    #[serde(default)]
+    pub full_document: bool,
     pub id: String,
     pub name: String,
     pub document_id: String,
@@ -146,6 +153,11 @@ impl Clip {
         }
         let mut clip = self.clone();
         clip.position = position as u64;
+        clip.full_document = false;
+        clip.processing.envelope.fade_in_frames =
+            clip.processing.envelope.fade_in_frames.min(end - start);
+        clip.processing.envelope.fade_out_frames =
+            clip.processing.envelope.fade_out_frames.min(end - start);
         clip.source_start = start;
         clip.source_end = end;
         clip.frames =

@@ -343,6 +343,9 @@ impl WaveBob {
                         + document.sample_rate as u128 / 2)
                         / document.sample_rate as u128) as u64;
                     let ghost = Clip {
+                        processing: wavebob::processing::Processing::default(),
+                        linked: true,
+                        full_document: true,
                         id: String::new(),
                         name: document.name.clone(),
                         document_id: document.id.clone(),

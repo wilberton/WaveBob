@@ -186,7 +186,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 60);
+        assert_eq!(tools.len(), 69);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -362,7 +362,7 @@ async fn mp3_edit_and_mix_output_match_direct_headless_and_mcp_adapters() {
         std::thread::sleep(Duration::from_millis(2));
     };
     let started = direct(
-        "effects.apply",
+        "edit.process",
         json!({"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}),
     );
     let edited = finish_sync_job(&mut direct, started);
@@ -433,7 +433,7 @@ async fn mp3_edit_and_mix_output_match_direct_headless_and_mcp_adapters() {
         std::thread::sleep(Duration::from_millis(2));
     };
     let started = wire(
-        "effects.apply",
+        "edit.process",
         json!({"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}),
     );
     let edited = finish_sync_job(&mut wire, started);
@@ -480,7 +480,7 @@ async fn mp3_edit_and_mix_output_match_direct_headless_and_mcp_adapters() {
         assert!(std::time::Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(2)).await;
     };
-    let started=response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}})).await);
+    let started=response(&call(&client,"edit.process",json!({"params":{"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}})).await);
     let edited = finish_mcp_job(&client, started).await;
     let started = response(
         &call(
@@ -943,7 +943,7 @@ mod live {
         let opened =
             response(&call(&client, "documents.open", json!({"params":{"path":source}})).await);
         let doc = finish_mcp_job(&client, opened).await;
-        let edited = response(&call(&client, "effects.apply", json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":{"kind":"gain","db":-3.0}}})).await);
+        let edited = response(&call(&client, "edit.process", json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":{"kind":"gain","db":-3.0}}})).await);
         let doc = finish_mcp_job(&client, edited).await;
         let track = response(
             &call(
@@ -1149,7 +1149,7 @@ mod live {
         }
         let arr = response(&call(&client, "arrangement.get", json!({})).await)["result"].clone();
         let clip = &arr["tracks"][0]["clips"][1];
-        let edited=response(&call(&client,"clips.effects.apply",json!({"params":{"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"reverb","room_size":0.4,"decay_seconds":0.7,"wet":0.2}}})).await);
+        let edited=response(&call(&client,"clips.pcm.process",json!({"params":{"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"reverb","room_size":0.4,"decay_seconds":0.7,"wet":0.2}}})).await);
         finish_mcp_output(&client, edited).await;
         response(
             &call(
@@ -1653,7 +1653,7 @@ mod live {
             .await,
         )["result"]["channels"]
             .clone();
-        let effect=response(&call(&client,"clips.effects.apply",json!({"params":{"clip_id":first["id"],"edit_revision_id":first["edit_revision_id"],"effect":{"kind":"gain","db":-6.0}}})).await);
+        let effect=response(&call(&client,"clips.pcm.process",json!({"params":{"clip_id":first["id"],"edit_revision_id":first["edit_revision_id"],"effect":{"kind":"gain","db":-6.0}}})).await);
         let edited = finish_mcp_output(&client, effect).await;
         let trim=response(&call(&client,"clips.trim",json!({"params":{"clip_id":first["id"],"edit_revision_id":edited["edit_revision_id"],"source_start":24000,"source_end":72000}})).await);
         let trimmed = finish_mcp_output(&client, trim).await;
@@ -2206,7 +2206,7 @@ mod live {
             )
             .await,
         );
-        let started=response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":24000,"end_frame":120000},"effect":{"kind":"fade_out"}}})).await);
+        let started=response(&call(&client,"edit.process",json!({"params":{"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":24000,"end_frame":120000},"effect":{"kind":"fade_out"}}})).await);
         let edited = finish_mcp_job(&client, started).await;
         assert_eq!(edited["dirty"], true);
         response(&call(&client, "history.undo", json!({})).await);
@@ -2393,7 +2393,7 @@ mod live {
             .await,
         );
         assert_eq!(view["status"], "ok");
-        let started=response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":effect}})).await);
+        let started=response(&call(&client,"edit.process",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":effect}})).await);
         let edited = finish_mcp_job(&client, started).await;
         assert_ne!(edited["revision_id"], doc["revision_id"]);
         assert_eq!(edited["frames"], doc["frames"]);
@@ -2447,7 +2447,7 @@ mod live {
             )
             .await,
         );
-        let started=response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":effect}})).await);
+        let started=response(&call(&client,"edit.process",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":effect}})).await);
         let edited = finish_mcp_job(&client, started).await;
         let refusal = response(
             &call(
@@ -3219,7 +3219,7 @@ mod live {
         for phase in ["effect", "export"] {
             let began = Instant::now();
             let started = if phase == "effect" {
-                response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":{"kind":"gain","db":-6.0}}})).await)
+                response(&call(&client,"edit.process",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":{"kind":"gain","db":-6.0}}})).await)
             } else {
                 response(&call(&client,"audio.export",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"path":runtime.path().join("ten-minute-output.wav"),"format":{"kind":"wav","encoding":"pcm16"}}})).await)
             };

@@ -213,6 +213,9 @@ impl Browser {
         let id = self.state.audition.id.clone()?;
         Some((
             DocumentInfo {
+                processing: crate::processing::Processing::default(),
+                saved_processing: crate::processing::Processing::default(),
+                tab_open: true,
                 id: id.clone(),
                 revision_id: id,
                 path: self.state.audition.path.clone()?,
