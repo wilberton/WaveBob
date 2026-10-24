@@ -6,7 +6,7 @@ unsaved work. MP3 export is a version 1 requirement.
 
 **Blocked by:** 06 — WAV and MP3 import with scalable waveform jobs; 11 — Cut, copy, paste, delete and trim samples.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] WAV Save preserves supported source encoding; Save As/export offers WAV and
   MP3 with a 24-bit WAV default for new exports and defined overload handling.
@@ -32,3 +32,15 @@ unsaved work. MP3 export is a version 1 requirement.
 ## Specification
 
 [WaveBob editor specification](../spec.md).
+
+## Progress
+
+Core sample export/save is implemented with atomic worker publication, explicit
+overload/overwrite policy and exact saved-revision tracking. All 24 MP3 settings
+round-trip with exact gapless duration; independent FFmpeg selected-range checks
+pass and are recorded in `docs/verification/ticket13/encoder-qa.json`.
+GUI save/export and dirty close/quit flows remain in progress.
+See [encoder/build/license details](../../../docs/mp3-encoder.md).
+The core slice passes 86 GUI-enabled tests and 61 GUI-free tests, both Clippy
+variants and formatting. Large Windows catalogue responses now use 64 KiB pipe
+buffers; the >64 KiB regression test completes within its 500 ms deadline.

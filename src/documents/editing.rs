@@ -182,6 +182,7 @@ impl Editor {
             progress: 0,
             result: None,
             error: None,
+            output: None,
         };
         let pending = PendingEdit {
             document_id: document.id,
@@ -495,7 +496,17 @@ impl Editor {
             .clone();
         advance(revision)?;
         stack.pop();
-        let restored = if redo { &change.after } else { &change.before };
+        let mut restored = if redo {
+            change.after.clone()
+        } else {
+            change.before.clone()
+        };
+        let current = self.document(&restored.id)?;
+        restored.path = current.path.clone();
+        restored.name = current.name.clone();
+        restored.saved_revision_id = current.saved_revision_id.clone();
+        restored.save_format = current.save_format.clone();
+        restored.dirty = restored.saved_revision_id.as_ref() != Some(&restored.revision_id);
         *self
             .documents
             .iter_mut()

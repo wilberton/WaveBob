@@ -9,6 +9,7 @@ use std::sync::{
     mpsc,
 };
 mod editing;
+mod saving;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct FrameRange {
@@ -40,6 +41,10 @@ pub struct DocumentInfo {
     pub selection: Option<FrameRange>,
     pub peak_level: f64,
     pub overloaded_samples: u64,
+    #[serde(default)]
+    pub saved_revision_id: Option<String>,
+    #[serde(default)]
+    pub save_format: Option<crate::exports::ExportFormat>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -58,6 +63,13 @@ pub struct JobInfo {
     pub progress: u8,
     pub result: Option<DocumentInfo>,
     pub error: Option<CommandError>,
+    #[serde(default)]
+    pub output: Option<JobOutput>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "kind", content = "details", rename_all = "snake_case")]
+pub enum JobOutput {
+    AudioExport(crate::exports::ExportSummary),
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Peak {
@@ -149,6 +161,8 @@ enum Event {
     Progress(String, u8),
     Finished(String, Result<audio::Audio, CommandError>),
     Edited(String, Result<Option<audio::Audio>, CommandError>),
+    OutputPrepared(String, mpsc::SyncSender<bool>),
+    OutputFinished(String, Result<crate::exports::ExportSummary, CommandError>),
 }
 pub(crate) type Wake = Arc<dyn Fn() + Send + Sync>;
 pub(crate) struct Editor {
@@ -162,6 +176,7 @@ pub(crate) struct Editor {
     pending_edits: BTreeMap<String, editing::PendingEdit>,
     history: editing::History,
     clipboard: Option<editing::Clipboard>,
+    pending_outputs: BTreeMap<String, saving::PendingOutput>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -177,6 +192,7 @@ impl Default for Editor {
             pending_edits: BTreeMap::new(),
             history: editing::History::default(),
             clipboard: None,
+            pending_outputs: BTreeMap::new(),
         }
     }
 }
@@ -234,6 +250,8 @@ impl Editor {
         while let Ok(event) = self.receiver.try_recv() {
             match event {
                 Event::Edited(id, result) => self.finish_edit(id, result, revision),
+                Event::OutputPrepared(id, permit) => self.approve_output(id, permit, *revision),
+                Event::OutputFinished(id, result) => self.finish_output(id, result, revision),
                 Event::Progress(id, percent) => {
                     if let Some((job, _)) = self.jobs.get_mut(&id)
                         && job.status == JobStatus::Running
@@ -266,7 +284,7 @@ impl Editor {
                                     ));
                                     continue;
                                 };
-                                let document = DocumentInfo {
+                                let mut document = DocumentInfo {
                                     id: uuid::Uuid::new_v4().to_string(),
                                     revision_id: uuid::Uuid::new_v4().to_string(),
                                     path: job.path.clone(),
@@ -285,7 +303,12 @@ impl Editor {
                                     selection: None,
                                     peak_level: audio.peak_level,
                                     overloaded_samples: audio.overloaded_samples,
+                                    saved_revision_id: None,
+                                    save_format: crate::exports::ExportFormat::source_wav(
+                                        &audio.encoding,
+                                    ),
                                 };
+                                document.saved_revision_id = Some(document.revision_id.clone());
                                 self.revisions
                                     .insert(document.revision_id.clone(), Arc::new(audio));
                                 self.active = Some(document.id.clone());
@@ -325,6 +348,8 @@ impl Editor {
             Command::DeleteAudio(params) => self.structural_edit(params, "Delete"),
             Command::TrimAudio(params) => self.structural_edit(params, "Trim"),
             Command::PasteAudio(params) => self.paste_audio(params),
+            Command::ExportAudio(params) => self.export_audio(params),
+            Command::SaveDocument(params) => self.save_audio(params),
             Command::OpenDocument(params) => self.open(params),
             Command::GetDocument(params) => Ok(CommandResult::Document(
                 self.document(&params.document_id)?.clone().into(),
@@ -399,6 +424,16 @@ impl Editor {
                     .into(),
             )),
             Command::CancelJob(params) => {
+                if self
+                    .pending_outputs
+                    .get(&params.job_id)
+                    .is_some_and(|pending| pending.committing)
+                {
+                    return Err(CommandError::new(
+                        ErrorCode::Busy,
+                        "Output publication has started; wait for its result",
+                    ));
+                }
                 let (job, cancel) = self
                     .jobs
                     .get_mut(&params.job_id)
@@ -526,6 +561,7 @@ impl Editor {
             progress: 0,
             result: None,
             error: None,
+            output: None,
         };
         let cancel = Arc::new(AtomicBool::new(false));
         self.jobs.insert(id.clone(), (job.clone(), cancel.clone()));

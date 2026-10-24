@@ -6,6 +6,7 @@ use crate::browser::{AuditionVolumeParams, BrowserSnapshot, PathParams};
 use crate::documents::*;
 use crate::edits::{ClipboardInfo, EditParams, PasteParams};
 use crate::effects::{ApplyEffectParams, HistoryInfo};
+use crate::exports::{ExportParams, SaveParams};
 use crate::presentation::{
     CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, RenderMetadata,
     RenderParams, SetEffectParams, SetLayoutParams, SetModeParams, SetViewportParams,
@@ -132,6 +133,8 @@ command_registry! {
     DeleteAudio(EditParams) => ("edit.delete", "Delete an explicit interval as one undoable edit.", true, false, false, JobInfo),
     TrimAudio(EditParams) => ("edit.trim", "Keep only an explicit nonempty interval as one undoable edit.", true, false, false, JobInfo),
     PasteAudio(PasteParams) => ("edit.paste", "Paste the internal audio clipboard, inserting at an empty interval or replacing a nonempty interval, with rate/channel conversion.", true, false, false, JobInfo),
+    ExportAudio(ExportParams) => ("audio.export", "Export an explicit document interval to WAV or MP3 as a cancellable atomic job.", true, false, false, JobInfo),
+    SaveDocument(SaveParams) => ("documents.save", "Save a whole document with explicit overwrite intent; MP3 requires explicit lossy encoding settings.", true, false, false, JobInfo),
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, false, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, false, PresentationSnapshot),
     SetEffect(SetEffectParams) => ("presentation.effects.set", "Choose visible effect parameters without applying an audio edit.", true, true, false, PresentationSnapshot),
@@ -155,6 +158,7 @@ pub(crate) fn capabilities(gui: bool, device: bool) -> Capabilities {
         "effects".into(),
         "history".into(),
         "edit".into(),
+        "audio.export".into(),
     ];
     if device {
         capabilities.push("audio.output".into());

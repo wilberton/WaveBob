@@ -8,6 +8,7 @@ pub mod desktop;
 pub mod documents;
 pub mod edits;
 pub mod effects;
+pub mod exports;
 pub mod ipc;
 pub mod mcp;
 #[cfg(feature = "gui")]
@@ -111,6 +112,7 @@ pub enum ErrorCode {
     NotFound,
     UnsupportedFormat,
     DecodeFailed,
+    EncodeFailed,
     ResourceLimit,
     Cancelled,
     Busy,

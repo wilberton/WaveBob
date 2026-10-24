@@ -8,7 +8,7 @@ default-run = "wavebob"
 
 [features]
 default = ["gui"]
-gui = ["dep:eframe", "dep:png", "dep:tempfile", "dep:rfd", "audio-output"]
+gui = ["dep:eframe", "dep:png", "dep:rfd", "audio-output"]
 audio-output = ["dep:cpal"]
 
 [[bin]]
@@ -33,7 +33,7 @@ uuid = { version = "1", features = ["v4"] }
 interprocess = "2.4"
 directories = "6"
 png = { version = "0.18", optional = true }
-tempfile = { version = "3", optional = true }
+tempfile = "3"
 rmcp = { version = "=3.7.0", default-features = false, features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
 base64 = "0.23"
@@ -42,6 +42,7 @@ symphonia = {version = "=0.6.1", default-features = false, features = ["mp3", "i
 rfd = { version = "0.17", optional = true }
 cpal = {version="=0.18.2",optional=true}
 rtrb = "=0.4.0"
+mp3lame-sys = {version="=0.1.11",default-features=false}
 
 [dev-dependencies]
 tempfile = "3"

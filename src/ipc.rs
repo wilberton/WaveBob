@@ -18,7 +18,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use interprocess::local_socket::{GenericFilePath, GenericNamespaced, Name, Stream, prelude::*};
-#[cfg(any(feature = "gui", test))]
+#[cfg(all(any(feature = "gui", test), not(windows)))]
 use interprocess::local_socket::{ListenerNonblockingMode, ListenerOptions};
 use serde::{Deserialize, Serialize};
 
@@ -92,8 +92,8 @@ fn write_frame(stream: &mut Stream, bytes: &[u8], deadline: Instant) -> io::Resu
         if Instant::now() >= deadline {
             return Err(io::ErrorKind::TimedOut.into());
         }
-        // The Windows named-pipe backend defaults to 512-byte buffers. A large
-        // nonblocking write can otherwise make no progress even with a reader.
+        // Remain compatible with peers using the backend's default 512-byte
+        // buffers. Our Windows listener uses 64 KiB to avoid per-chunk stalls.
         match stream.write(&remaining[..remaining.len().min(512)]) {
             // Windows byte-mode pipes may report a successful zero-byte write
             // when their nonblocking buffer is full. Retry under the deadline.
@@ -274,10 +274,18 @@ impl Server {
         } else {
             format!("/tmp/wavebob-{session_id}.sock")
         };
+        #[cfg(not(windows))]
         let listener = ListenerOptions::new()
             .name(socket_name(&endpoint, namespaced)?)
             .nonblocking(ListenerNonblockingMode::Both)
             .create_sync()?;
+        #[cfg(windows)]
+        let listener = interprocess::os::windows::named_pipe::PipeListenerOptions::new()
+            .path(format!(r"\\.\pipe\{endpoint}"))
+            .nonblocking(true)
+            .input_buffer_size_hint(64 * 1024)
+            .output_buffer_size_hint(64 * 1024)
+            .create_duplex::<interprocess::os::windows::named_pipe::pipe_mode::Bytes>()?;
         let record = Record {
             info: InstanceInfo {
                 session_id: session_id.into(),
@@ -309,6 +317,12 @@ impl Server {
             while !thread_stop.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok(stream) => {
+                        #[cfg(windows)]
+                        let stream = Stream::from(
+                            interprocess::os::windows::named_pipe::local_socket::Stream::from(
+                                stream,
+                            ),
+                        );
                         if active.fetch_add(1, Ordering::AcqRel) >= 32 {
                             active.fetch_sub(1, Ordering::AcqRel);
                             continue;
@@ -432,7 +446,7 @@ mod tests {
             assert!(incoming.deadline > Instant::now());
             let response =
                 crate::protocol::dispatch_line(&mut crate::Session::default(), &incoming.line);
-            assert!(serde_json::to_vec(&response).unwrap().len() > 512);
+            assert!(serde_json::to_vec(&response).unwrap().len() > 64 * 1024);
             incoming.reply.send(response).unwrap();
         });
         let response = exchange(

@@ -227,6 +227,8 @@ impl Browser {
                 selection: None,
                 peak_level: audio.peak_level,
                 overloaded_samples: audio.overloaded_samples,
+                saved_revision_id: None,
+                save_format: None,
             },
             audio,
         ))
