@@ -271,6 +271,12 @@ pub(crate) fn prepare_mix(
         ));
     }
     let rate = request.rate;
+    if graph.streaming() && range.end - range.start > 64 * 1024 * 1024 {
+        return Err(CommandError::new(
+            ErrorCode::ResourceLimit,
+            "Streaming mix export exceeds the 512 MiB PCM interval limit",
+        ));
+    }
     prepare_from(
         graph.rate,
         2,
@@ -279,6 +285,25 @@ pub(crate) fn prepare_mix(
         cancel,
         progress,
         |progress| {
+            let rendered = if graph.streaming() {
+                let mut stream = audio::mix::Stream::prepare(graph, range.start, None, || {
+                    cancel.load(Ordering::Acquire)
+                })?;
+                let mut pcm = Vec::with_capacity((range.end - range.start) as usize);
+                for frame in range.start..range.end {
+                    if frame.is_multiple_of(1024) && cancel.load(Ordering::Acquire) {
+                        return Err(CommandError::new(
+                            ErrorCode::Cancelled,
+                            "Mix export cancelled",
+                        ));
+                    }
+                    pcm.push(stream.values[0]);
+                    stream.advance(graph, 1);
+                }
+                Some(pcm)
+            } else {
+                None
+            };
             audio::resample::convert_from(
                 range.end - range.start,
                 graph.rate,
@@ -286,7 +311,15 @@ pub(crate) fn prepare_mix(
                 2,
                 cancel,
                 progress,
-                |frame| graph.frame(range.start + frame).map(|value| value as f64),
+                |frame| {
+                    rendered
+                        .as_ref()
+                        .map_or_else(
+                            || graph.frame(range.start + frame),
+                            |pcm| pcm[frame as usize],
+                        )
+                        .map(f64::from)
+                },
             )
         },
     )

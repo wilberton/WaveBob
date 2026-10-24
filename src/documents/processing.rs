@@ -36,6 +36,28 @@ impl Editor {
             .and_then(|preview| self.processing_snapshot(preview.owner.clone()).ok())
             .is_some_and(|snapshot| snapshot.preview_id.is_some())
     }
+    pub(super) fn audible_arrangement(&self) -> crate::arrangement::Arrangement {
+        let mut arrangement = self.arrangement.clone();
+        let mut changed = false;
+        for clip in arrangement
+            .tracks
+            .iter_mut()
+            .flat_map(|track| &mut track.clips)
+        {
+            if let Ok(snapshot) = self.processing_snapshot(Owner::Clip(clip.id.clone()))
+                && let Some(state) = snapshot.preview
+            {
+                changed |= !state.same_sound(&clip.processing);
+                clip.processing = state;
+            }
+        }
+        if changed {
+            let hash = crate::projects::checksum(&(&arrangement.revision_id, &arrangement.tracks));
+            arrangement.revision_id =
+                uuid::Uuid::from_u128(u128::from_str_radix(&hash[..32], 16).unwrap()).to_string();
+        }
+        arrangement
+    }
     pub fn audible_audio(
         &self,
         id: &str,

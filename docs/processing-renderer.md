@@ -64,3 +64,27 @@ non-unity live processing state. It cannot silently write dry PCM or mark the
 processed document saved. Use `processing.render`/`processing.samples` for current
 render inspection. Rendered WAV/MP3 export is integrated by ticket 43. Sample and
 project saves require previews to be committed or cancelled first.
+
+## Arrangement streaming
+
+Prepared mix graphs retain immutable source intervals and at most 128 clip voices.
+Each processed voice runs the shared source-rate chain before project-clock
+interpolation, with computational latency removed once per path. Trimmed ranges
+use local envelope coordinates. Untouched mixed-rate clips reuse the existing
+prepared sinc conversion. Owner processing does not require a whole-file wet
+render for each preview update. A gain-only replacement that switches between the
+static conversion and streaming path transitions over 10 ms; other topology
+changes use 20 ms. Compatible voices transfer state and ramp their continuous
+targets. Track/master controls remain outside owner processing.
+
+Clip previews produce an audible graph identity without publishing an arrangement
+edit or history entry. Superseded mix jobs are cancelled and still count against
+the two-job admission limit until they retire. Preparation and streaming-context
+catch-up occur off the callback. Mix inspection and export use the same streaming
+reader and reject unresolved previews. Export may materialize its explicit interval
+(up to 512 MiB) for high-quality output-rate conversion; live updates do not.
+Closing a preview restores committed sound through the same handoff path.
+
+Processing generation/error, maximum path latency and capped-tail reporting cover
+mix streams as well as document playback. Final tail geometry and linked-document
+bounce freshness remain ticket 42's responsibilities.

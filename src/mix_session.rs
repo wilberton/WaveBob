@@ -126,10 +126,7 @@ impl Session {
             let position = if self.pending_mix_play {
                 Some(document.cursor)
             } else {
-                explicit.or_else(|| {
-                    (transport.requested.audio_revision_id.as_ref() != Some(&document.revision_id))
-                        .then_some(transport.applied.frame)
-                })
+                explicit
             };
             match self.playback.request_mix(
                 &document,

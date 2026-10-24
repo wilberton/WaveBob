@@ -6,7 +6,7 @@ impl Editor {
         let attempt = self
             .mix_attempt
             .as_ref()
-            .filter(|id| self.mix_bases.get(*id) == Some(&self.arrangement.revision_id))
+            .filter(|id| self.mix_bases.get(*id) == Some(&self.audible_arrangement().revision_id))
             .and_then(|id| self.jobs.get(id).map(|(job, _)| job));
         MixState {
             arrangement_id: self.arrangement.id.clone(),
@@ -36,13 +36,13 @@ impl Editor {
     pub fn prepared_mix(&self) -> Option<Arc<mix::Graph>> {
         self.mix
             .as_ref()
-            .filter(|graph| graph.revision_id == self.arrangement.revision_id)
+            .filter(|graph| graph.revision_id == self.audible_arrangement().revision_id)
             .cloned()
     }
     pub fn ensure_mix(&mut self, explicit: bool) -> Result<JobInfo, CommandError> {
         if let Some(id) = &self.mix_attempt
             && let Some(base) = self.mix_bases.get(id)
-            && base == &self.arrangement.revision_id
+            && base == &self.audible_arrangement().revision_id
         {
             let job = &self.jobs[id].0;
             if job.status == JobStatus::Running
@@ -58,6 +58,12 @@ impl Editor {
                     )
                 }));
             }
+        }
+        if let Some(id) = &self.mix_attempt
+            && self.mix_bases.get(id) != Some(&self.audible_arrangement().revision_id)
+            && let Some((_, cancel)) = self.jobs.get(id)
+        {
+            cancel.store(true, Ordering::Release);
         }
         if self
             .jobs
@@ -104,8 +110,8 @@ impl Editor {
         self.jobs.insert(id.clone(), (job.clone(), cancel.clone()));
         self.mix_attempt = Some(id.clone());
         self.mix_bases
-            .insert(id.clone(), self.arrangement.revision_id.clone());
-        let arrangement = self.arrangement.clone();
+            .insert(id.clone(), self.audible_arrangement().revision_id.clone());
+        let arrangement = self.audible_arrangement();
         let previous = self.mix.clone();
         let sender = self.sender.clone();
         let wake = self.wake.clone();
@@ -127,13 +133,13 @@ impl Editor {
         Ok(job)
     }
     fn mix_inputs(&self) -> Result<Vec<mix::Input>, CommandError> {
-        self.arrangement
+        self.audible_arrangement()
             .tracks
-            .iter()
-            .flat_map(|track| &track.clips)
+            .into_iter()
+            .flat_map(|track| track.clips)
             .map(|clip| {
                 self.clip_audio(&clip.id)
-                    .map(|(clip, audio, range)| mix::Input { clip, audio, range })
+                    .map(|(_, audio, range)| mix::Input { clip, audio, range })
             })
             .collect()
     }
@@ -141,6 +147,12 @@ impl Editor {
         &mut self,
         params: crate::exports::MixExportParams,
     ) -> Result<CommandResult, CommandError> {
+        if self.has_active_preview() {
+            return Err(CommandError::new(
+                ErrorCode::Busy,
+                "Resolve the processing preview before reading or exporting a committed mix",
+            ));
+        }
         if params.revision_id != self.arrangement.revision_id {
             return Err(CommandError::new(
                 ErrorCode::StaleRevision,
@@ -194,7 +206,7 @@ impl Editor {
                 "Mix export would exceed the retained audio limit",
             ));
         }
-        let arrangement = self.arrangement.clone();
+        let arrangement = self.audible_arrangement();
         let previous = self.mix.clone();
         let overwrite = params.overwrite;
         let path = params.path.clone();
@@ -250,7 +262,7 @@ impl Editor {
             return;
         }
         let result = result.and_then(|graph| {
-            if graph.revision_id != self.arrangement.revision_id {
+            if graph.revision_id != self.audible_arrangement().revision_id {
                 return Err(CommandError::new(
                     ErrorCode::StaleRevision,
                     "Arrangement changed during mix preparation",
@@ -285,6 +297,12 @@ impl Editor {
         &self,
         params: MixSamplesParams,
     ) -> Result<CommandResult, CommandError> {
+        if self.has_active_preview() {
+            return Err(CommandError::new(
+                ErrorCode::Busy,
+                "Resolve the processing preview before reading or exporting a committed mix",
+            ));
+        }
         if params.revision_id != self.arrangement.revision_id {
             return Err(CommandError::new(
                 ErrorCode::StaleRevision,
@@ -310,8 +328,10 @@ impl Editor {
         ];
         let mut peak = 0.0f64;
         let mut overloaded = 0;
-        for frame in params.start_frame..end {
-            let values = graph.frame(frame);
+        let mut stream = mix::Stream::prepare(&graph, params.start_frame, None, || false)?;
+        for _ in params.start_frame..end {
+            let values = stream.values[0];
+            stream.advance(&graph, 1);
             for channel in 0..2 {
                 let value = values[channel] as f64;
                 channels[channel].push(value);
@@ -343,7 +363,7 @@ impl Editor {
             saved_processing: crate::processing::Processing::default(),
             tab_open: true,
             id: self.arrangement.id.clone(),
-            revision_id: self.arrangement.revision_id.clone(),
+            revision_id: self.audible_arrangement().revision_id,
             path: String::new(),
             name: "Arrangement".into(),
             sample_rate: self.arrangement.sample_rate,

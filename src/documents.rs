@@ -448,6 +448,7 @@ impl Editor {
                     | Command::CancelProcessingPreview(_)
                     | Command::BeginProcessingPreview(_)
                     | Command::CancelJob(_)
+                    | Command::PrepareMix(_)
             );
         let result = self.execute_inner(command, revision);
         if result.is_ok() && cancel_preview {

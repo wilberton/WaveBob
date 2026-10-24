@@ -115,18 +115,32 @@ impl Shared {
             values[1].store(id as u64, Ordering::Relaxed);
         }
         self.latency.store(
-            plan.and_then(|p| p.voice.as_ref())
-                .map_or(0, |v| v.chain.latency()) as u64,
+            plan.and_then(|p| p.voice.as_ref()).map_or_else(
+                || {
+                    plan.and_then(|p| p.mix_voice.as_ref().zip(p.source.as_ref()))
+                        .map_or(0, |(voice, source)| match source {
+                            Source::Mix { graph, .. } => voice.latency(graph),
+                            _ => 0,
+                        })
+                },
+                |v| v.chain.latency() as u64,
+            ),
             Ordering::Relaxed,
         );
         self.tail_capped.store(
             plan.and_then(|p| p.voice.as_ref())
-                .is_some_and(|v| v.chain.tail_capped),
+                .is_some_and(|v| v.chain.tail_capped)
+                || plan
+                    .and_then(|p| p.mix_voice.as_ref())
+                    .is_some_and(|v| v.tail_capped()),
             Ordering::Relaxed,
         );
         self.processing_failed.store(
             plan.and_then(|p| p.voice.as_ref())
-                .is_some_and(|v| v.chain.failed),
+                .is_some_and(|v| v.chain.failed)
+                || plan
+                    .and_then(|p| p.mix_voice.as_ref())
+                    .is_some_and(|v| v.failed),
             Ordering::Relaxed,
         );
         self.tail_active.store(
@@ -233,7 +247,9 @@ impl Source {
                 Self::Audio(a) | Self::Processed { audio: a, .. },
                 Self::Audio(b) | Self::Processed { audio: b, .. },
             ) => Arc::ptr_eq(a, b),
-            (Self::Mix { graph: a, .. }, Self::Mix { graph: b, .. }) => Arc::ptr_eq(a, b),
+            (Self::Mix { graph: a, .. }, Self::Mix { graph: b, .. }) => {
+                a.arrangement_id == b.arrangement_id
+            }
             _ => false,
         }
     }
@@ -252,6 +268,7 @@ struct Plan {
     voice: Option<crate::rendering::Voice>,
     prepared_position: u64,
     processing_key: u128,
+    mix_voice: Option<crate::audio::mix::Stream>,
 }
 struct Renderer {
     incoming: rtrb::Consumer<Box<Plan>>,
@@ -262,6 +279,7 @@ struct Renderer {
     peak: f32,
     outgoing: Option<Box<Plan>>,
     transition: u32,
+    transition_total: u32,
     last: [f32; 2],
     pause_from: [f32; 2],
     pause_remaining: u32,
@@ -345,6 +363,27 @@ impl Renderer {
                 && next.seek.is_none()
                 && let Some(old) = &mut self.current
             {
+                if old.processing_key == next.processing_key && old.bounds == next.bounds {
+                    std::mem::swap(&mut next.mix_voice, &mut old.mix_voice);
+                    transferred = next.mix_voice.is_some();
+                } else if let (
+                    Some(a),
+                    Some(b),
+                    Some(Source::Mix { graph, .. }),
+                    Some(Source::Mix { graph: prior, .. }),
+                ) = (
+                    &mut next.mix_voice,
+                    &mut old.mix_voice,
+                    &next.source,
+                    &old.source,
+                ) {
+                    transferred = a.retarget(b, graph, prior);
+                }
+            }
+            if carry
+                && next.seek.is_none()
+                && let Some(old) = &mut self.current
+            {
                 let compatible = match (&old.source, &next.source) {
                     (
                         Some(Source::Processed {
@@ -402,7 +441,30 @@ impl Renderer {
                     voice.advance(audio, delta);
                 }
             }
-            if matches!(&next.source, Some(Source::Processed { .. })) && next.voice.is_none() {
+            if carry
+                && next.seek.is_none()
+                && !transferred
+                && let (Some(stream), Some(Source::Mix { graph, .. })) =
+                    (&mut next.mix_voice, &next.source)
+            {
+                let delta = if next.position >= next.prepared_position {
+                    next.position - next.prepared_position
+                } else if let Some(bounds) = &next.bounds {
+                    bounds.end.saturating_sub(next.prepared_position)
+                        + next.position.saturating_sub(bounds.start)
+                } else {
+                    0
+                };
+                if delta > 4096 {
+                    self.shared.needs_prepare.store(true, Ordering::Release);
+                    self.retired.push(next).expect("retirement slot reserved");
+                    continue;
+                }
+                stream.advance(graph, delta);
+            }
+            if (matches!(&next.source, Some(Source::Processed { .. })) && next.voice.is_none())
+                || (matches!(&next.source, Some(Source::Mix { .. })) && next.mix_voice.is_none())
+            {
                 self.shared.needs_prepare.store(true, Ordering::Release);
                 self.retired.push(next).expect("retirement slot reserved");
                 continue;
@@ -437,11 +499,16 @@ impl Renderer {
                                 || a.envelope.fade_in_frames != b.envelope.fade_in_frames
                                 || a.envelope.fade_out_frames != b.envelope.fade_out_frames
                         }
+                        (Some(Source::Mix { .. }), Some(Source::Mix { .. })) => {
+                            old.processing_key != new.processing_key
+                        }
                         _ => false,
                     };
                 if topology {
+                    let continuous = matches!((&old.source,&new.source),(Some(Source::Mix{graph:a,..}),Some(Source::Mix{graph:b,..})) if a.gain_change_only(b));
+                    self.transition_total = (self.rate / if continuous { 100 } else { 50 }).max(1);
                     self.outgoing = Some(old);
-                    self.transition = (self.rate / 50).max(1);
+                    self.transition = self.transition_total;
                 } else {
                     self.retired.push(old).expect("retirement slot reserved");
                 }
@@ -463,7 +530,7 @@ impl Renderer {
                 .outgoing
                 .as_mut()
                 .map_or([0.0; 2], |plan| render_plan(plan, self.rate));
-            let fraction = 1.0 - self.transition as f32 / (self.rate / 50).max(1) as f32;
+            let fraction = 1.0 - self.transition as f32 / self.transition_total as f32;
             output = [
                 previous[0] + (output[0] - previous[0]) * fraction,
                 previous[1] + (output[1] - previous[1]) * fraction,
@@ -509,7 +576,9 @@ fn processing_key(source: Option<&Source>, bounds: Option<&FrameRange>) -> u128 
 }
 
 fn render_plan(plan: &mut Plan, rate: u32) -> [f32; 2] {
-    if plan.voice.as_ref().is_some_and(|v| v.chain.failed) {
+    if plan.voice.as_ref().is_some_and(|v| v.chain.failed)
+        || plan.mix_voice.as_ref().is_some_and(|v| v.failed)
+    {
         plan.playing = false;
     }
     if !plan.playing {
@@ -527,7 +596,9 @@ fn render_plan(plan: &mut Plan, rate: u32) -> [f32; 2] {
     } else {
         second = second.min(audio.frames().saturating_sub(1));
     }
-    let pair = if let Some(voice) = &plan.voice {
+    let pair = if let Some(stream) = &plan.mix_voice {
+        stream.values
+    } else if let Some(voice) = &plan.voice {
         voice.values
     } else if first < audio.frames() {
         [audio.frame(first), audio.frame(second)]
@@ -547,6 +618,9 @@ fn render_plan(plan: &mut Plan, rate: u32) -> [f32; 2] {
     plan.phase %= rate as u64;
     if let (Some(voice), Source::Processed { audio, .. }) = (&mut plan.voice, audio) {
         voice.advance(audio, advance);
+    }
+    if let (Some(stream), Source::Mix { graph, .. }) = (&mut plan.mix_voice, audio) {
+        stream.advance(graph, advance);
     }
     if let Some(bounds) = &plan.bounds {
         if plan.position >= bounds.end {
@@ -639,6 +713,7 @@ impl Playback {
                 peak: 0.0,
                 outgoing: None,
                 transition: 0,
+                transition_total: 1,
                 last: [0.0; 2],
                 pause_from: [0.0; 2],
                 pause_remaining: 0,
@@ -792,7 +867,10 @@ impl Playback {
             | self.shared.processing_key[1].load(Ordering::Acquire) as u128;
         let reuse = seek.is_none()
             && processing_key == applied_key
-            && matches!(&source, Some(Source::Processed { .. }));
+            && matches!(
+                &source,
+                Some(Source::Processed { .. }) | Some(Source::Mix { .. })
+            );
         let mut plan = Box::new(Plan {
             generation,
             source: source.clone(),
@@ -806,9 +884,10 @@ impl Playback {
             voice: None,
             prepared_position: seek.unwrap_or(self.state.applied.frame),
             processing_key,
+            mix_voice: None,
         });
-        let expensive =
-            matches!(&source,Some(Source::Processed{state,..}) if !state.effects.is_empty());
+        let expensive = matches!(&source,Some(Source::Processed{state,..}) if !state.effects.is_empty())
+            || matches!(&source, Some(Source::Mix {graph,..}) if graph.expensive());
         if expensive && !reuse {
             if seek.is_some() {
                 self.shared
@@ -1264,6 +1343,7 @@ mod processing_tests {
                 gain: 1.0,
                 voice: Some(voice),
                 prepared_position: position,
+                mix_voice: None,
                 processing_key: key,
             });
             control

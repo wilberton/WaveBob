@@ -489,6 +489,7 @@ pub(crate) struct Voice {
     pub values: [[f32; 2]; 2],
     input_position: u64,
     source_frames: u64,
+    source_start: u64,
     bounds: Option<crate::documents::FrameRange>,
     pub ended: bool,
     last: [f32; 2],
@@ -521,9 +522,45 @@ impl Voice {
         let chain = Chain::prepare(state, source.rate, channels, tempo)?;
         Self::with_chain(chain, source, position, bounds, cancelled)
     }
+    pub fn prepare_range(
+        state: &Processing,
+        source: &crate::audio::Audio,
+        range: &crate::documents::FrameRange,
+        tempo: f64,
+        position: u64,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<Self, CommandError> {
+        let channels = if source.channels == 1 {
+            Channels::Mono
+        } else {
+            Channels::Stereo
+        };
+        let chain = Chain::prepare(state, source.rate, channels, tempo)?;
+        Self::with_range(chain, source, range, position, None, cancelled)
+    }
     pub(crate) fn with_chain(
+        chain: Chain,
+        source: &crate::audio::Audio,
+        position: u64,
+        bounds: Option<crate::documents::FrameRange>,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<Self, CommandError> {
+        Self::with_range(
+            chain,
+            source,
+            &crate::documents::FrameRange {
+                start: 0,
+                end: source.frames(),
+            },
+            position,
+            bounds,
+            cancelled,
+        )
+    }
+    fn with_range(
         mut chain: Chain,
         source: &crate::audio::Audio,
+        range: &crate::documents::FrameRange,
         position: u64,
         bounds: Option<crate::documents::FrameRange>,
         cancelled: impl Fn() -> bool,
@@ -533,7 +570,8 @@ impl Voice {
             chain,
             values: [[0.0; 2]; 2],
             input_position: 0,
-            source_frames: source.frames(),
+            source_frames: range.end - range.start,
+            source_start: range.start,
             bounds,
             ended: false,
             last: [0.0; 2],
@@ -574,7 +612,7 @@ impl Voice {
     fn read(&mut self, source: &crate::audio::Audio) -> [f32; 2] {
         let frame = self.input_position;
         let input = if frame < self.source_frames {
-            let offset = frame as usize * source.channels as usize;
+            let offset = (frame + self.source_start) as usize * source.channels as usize;
             [
                 source.samples[offset],
                 source.samples[offset + usize::from(source.channels == 2)],
@@ -603,6 +641,13 @@ impl Voice {
             self.values[0] = self.values[1];
             self.values[1] = self.read(source);
         }
+    }
+    /// A loop is a new input interval in the existing processor state.
+    pub fn wrap(&mut self, source: &crate::audio::Audio, position: u64) {
+        self.input_position = position;
+        self.ended = false;
+        self.values[0] = self.read(source);
+        self.values[1] = self.read(source);
     }
 }
 
@@ -984,8 +1029,8 @@ mod tests {
             |_| {},
         )
         .unwrap();
-        let render = |delay| {
-            let chain = Chain::with_processors(
+        let make_chain = |delay| {
+            Chain::with_processors(
                 &Processing::default(),
                 48000,
                 Channels::Mono,
@@ -997,28 +1042,9 @@ mod tests {
                     false,
                 )],
             )
-            .unwrap();
-            let mut voice = Voice::with_chain(chain, &source, 0, None, || false).unwrap();
-            let pcm = (0..256)
-                .map(|_| {
-                    let value = voice.values[0][0];
-                    voice.advance(&source, 1);
-                    value
-                })
-                .collect();
-            Arc::new(
-                crate::audio::prepare(
-                    48000,
-                    1,
-                    "float32".into(),
-                    Default::default(),
-                    pcm,
-                    &cancel,
-                    |_| {},
-                )
-                .unwrap(),
-            )
+            .unwrap()
         };
+        let source = Arc::new(source);
         let clip = |order| Clip {
             id: uuid::Uuid::new_v4().to_string(),
             name: "latency probe".into(),
@@ -1057,12 +1083,12 @@ mod tests {
         let inputs = vec![
             crate::audio::mix::Input {
                 clip: first,
-                audio: render(7),
+                audio: source.clone(),
                 range: crate::documents::FrameRange { start: 0, end: 256 },
             },
             crate::audio::mix::Input {
                 clip: second,
-                audio: render(19),
+                audio: source,
                 range: crate::documents::FrameRange { start: 0, end: 256 },
             },
         ];
@@ -1070,12 +1096,18 @@ mod tests {
             crate::audio::mix::prepare(&arrangement, inputs, None, &cancel, |_| {}).unwrap();
         let gains = arrangement.crossfades().regions[0].gains(64);
         let expected = (gains[0] + gains[1]) * std::f64::consts::FRAC_1_SQRT_2;
-        assert!((graph.frame(64)[0] as f64 - expected).abs() < 1e-7);
-        assert!(
-            (0..256)
-                .filter(|n| *n != 64)
-                .all(|n| graph.frame(n) == [0.0; 2])
+        let mut stream = crate::audio::mix::Stream::with_test_chains(
+            &graph,
+            vec![make_chain(7), make_chain(19)],
         );
+        for frame in 0..256 {
+            if frame == 64 {
+                assert!((stream.values[0][0] as f64 - expected).abs() < 1e-7);
+            } else {
+                assert_eq!(stream.values[0], [0.0; 2]);
+            }
+            stream.advance(&graph, 1);
+        }
         assert_eq!(graph.frames, 256);
     }
 }

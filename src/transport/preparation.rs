@@ -49,12 +49,10 @@ impl Worker {
                             if plan.seek.is_some() || !clock.playing.load(Ordering::Acquire) {
                                 break;
                             }
-                            let Some(Source::Processed { audio, .. }) = &plan.source else {
+                            let Some(source) = &plan.source else {
                                 break;
                             };
-                            let Some(voice) = &mut plan.voice else {
-                                break;
-                            };
+                            let rate = source.rate();
                             let position = clock.frame.load(Ordering::Acquire);
                             let delta = if position >= plan.prepared_position {
                                 position - plan.prepared_position
@@ -64,7 +62,7 @@ impl Worker {
                             } else {
                                 0
                             };
-                            if delta > audio.rate as u64 * crate::rendering::TAIL_SECONDS {
+                            if delta > rate as u64 * crate::rendering::TAIL_SECONDS {
                                 return Err(CommandError::new(
                                     ErrorCode::ResourceLimit,
                                     "Preparation could not catch up within 60 seconds of context",
@@ -79,7 +77,19 @@ impl Worker {
                                         "Preparation superseded",
                                     ));
                                 }
-                                voice.advance(audio, 1);
+                                match source {
+                                    Source::Processed { audio, .. } => {
+                                        if let Some(voice) = &mut plan.voice {
+                                            voice.advance(audio, 1);
+                                        }
+                                    }
+                                    Source::Mix { graph, .. } => {
+                                        if let Some(voice) = &mut plan.mix_voice {
+                                            voice.advance(graph, 1);
+                                        }
+                                    }
+                                    _ => break,
+                                }
                             }
                             plan.prepared_position = position;
                             if delta < 256 {
@@ -155,6 +165,21 @@ pub(super) fn prepare_voice(
             state,
             audio,
             *tempo,
+            position,
+            plan.bounds.clone(),
+            &cancelled,
+        )?);
+        plan.prepared_position = position;
+    }
+    if let Some(Source::Mix { graph, .. }) = &plan.source {
+        let mut position = plan.prepared_position;
+        if let Some(bounds) = &plan.bounds
+            && (position < bounds.start || position >= bounds.end)
+        {
+            position = bounds.start;
+        }
+        plan.mix_voice = Some(crate::audio::mix::Stream::prepare(
+            graph,
             position,
             plan.bounds.clone(),
             cancelled,

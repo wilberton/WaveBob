@@ -736,3 +736,72 @@ fn pause_ramps_output_without_consuming_streaming_position() {
     assert_eq!(frames[0], [0.5; 2]);
     assert_eq!(state(&mut session)["applied"]["frame"], 128);
 }
+
+#[test]
+fn arrangement_clip_preview_and_cancel_preserve_callback_resource_rules() {
+    let (mut session, mut output, _directory, id) = fixture(48000, 2, &[16384; 16384]);
+    let doc = ok(send(
+        &mut session,
+        "documents.get",
+        json!({"document_id":id}),
+    ));
+    let arr = ok(send(&mut session, "tracks.add", json!({})));
+    let arr = ok(send(
+        &mut session,
+        "clips.insert",
+        json!({"track_id":arr["tracks"][0]["id"],"document_id":id,"revision_id":doc["revision_id"],"source_start":0,"source_end":8192,"position":0}),
+    ));
+    let owner = json!({"kind":"clip","id":arr["tracks"][0]["clips"][0]["id"]});
+    ok(send(&mut session, "mix.play", json!({})));
+    let wait = |session: &mut Session, previous: Option<String>| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let mix = ok(send(session, "mix.get", json!({})));
+            if !mix["prepared_revision_id"].is_null()
+                && mix["prepared_revision_id"].as_str() != previous.as_deref()
+                && mix["pending_job_id"].is_null()
+            {
+                return mix["prepared_revision_id"].as_str().unwrap().to_string();
+            }
+            assert!(std::time::Instant::now() < deadline, "{mix}");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    };
+    let first = wait(&mut session, None);
+    output.render_into(&mut [[0.0; 2]; 64]);
+    state(&mut session);
+    let processing = ok(send(&mut session, "processing.get", json!({"owner":owner})));
+    let preview = ok(send(
+        &mut session,
+        "processing.preview.begin",
+        json!({"owner":owner,"expected_edit_revision":processing["committed"]["edit_revision_id"]}),
+    ));
+    ok(send(
+        &mut session,
+        "processing.preview.update",
+        json!({"preview_id":preview["preview_id"],"change":{"action":"set_envelope","envelope":{"gain_db":-6.020599913279624,"fade_in_frames":0,"fade_out_frames":0}}}),
+    ));
+    let preview_revision = wait(&mut session, Some(first));
+    let mut frames = [[0.0; 2]; 600];
+    ALLOCS.set(0);
+    FREES.set(0);
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    assert_eq!((ALLOCS.get(), FREES.get()), (0, 0));
+    assert_eq!(frames[599], [0.25; 2]);
+    state(&mut session);
+    ok(send(
+        &mut session,
+        "processing.preview.cancel",
+        json!({"preview_id":preview["preview_id"]}),
+    ));
+    wait(&mut session, Some(preview_revision));
+    ALLOCS.set(0);
+    FREES.set(0);
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    assert_eq!((ALLOCS.get(), FREES.get()), (0, 0));
+    assert_eq!(frames[599], [0.5; 2]);
+}

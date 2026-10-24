@@ -4,25 +4,25 @@
 
 **Blocked by:** 27 â€” Model live processing state and reference contracts; 08 â€” Waveform playback, seeking and loop transport; 16 â€” Hear and inspect a multitrack mix.
 
-**Status:** in-progress
+**Status:** done
 
 ## Acceptance criteria
 
-- [ ] A WaveBob processor contract declares preparation, supported parameters, latency, output channels, tail/activity, reset and processing. Manual playback and offline rendering use the same algorithm path; render metadata distinguishes source body, latency and audible tail.
+- [x] A WaveBob processor contract declares preparation, supported parameters, latency, output channels, tail/activity, reset and processing. Manual playback and offline rendering use the same algorithm path; render metadata distinguishes source body, latency and audible tail.
 
-- [ ] Callback processing allocates/deallocates no heap buffers, performs no file access or blocking locks, and retires graph resources off the callback. Preparation coalesces superseded work, enforces documented buffer/voice limits and keeps the prior valid audible graph on failure.
+- [x] Callback processing allocates/deallocates no heap buffers, performs no file access or blocking locks, and retires graph resources off the callback. Preparation coalesces superseded work, enforces documented buffer/voice limits and keeps the prior valid audible graph on failure.
 
-- [ ] Continuous parameters/envelope gain ramp approximately 10 ms; bypass, reorder and topology replacements transition approximately 20 ms with bounded old/new resources. Per-effect processors may provide justified transition policies without changing fixed-setting reference results.
+- [x] Continuous parameters/envelope gain ramp approximately 10 ms; bypass, reorder and topology replacements transition approximately 20 ms with bounded old/new resources. Per-effect processors may provide justified transition policies without changing fixed-setting reference results.
 
-- [ ] Compensate per-path latency in arrangements and dry/bypassed comparisons; prepare changed latency atomically while retaining transport position. Offline trimming removes computational delay, preserving intentional predelay/echo. Tests with known-delay processors verify alignment, crossfades and no double compensation.
+- [x] Compensate per-path latency in arrangements and dry/bypassed comparisons; prepare changed latency atomically while retaining transport position. Offline trimming removes computational delay, preserving intentional predelay/echo. Tests with known-delay processors verify alignment, crossfades and no double compensation.
 
-- [ ] Implement envelope evaluation before its owner stack: independent frame-based linear fades multiply, zero/one-frame rules match the spec, gain is finite validated dB or explicit mute, and source PCM remains unchanged.
+- [x] Implement envelope evaluation before its owner stack: independent frame-based linear fades multiply, zero/one-frame rules match the spec, gain is finite validated dB or explicit mute, and source PCM remains unchanged.
 
-- [ ] Use explicit channel descriptors: promote mono to dual mono when processing requires it and preserve stereo output. Tempo-synced processors receive the shared visible Effect tempo; reset modulation deterministically. Free time is the default.
+- [x] Use explicit channel descriptors: promote mono to dual mono when processing requires it and preserve stereo output. Tempo-synced processors receive the shared visible Effect tempo; reset modulation deterministically. Free time is the default.
 
-- [ ] Pause retains state, explicit seeks/rewind reset with off-callback context preparation, loop wrap carries streaming state, and non-loop playback drains tails. Implement the -100 dBFS/100 ms activity threshold, 60-second tail cap and last-10-ms taper with capped-tail metadata, including feedback that never decays.
+- [x] Pause retains state, explicit seeks/rewind reset with off-callback context preparation, loop wrap carries streaming state, and non-loop playback drains tails. Implement the -100 dBFS/100 ms activity threshold, 60-second tail cap and last-10-ms taper with capped-tail metadata, including feedback that never decays.
 
-- [ ] Expose requested/applied processing generations and readiness/errors. Deterministic manual-output tests cover preview/cancel, bypass/reorder/remove, reset/loop, invalid/nonfinite output, resource pressure and parity across buffer sizes/rates. Instrument callback allocation and test bounded handoff; actual-effect load/latency measurement is completed in 44.
+- [x] Expose requested/applied processing generations and readiness/errors. Deterministic manual-output tests cover preview/cancel, bypass/reorder/remove, reset/loop, invalid/nonfinite output, resource pressure and parity across buffer sizes/rates. Instrument callback allocation and test bounded handoff; actual-effect load/latency measurement is completed in 44.
 
 ## Specification and references
 
@@ -85,3 +85,32 @@ native/independent-decoder checks remain opt-in), and both GUI-enabled and GUI-f
 all-target Clippy variants with `-D warnings` pass. The complete direct/headless/MCP
 WAV/MP3 baseline workflow also passes. This is a verified implementation checkpoint,
 not completion of the remaining live arrangement processing integration above.
+
+## Completion verification — 24 October 2026
+
+Completed the remaining live arrangement adapter. Prepared clip voices now use
+source intervals and the shared streaming chain; clip previews/cancel create safe
+audible graph replacements without history or source-PCM changes. The mix reader
+also drives bounded inspection and explicit interval exports. Preparation is
+cancelable, limited to two audio jobs and 128 clip voices, and keeps prior audible
+state on failure. Callback handoffs retain compatible processor state or use the
+specified 10/20 ms transitions, preserve the rational transport clock and retire
+all resources to the control thread. Mix failures/latency/capped tails reach the
+transport processing snapshot.
+
+The complete GUI-free suite, including direct/headless/MCP WAV/MP3 workflow,
+passes (`.tools/test28-mix-full.log`). Focused checks additionally pass all fourteen
+transport tests (`.tools/test28-mix-alloc.log`) and twelve library tests
+(`.tools/test28-mix-latency.log`). The new clip preview/cancel test measures zero
+callback allocations and frees; nine mix cases include trimmed source intervals,
+44.1/48/96 kHz sources, 1/7/64-frame callback blocks and exact live/read parity.
+The crossfade probe now runs independently delayed 7/19-frame processors inside
+the live mix stream and verifies one-time path compensation. Formatting and GUI
+and GUI-free all-target Clippy with warnings denied pass. An overlapping Windows
+build briefly encountered an executable lock during the workflow test; rerunning
+after that process exited passed.
+
+The preceding checkpoints and their outstanding notes describe historical states.
+The foundation is complete; production constructors/editors and measured load
+remain 29–40/44, while linked bounces/final tail geometry/export policy remain
+42–43 as specified in the ticket scope.
