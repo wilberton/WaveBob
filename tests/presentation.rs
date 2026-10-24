@@ -10,6 +10,59 @@ fn layout(host: &mut DesktopHost, params: SetLayoutParams) -> wavebob::Response 
 }
 
 #[test]
+fn effect_parameters_are_revision_guarded_presentation_without_audio_mutation() {
+    use wavebob::effects::Effect;
+    let mut host = DesktopHost::default();
+    let core = host.snapshot();
+    let effect = Effect::Reverb {
+        room_size: 0.5,
+        decay_seconds: 1.5,
+        wet: 0.25,
+    };
+    assert!(matches!(
+        command(
+            &mut host,
+            Command::SetEffect(SetEffectParams {
+                effect: effect.clone(),
+                expected_presentation_revision: Some(0)
+            })
+        )
+        .outcome,
+        Outcome::Ok { .. }
+    ));
+    assert_eq!(host.presentation().effect, effect);
+    assert_eq!(host.presentation().revision, 1);
+    assert_eq!(host.snapshot(), core);
+    let view = host.presentation();
+    for (effect, expected, code) in [
+        (Effect::Gain { db: 3.0 }, Some(0), ErrorCode::StaleRevision),
+        (
+            Effect::Reverb {
+                room_size: 2.0,
+                decay_seconds: 1.5,
+                wet: 0.25,
+            },
+            Some(1),
+            ErrorCode::InvalidParams,
+        ),
+    ] {
+        assert!(
+            matches!(command(&mut host,Command::SetEffect(SetEffectParams{effect,expected_presentation_revision:expected})).outcome,Outcome::Error{error} if error.code==code)
+        );
+        assert_eq!(host.presentation(), view);
+        assert_eq!(host.snapshot(), core);
+    }
+    command(
+        &mut host,
+        Command::SetEffect(SetEffectParams {
+            effect,
+            expected_presentation_revision: Some(1),
+        }),
+    );
+    assert_eq!(host.presentation(), view);
+}
+
+#[test]
 fn viewport_commands_validate_bounds_and_preserve_core_selection_and_audio() {
     use wavebob::documents::*;
     let directory = tempfile::tempdir().unwrap();

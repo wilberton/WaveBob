@@ -5,16 +5,22 @@ target, and inspect or undo the resulting audio.
 
 **Blocked by:** 10 — Undoable gain, fades and reverse on the editing target.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] GUI and commands share bounded parameter validation and deterministic DSP.
-- [ ] Selection processing starts with reset state, truncates the tail at target end
+- [x] GUI and commands share bounded parameter validation and deterministic DSP.
+- [x] Selection processing starts with reset state, truncates the tail at target end
   as visibly described, and leaves outside frames and document length unchanged.
-- [ ] Apply is a cancellable job with atomic revision/history publication and
+- [x] Apply is a cancellable job with atomic revision/history publication and
   correct stale-result handling.
-- [ ] Impulse, silence and wet/dry fixtures verify the result and undo/redo through
+- [x] Impulse, silence and wet/dry fixtures verify the result and undo/redo through
   the command interface rather than reproducing DSP implementation details.
 
 ## Specification
 
 [WaveBob editor specification](../spec.md).
+
+## Verification
+
+[Signal, presentation and inspected native MCP checks](../../../docs/verification/ticket12/README.md).
+79 ordinary GUI-enabled tests and 54 GUI-free tests pass. Both Clippy variants,
+formatting, release build and the native reverb/parameter/capture workflow pass.

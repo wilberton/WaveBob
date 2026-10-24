@@ -7,6 +7,7 @@ use crate::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
+mod reverb;
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
@@ -63,10 +64,17 @@ impl EditTarget {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
-    Gain { db: f64 },
+    Gain {
+        db: f64,
+    },
     FadeIn,
     FadeOut,
     Reverse,
+    Reverb {
+        room_size: f64,
+        decay_seconds: f64,
+        wet: f64,
+    },
 }
 impl Default for Effect {
     fn default() -> Self {
@@ -75,6 +83,22 @@ impl Default for Effect {
 }
 impl Effect {
     pub(crate) fn validate(&self) -> Result<(), CommandError> {
+        if let Self::Reverb {
+            room_size,
+            decay_seconds,
+            wet,
+        } = self
+            && (!room_size.is_finite()
+                || !decay_seconds.is_finite()
+                || !wet.is_finite()
+                || !(0.0..=1.0).contains(room_size)
+                || !(0.1..=10.0).contains(decay_seconds)
+                || !(0.0..=1.0).contains(wet))
+        {
+            return Err(invalid(
+                "Reverb room size and wet mix must be 0–1; decay must be 0.1–10 seconds",
+            ));
+        }
         if let Self::Gain { db } = self
             && (!db.is_finite() || !(-120.0..=60.0).contains(db))
         {
@@ -88,6 +112,7 @@ impl Effect {
             Self::FadeIn => "Fade in",
             Self::FadeOut => "Fade out",
             Self::Reverse => "Reverse",
+            Self::Reverb { .. } => "Reverb",
         }
     }
 }
@@ -128,6 +153,30 @@ pub(crate) fn process(
     }
     let channels = source.channels as usize;
     let count = range.end - range.start;
+    if let Effect::Reverb {
+        room_size,
+        decay_seconds,
+        wet,
+    } = effect
+    {
+        reverb::apply(
+            &mut samples[range.start as usize * channels..range.end as usize * channels],
+            source.rate,
+            source.channels,
+            (*room_size, *decay_seconds, *wet),
+            cancel,
+            &progress,
+        )?;
+        return audio::prepare(
+            source.rate,
+            source.channels,
+            source.encoding.clone(),
+            source.source.clone(),
+            samples,
+            cancel,
+            progress,
+        );
+    }
     let constant_gain = if let Effect::Gain { db } = effect {
         10.0_f64.powf(db / 20.0)
     } else {
@@ -156,6 +205,7 @@ pub(crate) fn process(
                 }
             }
             Effect::Reverse => 1.0,
+            Effect::Reverb { .. } => unreachable!("Reverb is processed with reset state above"),
         };
         let input = if matches!(effect, Effect::Reverse) {
             range.end - 1 - (frame - range.start)

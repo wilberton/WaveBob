@@ -283,3 +283,127 @@ fn edits_and_undo_swap_active_playback_at_a_safe_handoff() {
     output.render_into(&mut pcm);
     assert_eq!(pcm, [[0.5; 2]]);
 }
+
+fn reverb(wet: f64, decay: f64) -> Value {
+    json!({"kind":"reverb","room_size":0.5,"decay_seconds":decay,"wet":wet})
+}
+#[test]
+fn reverb_resets_at_selection_preserves_outside_frames_and_truncates_tail() {
+    let mut values = vec![0.0; 8192];
+    values[0] = 0.75;
+    values[128] = 1.0;
+    values[4224] = 0.25;
+    let (mut s, _d, doc) = fixture(1, &values);
+    let edited = apply(&mut s, target(&doc, 128, 4224), reverb(1.0, 1.5));
+    assert_eq!(edited["frames"], 8192);
+    let processed = ok(
+        &mut s,
+        "documents.samples",
+        json!({"document_id":doc["id"],"start_frame":128,"frames":4096}),
+    )["channels"][0]
+        .clone();
+    assert_eq!(processed[0], 0.0);
+    assert!(
+        processed.as_array().unwrap()[600..]
+            .iter()
+            .any(|sample| sample.as_f64().unwrap().abs() > 0.001)
+    );
+    assert!(
+        processed
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|sample| sample.as_f64().unwrap().is_finite())
+    );
+    assert_eq!(
+        ok(
+            &mut s,
+            "documents.samples",
+            json!({"document_id":doc["id"],"start_frame":0,"frames":1})
+        )["channels"][0][0],
+        0.75
+    );
+    assert_eq!(
+        ok(
+            &mut s,
+            "documents.samples",
+            json!({"document_id":doc["id"],"start_frame":4224,"frames":1})
+        )["channels"][0][0],
+        0.25
+    );
+    ok(&mut s, "history.undo", json!({}));
+    let again = apply(&mut s, target(&doc, 128, 4224), reverb(1.0, 1.5));
+    assert_ne!(again["revision_id"], edited["revision_id"]);
+    assert_eq!(
+        ok(
+            &mut s,
+            "documents.samples",
+            json!({"document_id":doc["id"],"start_frame":128,"frames":4096})
+        )["channels"][0],
+        processed
+    );
+    ok(&mut s, "history.undo", json!({}));
+    let unchanged = apply(&mut s, target(&doc, 129, 4224), reverb(1.0, 1.5));
+    assert_eq!(
+        unchanged["revision_id"], doc["revision_id"],
+        "An earlier impulse cannot bleed into independently processed silence"
+    );
+}
+#[test]
+fn reverb_wet_dry_mix_and_decay_follow_public_signal_properties() {
+    let mut values = vec![0.0; 4096];
+    values[0] = 1.0;
+    let (mut s, _d, doc) = fixture(1, &values);
+    let dry = apply(&mut s, target(&doc, 0, 4096), reverb(0.0, 1.5));
+    assert_eq!(dry["revision_id"], doc["revision_id"]);
+    apply(&mut s, target(&doc, 0, 4096), reverb(1.0, 1.5));
+    let wet = samples(&mut s, &doc["id"], 4096);
+    ok(&mut s, "history.undo", json!({}));
+    apply(&mut s, target(&doc, 0, 4096), reverb(0.5, 1.5));
+    let mixed = samples(&mut s, &doc["id"], 4096);
+    for (frame, dry) in values.iter().enumerate() {
+        assert!(
+            (mixed[0][frame].as_f64().unwrap()
+                - (*dry as f64 * 0.5 + wet[0][frame].as_f64().unwrap() * 0.5))
+                .abs()
+                < 1e-7,
+            "frame {frame}"
+        );
+    }
+    ok(&mut s, "history.undo", json!({}));
+    apply(&mut s, target(&doc, 0, 4096), reverb(1.0, 0.1));
+    let short = samples(&mut s, &doc["id"], 4096);
+    let energy = |pcm: &Value| {
+        pcm[0].as_array().unwrap()[3072..]
+            .iter()
+            .map(|sample| sample.as_f64().unwrap().powi(2))
+            .sum::<f64>()
+    };
+    assert!(energy(&wet) > energy(&short));
+}
+#[test]
+fn reverb_bounds_silence_and_cancellation_leave_history_atomic() {
+    let (mut s, _d, doc) = fixture(1, &vec![0.0; 4096]);
+    for (room, decay, wet) in [(1.1, 1.5, 0.5), (0.5, 0.0, 0.5), (0.5, 1.5, -0.1)] {
+        assert_eq!(
+            send(
+                &mut s,
+                "effects.apply",
+                json!({"target":target(&doc,0,4096),"effect":{"kind":"reverb","room_size":room,"decay_seconds":decay,"wet":wet}})
+            )["error"]["code"],
+            "invalid_params"
+        );
+    }
+    assert_eq!(
+        apply(&mut s, target(&doc, 0, 4096), reverb(1.0, 10.0))["revision_id"],
+        doc["revision_id"]
+    );
+    let job = ok(
+        &mut s,
+        "effects.apply",
+        json!({"target":target(&doc,0,4096),"effect":reverb(0.5,1.5)}),
+    );
+    ok(&mut s, "jobs.cancel", json!({"job_id":job["id"]}));
+    assert_eq!(wait(&mut s, &job["id"])["status"], "cancelled");
+    assert_eq!(ok(&mut s, "history.get", json!({}))["undo_count"], 0);
+}

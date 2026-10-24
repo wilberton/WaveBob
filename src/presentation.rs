@@ -17,6 +17,14 @@ pub struct PresentationSnapshot {
     pub preferences: PreferenceStatus,
     #[serde(default)]
     pub viewports: std::collections::BTreeMap<String, crate::documents::FrameRange>,
+    #[serde(default)]
+    pub effect: crate::effects::Effect,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetEffectParams {
+    pub effect: crate::effects::Effect,
+    pub expected_presentation_revision: Option<u64>,
 }
 
 impl PresentationSnapshot {

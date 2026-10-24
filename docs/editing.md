@@ -4,7 +4,9 @@ Choose gain, fade in, fade out or reverse in the right panel, then press Apply.
 The displayed target resolves to the current selection or the whole nonempty
 sample. Moving the gain slider selects gain; parameter/effect choices alone do
 not change audio. Apply is unavailable during a selection gesture or without a
-sample. Reverb and clip-specific processing arrive in later tickets.
+sample. Reverb is available with bounded room/decay/wet controls. Clip-specific
+processing arrives in ticket 15. See [structural edits](structural-edits.md) for
+cut/copy/paste/delete/trim.
 
 Undo/Redo buttons and the Edit menu share `history.undo` and `history.redo`.
 Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z or Ctrl+Y redoes. Typing/modal guards apply.
@@ -25,7 +27,7 @@ result fails with `stale_revision`, never replacing newer audio.
 ```
 
 Effect kinds are `gain` (finite `db` from -120 to +60), `fade_in`, `fade_out`,
-and `reverse`. Gain converts dB to amplitude. Fades use linear amplitude with
+`reverse` and `reverb`. Gain converts dB to amplitude. Fades use linear amplitude with
 exact zero/unity endpoints; a single-frame fade uses unity. Reverse changes frame
 order independently for each channel. Outside-target frames remain unchanged.
 All processing stays floating point. Document metadata reports `peak_level` and
@@ -41,3 +43,25 @@ and history revisions share immutable buffers. The current retained PCM budget
 is 2 GiB; allocation/budget failures produce structured errors. Playback adopts
 new revisions at its bounded audio-block handoff, and cached waveforms refresh
 by revision identity.
+
+## Reverb
+
+Choose Reverb, set Room (0–1), Decay (0.1–10 seconds) and Wet (0–1), then Apply.
+Wet zero is unchanged dry audio; one is entirely reverberated. The displayed
+policy is **Tail is truncated at target end**. Each target starts with reset
+effect state; no preceding audio bleeds into a selection. Outside frames and
+document length remain unchanged. Undo/redo and job cancellation/stale-result
+handling use the same edit path as the other effects.
+
+The command effect is `{"kind":"reverb","room_size":0.5,"decay_seconds":1.5,"wet":0.25}`.
+The deterministic Schroeder network has four parallel feedback comb delays and
+two serial all-pass diffusers per channel, with bounded room scaling and decay
+feedback derived from RT60. It processes in floating point and reports overloads.
+This is a general-purpose built-in reverb, with no external plugin dependency.
+
+`presentation.effects.set {effect, expected_presentation_revision?}` chooses
+visible effect parameters in a GUI without applying audio or recording history.
+`presentation.get.effect` reports them. The GUI uses this same presentation seam;
+MCP clients can set parameters, apply an explicit audio target, then fence a
+screenshot using the returned presentation revision. Layout preferences remain
+separate; these transient effect settings are not saved as layout preferences.

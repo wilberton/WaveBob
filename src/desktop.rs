@@ -158,6 +158,7 @@ impl DesktopHost {
         }
         let expected = match &request.command {
             Command::SetMode(params) => params.expected_presentation_revision,
+            Command::SetEffect(params) => params.expected_presentation_revision,
             Command::SetViewport(params) => params.expected_presentation_revision,
             Command::SetLayout(params) => params.expected_presentation_revision,
             Command::TogglePanels(params) => params.expected_presentation_revision,
@@ -176,6 +177,13 @@ impl DesktopHost {
                 self.session.audio_output_configured(),
             )),
             Command::GetPresentation(_) => CommandResult::Presentation(self.presentation()),
+            Command::SetEffect(params) => {
+                if let Err(error) = params.effect.validate() {
+                    return self.session.failure(Some(request.id), error);
+                }
+                presentation.effect = params.effect.clone();
+                return self.commit_presentation(request.id, presentation, false);
+            }
             Command::SetMode(params) => {
                 if params.mode != presentation.mode {
                     if self.presentation.revision == u64::MAX {
@@ -252,6 +260,7 @@ impl DesktopHost {
         if layout_changed
             || next.mode != self.presentation.mode
             || next.viewports != self.presentation.viewports
+            || next.effect != self.presentation.effect
         {
             let Some(revision) = self.presentation.revision.checked_add(1) else {
                 return self.session.failure(

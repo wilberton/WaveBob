@@ -8,7 +8,7 @@ use crate::edits::{ClipboardInfo, EditParams, PasteParams};
 use crate::effects::{ApplyEffectParams, HistoryInfo};
 use crate::presentation::{
     CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, RenderMetadata,
-    RenderParams, SetLayoutParams, SetModeParams, SetViewportParams,
+    RenderParams, SetEffectParams, SetLayoutParams, SetModeParams, SetViewportParams,
 };
 use crate::transport::TransportSnapshot;
 use crate::{CommandError, ErrorCode, PROTOCOL_VERSION, SessionSnapshot};
@@ -122,7 +122,7 @@ command_registry! {
     StartAudition(PathParams) => ("audition.start", "Decode and preview WAV or MP3 without creating an audio document.", true, false, true, BrowserSnapshot),
     StopAudition(EmptyParams) => ("audition.stop", "Cancel or stop browser preview without resuming editor playback.", true, false, false, BrowserSnapshot),
     SetAuditionVolume(AuditionVolumeParams) => ("audition.volume.set", "Set independent browser preview volume from zero to one.", true, false, false, BrowserSnapshot),
-    ApplyEffect(ApplyEffectParams) => ("effects.apply", "Apply gain, fade or reverse to an explicit immutable audio target as one undoable background edit.", true, false, false, JobInfo),
+    ApplyEffect(ApplyEffectParams) => ("effects.apply", "Apply gain, fade, reverse or bounded reverb to an explicit immutable audio target as one undoable background edit.", true, false, false, JobInfo),
     GetHistory(EmptyParams) => ("history.get", "Inspect chronological session undo and redo availability.", false, false, false, HistoryInfo),
     Undo(EmptyParams) => ("history.undo", "Undo the latest committed audio edit.", true, false, false, HistoryInfo),
     Redo(EmptyParams) => ("history.redo", "Redo the latest undone audio edit.", true, false, false, HistoryInfo),
@@ -134,6 +134,7 @@ command_registry! {
     PasteAudio(PasteParams) => ("edit.paste", "Paste the internal audio clipboard, inserting at an empty interval or replacing a nonempty interval, with rate/channel conversion.", true, false, false, JobInfo),
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, false, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, false, PresentationSnapshot),
+    SetEffect(SetEffectParams) => ("presentation.effects.set", "Choose visible effect parameters without applying an audio edit.", true, true, false, PresentationSnapshot),
     SetViewport(SetViewportParams) => ("presentation.viewport.set", "Set a document's visible frame interval without changing its selection or audio.", true, true, false, PresentationSnapshot),
     SetLayout(SetLayoutParams) => ("presentation.layout.set", "Set panel widths, visibility and library/browser split.", true, true, false, PresentationSnapshot),
     TogglePanels(PresentationRevisionParams) => ("presentation.panels.toggle", "Hide both panels if either is visible; otherwise restore both.", true, true, false, PresentationSnapshot),

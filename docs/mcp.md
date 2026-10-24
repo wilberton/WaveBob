@@ -66,7 +66,8 @@ See [browser and audition commands](browser.md) and [editing](editing.md).
 An attached GUI also advertises
 `presentation.get`, `presentation.set_mode`, `presentation.viewport.set`, `presentation.layout.set`,
 `presentation.panels.toggle`, `presentation.barrier` and `capture.png`, plus four
-device playback commands and audition start (forty-seven tools in total). Command descriptors explicitly
+device playback commands, audition start and `presentation.effects.set`
+(forty-eight tools in total). Command descriptors explicitly
 report `requires_audio_output`. See [playback](transport.md) and
 [panel commands and preferences](layout.md).
 Use `tools/list` for tool discovery or call `session.capabilities` for the full

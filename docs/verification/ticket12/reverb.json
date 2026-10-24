@@ -1,0 +1,77 @@
+{
+  "capture": {
+    "id": "6",
+    "protocol_version": 1,
+    "result": {
+      "metadata": {
+        "frame_number": 10,
+        "height": 900,
+        "mode": "waveform",
+        "pending_resources": [],
+        "presentation_revision": 1,
+        "rendered_revision": 2,
+        "scale": 1.0,
+        "session_id": "b2618da7-7a96-4d60-9b05-26901dc7f126",
+        "width": 1440
+      },
+      "mime_type": "image/png",
+      "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpJv5LCD\\reverb.png"
+    },
+    "revision": 2,
+    "session_id": "b2618da7-7a96-4d60-9b05-26901dc7f126",
+    "status": "ok"
+  },
+  "document": {
+    "channels": 2,
+    "cursor": 0,
+    "dirty": true,
+    "encoding": "mp3",
+    "frames": 8192,
+    "id": "53011721-4041-48d3-a80a-b2fa45a9afaa",
+    "name": "cbr-2ch-48000-tagged.mp3",
+    "overloaded_samples": 0,
+    "path": "C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests/fixtures/audio/cbr-2ch-48000-tagged.mp3",
+    "peak_level": 0.30238333344459534,
+    "revision_id": "34612392-2e35-4783-862b-84714c6c41e4",
+    "sample_rate": 48000,
+    "selection": null,
+    "source_details": {
+      "bitrate_kbps": 128,
+      "bitrate_mode": "cbr",
+      "encoder_delay": 1105,
+      "encoder_padding": 1071
+    }
+  },
+  "effect_view": {
+    "id": "3",
+    "protocol_version": 1,
+    "result": {
+      "effect": {
+        "decay_seconds": 1.5,
+        "kind": "reverb",
+        "room_size": 0.5,
+        "wet": 0.35
+      },
+      "layout": {
+        "left": {
+          "visible": true,
+          "width": 240.0
+        },
+        "library_fraction": 0.18,
+        "right": {
+          "visible": true,
+          "width": 200.0
+        }
+      },
+      "mode": "waveform",
+      "preferences": {
+        "status": "saved"
+      },
+      "revision": 1,
+      "viewports": {}
+    },
+    "revision": 1,
+    "session_id": "b2618da7-7a96-4d60-9b05-26901dc7f126",
+    "status": "ok"
+  }
+}

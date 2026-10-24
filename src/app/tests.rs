@@ -730,6 +730,48 @@ fn text_clipboard_keys_delegate_to_the_platform_while_audio_keys_stay_raw() {
     output.textures_delta.clear();
 }
 
+#[test]
+fn reverb_controls_and_tail_policy_are_visible_without_mutating_audio() {
+    let (mut h, _d) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    let reverb = h.text_rect("Reverb").center();
+    h.click(reverb);
+    assert!(matches!(
+        h.app.host.presentation().effect,
+        wavebob::effects::Effect::Reverb { .. }
+    ));
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        doc.revision_id
+    );
+    assert!(!h.app.host.history().can_undo);
+    let frame = h.frame(vec![]);
+    let texts = text_shapes(&frame);
+    assert!(
+        texts
+            .iter()
+            .any(|(_, text)| text == "Tail is truncated at target end.")
+    );
+    for label in ["Room", "Decay s", "Wet"] {
+        assert!(
+            texts
+                .iter()
+                .any(|(rect, text)| text == label && rect.right() <= 1440.0),
+            "{label}: {:?}",
+            texts
+                .iter()
+                .filter(|(rect, _)| rect.left() > 1240.0)
+                .collect::<Vec<_>>()
+        );
+    }
+    h.size = Vec2::new(800.0, 520.0);
+    h.frame(vec![]);
+    assert!(
+        h.text_rect("›").top() < 70.0,
+        "Panel handle remains accessible above scrolling controls"
+    );
+}
+
 fn canvas_rects(h: &mut Harness) -> [Rect; 2] {
     fn collect(shape: &egui::Shape, out: &mut Vec<Rect>) {
         match shape {

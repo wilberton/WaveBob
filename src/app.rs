@@ -28,7 +28,9 @@ pub struct WaveBob {
     browser_seen_path: Option<String>,
     browser_edit_path: bool,
     effect: wavebob::effects::Effect,
+    observed_effect: Option<wavebob::effects::Effect>,
     gain_db: f64,
+    reverb: effects::ReverbControls,
 }
 
 #[derive(Default)]

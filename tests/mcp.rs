@@ -987,6 +987,61 @@ mod live {
         client.cancel().await.unwrap();
     }
 
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn reverb_parameters_apply_and_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "reverb-check");
+        let client = named_client(runtime.path(), "reverb-check").await;
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/cbr-2ch-48000-tagged.mp3");
+        let started =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let doc = finish_mcp_job(&client, started).await;
+        let effect = json!({"kind":"reverb","room_size":0.5,"decay_seconds":1.5,"wet":0.35});
+        let view = response(
+            &call(
+                &client,
+                "presentation.effects.set",
+                json!({"params":{"effect":effect}}),
+            )
+            .await,
+        );
+        assert_eq!(view["status"], "ok");
+        let started=response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":effect}})).await);
+        let edited = finish_mcp_job(&client, started).await;
+        assert_ne!(edited["revision_id"], doc["revision_id"]);
+        assert_eq!(edited["frames"], doc["frames"]);
+        let capture=call(&client,"capture.png",json!({"params":{"path":runtime.path().join("reverb.png"),"after_presentation_revision":view["result"]["revision"]}})).await;
+        let metadata = response(&capture);
+        assert_eq!(metadata["status"], "ok");
+        let image = capture
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("reverb.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                Path::new(&directory).join("reverb.json"),
+                serde_json::to_vec_pretty(
+                    &json!({"document":edited,"effect_view":view,"capture":metadata}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
+
     async fn saved_layout(client: &RunningService<RoleClient, ClientConfig>) -> Value {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
@@ -1765,7 +1820,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 47);
+        assert_eq!(tools.len(), 48);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);
