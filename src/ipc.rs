@@ -98,9 +98,11 @@ fn write_frame(stream: &mut Stream, bytes: &[u8], deadline: Instant) -> io::Resu
             );
             return Err(io::ErrorKind::TimedOut.into());
         }
-        // Remain compatible with peers using the backend's default 512-byte
-        // buffers. Our Windows listener uses 64 KiB to avoid per-chunk stalls.
-        match stream.write(&remaining[..remaining.len().min(512)]) {
+        // Windows peers may use the backend's default 512-byte pipe buffers.
+        // Unix sockets support bulk partial writes; tiny writes there exhaust
+        // macOS socket buffers through per-write overhead and stall large schemas.
+        let chunk = if cfg!(windows) { 512 } else { 64 * 1024 };
+        match stream.write(&remaining[..remaining.len().min(chunk)]) {
             // Windows byte-mode pipes may report a successful zero-byte write
             // when their nonblocking buffer is full. Retry under the deadline.
             Ok(0) if cfg!(windows) => thread::sleep(Duration::from_millis(2)),
