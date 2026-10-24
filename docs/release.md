@@ -1,0 +1,100 @@
+# Native development releases
+
+The local Windows x86-64 kit contains `bin/wavebob.exe`, `wavebob-headless.exe`,
+`wavebob-mcp.exe` and the reproducible `wavebob-workflow.exe` example client.
+Unzip the complete kit before running it. Launch the GUI by opening its executable.
+The command-line runners reserve stdout for their documented protocol; use a
+terminal or an MCP client. See [commands](commands.md), [MCP](mcp.md),
+[automation](automation.md) and [projects](projects.md).
+
+Windows 10/11 x86-64 needs a working OpenGL driver for the GUI and the Microsoft
+Visual C++ x64 runtime (`VCRUNTIME140.dll`) plus Universal CRT. The development
+machine already supplies these; a clean-machine installation remains unverified.
+Headless/MCP builds omit windowing and audio-device features. WAV/MP3 codecs are
+bundled; neither FFmpeg nor a user-installed LAME is needed. Native playback uses
+the default audio device and reports failure/retry without preventing editing.
+
+macOS builds need the system window/audio frameworks and an OpenGL-capable desktop.
+Linux GUI builds use X11 or Wayland, OpenGL and ALSA. The Debian/Ubuntu native build
+packages are in the root README. Prepared release CI uses Windows x86-64,
+macOS ARM64 and Linux x86-64 native runners; host identity is recorded by rustc.
+No macOS/Linux binary or X11/Wayland execution is claimed locally. Those checks
+and CI execution remain deferred until a remote exists, as requested by the user.
+
+## Build and package
+
+Install Rust stable with rustfmt, Clippy and rust-src, Python 3.11+, and the native
+C build tools described in the README. From a clean committed checkout:
+
+```sh
+rustup component add rust-src
+python scripts/package-release.py
+```
+
+This builds the GUI, then separately builds headless/MCP and the workflow client
+with `--no-default-features`; the automation binaries retain no mandatory GUI/audio
+adapter. It vendors the exact Cargo.lock dependency set, includes full sources,
+original notices, Inter/OFL, Rust library sources/notices, codec source, application
+sources and offline Cargo configuration. `--vendor PATH` can reuse an already
+completed `cargo vendor --locked PATH` tree. Every vendor package is checked against
+the lockfile's version/archive checksum. No archive is overwritten. The kit's
+manifest records host, compiler, commit/dirty state, lock hash and executable hashes;
+a SHA-256 sidecar covers the complete ZIP. Vendoring may fetch missing pinned
+registry packages and Rust notices are downloaded from the compiler's exact commit.
+The packaged toolchain file pins the recorded compiler version. Archive timestamps,
+native compiler differences and linker output are not promised to be byte-reproducible.
+The local workspace's ignored Rust environment remains documented in the README.
+
+The prepared GitHub Actions release workflow runs this packaging on all three
+native hosts when manually dispatched, and uploads the ZIP plus checksum. It is
+configuration only until a remote/Actions run exists. Signing, notarization,
+installers, auto-updates and public publishing are deferred.
+
+## Offline rebuilding and encoder relinking
+
+Keep the whole source tree and notices with the statically linked executables.
+From the kit's `source/` folder, with the recorded Rust version and native tools:
+
+```sh
+cargo build --locked --offline --release --bin wavebob
+cargo build --locked --offline --release --no-default-features --bin wavebob-headless --bin wavebob-mcp --example workflow
+```
+
+The bundled `.cargo/config.toml` resolves dependencies from `vendor/`, without a
+registry download. The LAME source is in `vendor/mp3lame-sys/lame-3.100/`, with its
+bindings/build script one level above. To relink a modified encoder, copy the
+entire `vendor/mp3lame-sys` directory to `modified-encoder`, edit its C source, then:
+
+```sh
+cargo build --offline --release --no-default-features --bin wavebob-headless --bin wavebob-mcp --config 'patch.crates-io.mp3lame-sys.path="modified-encoder"'
+cargo build --offline --release --bin wavebob --config 'patch.crates-io.mp3lame-sys.path="modified-encoder"'
+```
+
+This intentional path patch updates Cargo.lock, so omit `--locked` for the modified
+build. Do not edit the checksum-verified registry copy in place. The original
+binding build script recompiles and statically relinks the modified C library;
+no signing key, network codec, application object secrecy or installation lock
+prevents rebuilding. Restore the original lock/source tree to reproduce the
+unmodified build. Full source is provided instead of relying on stripped objects.
+See [the encoder notices](mp3-encoder.md) and the kit's third-party inventory.
+
+Application licensing for public redistribution has not been selected. This is a
+local development/review kit. The bundled third-party source/license texts retain
+their own terms; this document does not replace them.
+
+## Known limits
+
+- Native macOS/Linux, physical trackpad and subjective audio acceptance remain
+  deferred. Windows UI, native callback, file/path, scale and MCP capture checks
+  are recorded under `docs/verification/`.
+- Editing accepts mono/stereo WAV and MP3. MP3 export offers CBR 128/192/256/320
+  kbit/s at 32/44.1/48 kHz. Project audio stays lossless.
+- Reverb tails are bounded to the explicit editing/clip/range interval. At most
+  two clips overlap simultaneously per track; a third is rejected.
+- Managed project assets are append-only; keep the manifest and assets together.
+  Undo history and clipboard do not survive reopen. Memory budgets are 512 MiB
+  per decoded/processed audio and 2 GiB retained PCM; arbitrarily large streaming
+  projects are outside this version.
+- The bundled font lacks some CJK glyphs, although Unicode native paths and
+  persistence work. Desktop output uses the default device; device selection,
+  plugin hosting, recording and MIDI are outside this release.

@@ -5,7 +5,7 @@ GUI, headless and MCP launch instructions and documented platform prerequisites.
 
 **Blocked by:** 20 — Verify a complete AI editing and visual-review workflow.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] CI produces launchable release artifacts for the agreed desktop targets;
   headless operation does not acquire a mandatory graphics/device dependency.
@@ -21,3 +21,10 @@ GUI, headless and MCP launch instructions and documented platform prerequisites.
 ## Specification
 
 [WaveBob editor specification](../spec.md).
+
+## Execution scope
+
+The user deferred macOS/Linux CI until a remote exists. This local repository
+still has no remote. Prepare repeatable packaging and CI artifacts, verify the
+Windows build locally and document the remaining native platform checks; do not
+claim unavailable macOS/Linux or CI executions as verified.

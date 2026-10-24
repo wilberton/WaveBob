@@ -28,6 +28,10 @@ available; see [waveform controls](docs/waveform.md).
 
 ## Run
 
+For the local packaged Windows build and platform prerequisites, see
+[native development kits](docs/release.md). The release workflow is prepared;
+macOS/Linux CI and native verification remain deferred until a remote exists.
+
 Install stable Rust using [rustup](https://rustup.rs/), then:
 
 ```sh

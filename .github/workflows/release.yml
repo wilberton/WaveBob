@@ -1,0 +1,30 @@
+name: Native release kits
+on:
+  workflow_dispatch:
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libasound2-dev
+      - name: Test device-free commands and MP3 workflow
+        run: cargo test --locked --no-default-features --all-targets
+      - name: Package native GUI, device-free runners, source and notices
+        run: python scripts/package-release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WaveBob-${{ runner.os }}-${{ runner.arch }}
+          path: dist/*
+          if-no-files-found: error
