@@ -72,3 +72,12 @@ regression and final Clippy. Logs: `.tools/test31-{kernel,public,callback,adapte
 native-v2,all,nogui,tail-final}.log`, `.tools/clippy31{-nogui,-final}.log`.
 Automated acceptance was approved by the user; physical listening/device checks
 remain explicitly unverified. All criteria are complete; ticket 32 is unblocked.
+
+## Shared tempo UI follow-up
+
+The synced editor additionally exposes exact shared project BPM entry with a
+single Set tempo action and current-value readout. A 90 BPM input/undo regression
+passes, and the actual [synced native capture](../../../docs/verification/reverb/reverb-tempo-90.png)
+was inspected with the field and help visible. `.tools/test31-tempo-ui.log` and
+`.tools/test31-tempo-native.log` record passing checks. Physical checks remain
+unverified under the approved automated acceptance.

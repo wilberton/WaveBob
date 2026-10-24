@@ -2,46 +2,46 @@
   "default": {
     "image": "reverb-default.png",
     "metadata": {
-      "editor_id": "6e1b190c6ae378bda751fefed10fa5813c22a0d6cf57ec3a34d0676343e9cbc2",
+      "editor_id": "7d8fbadcbe72b58e0f1f0053f915fbb93ce345b0cae3a9d70f77fd10d5455f45",
       "frame_number": 7,
       "height": 610,
-      "instance_id": "5c74f4de-8b92-494b-877a-0fbc6732ba41",
+      "instance_id": "cf6c9e11-fc01-4dca-85f3-ac824a65c7ff",
       "mode": "waveform",
       "owner": {
-        "id": "4f6b230c-4947-41f9-a66a-ba6fc2239933",
+        "id": "f2d47d24-c940-4638-b0d5-ac196e1187a0",
         "kind": "document"
       },
       "pending_resources": [],
       "presentation_revision": 1,
       "preview_id": null,
-      "processing_identity": "80e0bfa62c97e7c2940252c3c4ff2eac2c74ba84304f3ed7a38c76ee7460471b",
-      "processing_revision": "fd34aa17-d5c1-407c-a47f-a195b989539d",
+      "processing_identity": "e37e553c769c42db8647f5ec2a657dbc4a449d7bd6b76b1d50be68694e579003",
+      "processing_revision": "647dc946-ed82-4477-9dfe-2f62842f2f73",
       "rendered_revision": 2,
       "scale": 1.0,
-      "session_id": "5fcf8fe4-07a0-4241-a67b-5ea4ca030f93",
+      "session_id": "6dca56fc-33f1-4b46-a893-eb79f5ca1b24",
       "width": 1050
     }
   },
   "size_100": {
     "image": "reverb-size-100.png",
     "metadata": {
-      "editor_id": "6e1b190c6ae378bda751fefed10fa5813c22a0d6cf57ec3a34d0676343e9cbc2",
-      "frame_number": 38,
+      "editor_id": "7d8fbadcbe72b58e0f1f0053f915fbb93ce345b0cae3a9d70f77fd10d5455f45",
+      "frame_number": 13,
       "height": 610,
-      "instance_id": "5c74f4de-8b92-494b-877a-0fbc6732ba41",
+      "instance_id": "cf6c9e11-fc01-4dca-85f3-ac824a65c7ff",
       "mode": "waveform",
       "owner": {
-        "id": "4f6b230c-4947-41f9-a66a-ba6fc2239933",
+        "id": "f2d47d24-c940-4638-b0d5-ac196e1187a0",
         "kind": "document"
       },
       "pending_resources": [],
-      "presentation_revision": 14,
+      "presentation_revision": 2,
       "preview_id": null,
-      "processing_identity": "8f14df577d55ce283a74fe02720f35a62578ea18065ff2f739f7e50911389ac5",
-      "processing_revision": "593d4b82-6370-430e-abaf-606a2880994e",
+      "processing_identity": "45538e2757e334a93a47c1b470eee418a7578db488b7160cbec73e545c539eb5",
+      "processing_revision": "5da2595f-a0d4-4176-8962-adeefbd2fd4e",
       "rendered_revision": 3,
       "scale": 1.0,
-      "session_id": "5fcf8fe4-07a0-4241-a67b-5ea4ca030f93",
+      "session_id": "6dca56fc-33f1-4b46-a893-eb79f5ca1b24",
       "width": 1050
     }
   }

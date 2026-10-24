@@ -70,6 +70,35 @@ impl WaveBob {
                 }); });
             });
         });
+        if sync {
+            let bpm = self.host.snapshot().arrangement.effect_tempo;
+            ui.horizontal(|ui| {
+                ui.label("Project effect tempo");
+                let text = native.tempo_text.get_or_insert_with(|| bpm.to_string());
+                let response = ui.add(egui::TextEdit::singleline(text).desired_width(64.0));
+                ui.label("BPM");
+                let apply = ui.button("Set tempo");
+                if apply.clicked()
+                    || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                {
+                    if let Ok(bpm) = text.parse::<f64>() {
+                        self.dispatch(Command::SetEffectTempo(wavebob::processing::TempoParams {
+                            bpm,
+                        }));
+                    } else {
+                        self.error = Some("Effect tempo must be 20..400 BPM".into());
+                    }
+                    native.tempo_text = None;
+                }
+                ui.label(
+                    RichText::new(format!("Current: {bpm} BPM · shared by all synced effects"))
+                        .small()
+                        .color(MUTED),
+                );
+            });
+        } else {
+            native.tempo_text = None;
+        }
     }
     #[allow(clippy::too_many_arguments)]
     fn reverb_knob(

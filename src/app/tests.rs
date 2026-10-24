@@ -1,5 +1,257 @@
 use super::*;
 
+#[test]
+fn synced_reverb_exposes_shared_project_bpm_and_commits_exact_entry_once() {
+    use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
+    let (mut h, _directory) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::Reverb,
+        },
+    );
+    let id = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .effects[0]
+        .id
+        .clone();
+    h.app.processing_action(
+        &owner,
+        Action::SetParameter {
+            effect_id: id.clone(),
+            parameter_id: "tempo_sync".into(),
+            value: ParameterValue::Boolean(true),
+        },
+    );
+    let window = EditorWindow {
+        id: "tempo-input-test".into(),
+        owner: owner.clone(),
+        instance_id: id,
+        focus_generation: 1,
+    };
+    let mut native = effects::NativeEditor::default();
+    native.tempo_text = Some("90".into());
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    let mut render = |app: &mut WaveBob, events| {
+        time += 0.05;
+        let instance = app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects[0]
+            .clone();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1050.0, 610.0))),
+                events,
+                time: Some(time),
+                ..Default::default()
+            },
+            |ui| app.native_parameters(ui, &window, &instance, &mut native),
+        );
+        output.textures_delta.clear();
+        output
+    };
+    let output = render(&mut h.app, vec![]);
+    let button = text_shapes(&output)
+        .into_iter()
+        .find(|(_, s)| s == "Set tempo")
+        .unwrap()
+        .0
+        .center();
+    let history = h.app.host.history().undo_count;
+    render(
+        &mut h.app,
+        vec![
+            egui::Event::PointerMoved(button),
+            egui::Event::PointerButton {
+                pos: button,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerButton {
+            pos: button,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(h.app.host.snapshot().arrangement.effect_tempo, 90.0);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert_eq!(h.app.host.snapshot().arrangement.effect_tempo, 120.0);
+}
+
+#[test]
+fn parametric_eq_graph_edits_are_one_transaction_and_escape_waits_for_pointer_release() {
+    use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
+    let (mut h, _directory) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::ParametricEq,
+        },
+    );
+    let original = h.app.host.processing(owner.clone()).unwrap().committed;
+    let window = EditorWindow {
+        id: "eq-input-test".into(),
+        owner: owner.clone(),
+        instance_id: original.effects[0].id.clone(),
+        focus_generation: 1,
+    };
+    let mut native = effects::NativeEditor::default();
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    let mut render = |app: &mut WaveBob, events: Vec<egui::Event>| {
+        time += 0.05;
+        let state = app.host.processing(owner.clone()).unwrap();
+        let instance = state.preview.as_ref().unwrap_or(&state.committed).effects[0].clone();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1120.0, 700.0))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| app.native_parameters(ui, &window, &instance, &mut native),
+        );
+        output.textures_delta.clear();
+        output
+    };
+    let pointer = |pos: Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let output = render(&mut h.app, vec![]);
+    let token = text_shapes(&output)
+        .into_iter()
+        .find(|(r, s)| s == "4" && r.right() < 740.0 && r.bottom() < 300.0)
+        .unwrap()
+        .0
+        .center();
+    let history = h.app.host.history().undo_count;
+    let target = token + Vec2::new(65.0, -40.0);
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerMoved(token), pointer(token, true)],
+    );
+    render(&mut h.app, vec![egui::Event::PointerMoved(target)]);
+    let preview = h.app.host.processing(owner.clone()).unwrap();
+    assert!(preview.preview_id.is_some());
+    assert_ne!(
+        preview.preview.as_ref().unwrap().effects[0].parameters["freq4"],
+        original.effects[0].parameters["freq4"]
+    );
+    assert_ne!(
+        preview.preview.as_ref().unwrap().effects[0].parameters["level4"],
+        original.effects[0].parameters["level4"]
+    );
+    assert_eq!(h.app.host.history().undo_count, history);
+    let output = render(&mut h.app, vec![pointer(target, false)]);
+    let modified = h.app.host.processing(owner.clone()).unwrap().committed;
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    let reset = text_shapes(&output)
+        .into_iter()
+        .find(|(_, s)| s == "Reset selected band")
+        .unwrap()
+        .0
+        .center();
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerMoved(reset), pointer(reset, true)],
+    );
+    render(&mut h.app, vec![pointer(reset, false)]);
+    let reset_state = h.app.host.processing(owner.clone()).unwrap().committed;
+    assert_eq!(
+        reset_state.effects[0].parameters["freq4"],
+        ParameterValue::Integer(32768)
+    );
+    assert_eq!(
+        reset_state.effects[0].parameters["level4"],
+        ParameterValue::Integer(0)
+    );
+    assert_eq!(h.app.host.history().undo_count, history + 2);
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects,
+        modified.effects
+    );
+    let output = render(&mut h.app, vec![]);
+    let token = text_shapes(&output)
+        .into_iter()
+        .find(|(r, s)| s == "4" && r.right() < 740.0 && r.bottom() < 300.0)
+        .unwrap()
+        .0
+        .center();
+    let target = token + Vec2::new(20.0, 15.0);
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerMoved(token), pointer(token, true)],
+    );
+    render(&mut h.app, vec![egui::Event::PointerMoved(target)]);
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview_id
+            .is_some()
+    );
+    render(
+        &mut h.app,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerMoved(target + Vec2::new(20.0, 0.0))],
+    );
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview_id
+            .is_none()
+    );
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects,
+        modified.effects
+    );
+    render(&mut h.app, vec![pointer(target, false)]);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+}
+
 struct Harness {
     ctx: egui::Context,
     app: WaveBob,

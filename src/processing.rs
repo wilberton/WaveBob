@@ -146,6 +146,7 @@ pub fn catalogue() -> Vec<EffectInfo> {
     EffectKind::ALL
         .into_iter()
         .map(|kind| match kind {
+            EffectKind::ParametricEq => crate::dsp::parametric_eq::info(),
             EffectKind::SoftClipper => crate::dsp::soft_clipper::info(),
             EffectKind::Reverb => crate::dsp::reverb::info(),
             _ => EffectInfo {

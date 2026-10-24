@@ -1,7 +1,13 @@
 use super::*;
 use wavebob::processing::{self, Action, Owner, ParameterValue};
 fn default_geometry(kind: processing::EffectKind) -> WindowGeometry {
-    if kind == processing::EffectKind::Reverb {
+    if kind == processing::EffectKind::ParametricEq {
+        WindowGeometry {
+            width: 1120.0,
+            height: 700.0,
+            ..Default::default()
+        }
+    } else if kind == processing::EffectKind::Reverb {
         WindowGeometry {
             width: 1050.0,
             height: 610.0,
@@ -18,6 +24,10 @@ pub(super) struct NativeEditor {
     preview: Option<String>,
     control: Option<String>,
     pub(super) help: Option<String>,
+    pub(super) eq_band: usize,
+    pub(super) eq_drag: Option<(usize, bool)>,
+    pub(super) tempo_text: Option<String>,
+    cancelled_drag: bool,
 }
 impl WaveBob {
     pub(super) fn selected_clip(&self) -> Option<wavebob::arrangement::Clip> {
@@ -356,7 +366,7 @@ impl WaveBob {
         }
     }
 
-    fn native_parameters(
+    pub(super) fn native_parameters(
         &mut self,
         ui: &mut egui::Ui,
         window: &EditorWindow,
@@ -369,7 +379,17 @@ impl WaveBob {
             self.dispatch(Command::CancelProcessingPreview(
                 processing::PreviewParams { preview_id: id },
             ));
+            native.eq_drag = None;
+            native.cancelled_drag = ui.input(|i| i.pointer.any_down());
             return;
+        }
+        if native.cancelled_drag {
+            if ui.input(|i| i.pointer.any_down()) {
+                ui.visuals_mut().disabled_alpha = 1.0;
+                ui.disable();
+            } else {
+                native.cancelled_drag = false;
+            }
         }
         if instance.kind == processing::EffectKind::SoftClipper {
             self.soft_clipper_controls(ui, window, instance, native);
@@ -377,6 +397,10 @@ impl WaveBob {
         }
         if instance.kind == processing::EffectKind::Reverb {
             self.reverb_controls(ui, window, instance, native);
+            return;
+        }
+        if instance.kind == processing::EffectKind::ParametricEq {
+            self.parametric_eq_controls(ui, window, instance, native);
             return;
         }
         let Some(info) = processing::catalogue()
@@ -522,6 +546,18 @@ impl WaveBob {
         response: &egui::Response,
         ctx: &egui::Context,
     ) {
+        self.edit_native_parameters(window, instance_id, native, vec![change], response, ctx);
+    }
+    pub(super) fn edit_native_parameters(
+        &mut self,
+        window: &EditorWindow,
+        instance_id: &str,
+        native: &mut NativeEditor,
+        changes: Vec<(String, ParameterValue, bool)>,
+        response: &egui::Response,
+        ctx: &egui::Context,
+    ) {
+        let change = &changes[0];
         let control_id = if change.2 {
             "parameter-map".to_owned()
         } else {
@@ -566,14 +602,16 @@ impl WaveBob {
                 }
             }
             if let Some(id) = &native.preview {
-                self.dispatch(Command::UpdateProcessingPreview(processing::UpdateParams {
-                    preview_id: id.clone(),
-                    change: Action::SetParameter {
-                        effect_id: instance_id.to_owned(),
-                        parameter_id: change.0.clone(),
-                        value: change.1,
-                    },
-                }));
+                for change in changes {
+                    self.dispatch(Command::UpdateProcessingPreview(processing::UpdateParams {
+                        preview_id: id.clone(),
+                        change: Action::SetParameter {
+                            effect_id: instance_id.to_owned(),
+                            parameter_id: change.0.clone(),
+                            value: change.1,
+                        },
+                    }));
+                }
             }
         }
         if native.control.as_ref() == Some(&control_id)

@@ -1,0 +1,20 @@
+{
+  "editor_id": "7d8fbadcbe72b58e0f1f0053f915fbb93ce345b0cae3a9d70f77fd10d5455f45",
+  "frame_number": 20,
+  "height": 610,
+  "instance_id": "cf6c9e11-fc01-4dca-85f3-ac824a65c7ff",
+  "mode": "waveform",
+  "owner": {
+    "id": "f2d47d24-c940-4638-b0d5-ac196e1187a0",
+    "kind": "document"
+  },
+  "pending_resources": [],
+  "presentation_revision": 2,
+  "preview_id": null,
+  "processing_identity": "396345b4041e1b13bad754d629a92aab7a8f636029e1810a60d577c4d3bd5d59",
+  "processing_revision": "9aa54046-fb03-4069-b2e7-110b19d9be91",
+  "rendered_revision": 5,
+  "scale": 1.0,
+  "session_id": "6dca56fc-33f1-4b46-a893-eb79f5ca1b24",
+  "width": 1050
+}

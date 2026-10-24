@@ -101,3 +101,13 @@ Full regression results: GUI all-target 234 passed; GUI-free all-target 123 pass
 Clippy with warnings denied passes both configurations; rustfmt passes. The final
 early-only activity refinement also passes its focused tail regression and final
 all-target Clippy.
+
+## Explicit shared tempo follow-up
+
+Synced controls now expose exact **Project effect tempo** entry (20..400 BPM)
+and a Set tempo action, plus the current shared BPM. The field appears only
+when sync is enabled, so the 120 BPM fallback is visible. Setting 90 BPM commits
+one history entry; undo restores 120. The actual
+[90 BPM native capture](reverb-tempo-90.png) and [metadata](reverb-tempo-90.json)
+were inspected at 1050×610 with controls, BPM field and help visible.
+The UI input regression and native lifecycle/capture regression pass.

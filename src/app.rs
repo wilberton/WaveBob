@@ -16,6 +16,8 @@ mod effect_controls;
 mod effects;
 #[path = "app/envelopes.rs"]
 mod envelopes;
+#[path = "app/parametric_eq.rs"]
+mod parametric_eq;
 #[path = "app/projecting.rs"]
 mod projecting;
 #[path = "app/reverb.rs"]
