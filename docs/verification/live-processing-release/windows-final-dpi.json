@@ -1,0 +1,167 @@
+{
+  "archive": "D:\\a\\WaveBob\\WaveBob\\dist\\WaveBob-0.1.0-x86_64-pc-windows-msvc.zip",
+  "archive_sha256": "cbdb927910984dbb65d244ec8c2a169c7950111a192d3f43396c1e4a2009fda7",
+  "build_commit": "04132f950081a5b3230ea4b7fd031b0f93fe830e",
+  "host": "x86_64-pc-windows-msvc",
+  "ui_scale": 1.25,
+  "graphics_runtime": {
+    "directory": "D:\\a\\_temp\\msys64\\mingw64\\bin",
+    "driver": "llvmpipe",
+    "dll_sha256": {
+      "opengl32.dll": "5c8031403f24c8292f3faa51377b1efc900c8114bfd5509bb91cf608c53f25d8",
+      "libgallium_wgl.dll": "d49e52f7df6751749fe027675567413e337625f3efce4b473b39388d70454646"
+    }
+  },
+  "results": {
+    "direct": {
+      "audition": false,
+      "captures": [],
+      "clipboard_converted_frames": 32000,
+      "clips": 5,
+      "crossfades": 1,
+      "documents": 3,
+      "mix_channels": 2,
+      "mix_frames": 576000,
+      "project_reopen_without_sources": true,
+      "tracks": 4
+    },
+    "headless": {
+      "audition": false,
+      "captures": [],
+      "clipboard_converted_frames": 32000,
+      "clips": 5,
+      "crossfades": 1,
+      "documents": 3,
+      "mix_channels": 2,
+      "mix_frames": 576000,
+      "project_reopen_without_sources": true,
+      "tracks": 4
+    },
+    "mcp": {
+      "audition": false,
+      "captures": [],
+      "clipboard_converted_frames": 32000,
+      "clips": 5,
+      "crossfades": 1,
+      "documents": 3,
+      "mix_channels": 2,
+      "mix_frames": 576000,
+      "project_reopen_without_sources": true,
+      "tracks": 4
+    },
+    "output_hashes": {
+      "Mix.wav": "55787c4a61a5d35840cdd057d66e2d28cc3b38e8bd30745b75be0a15dabfd060",
+      "Mix.mp3": "0631828ba01066f13b00c12bad13f492e641a9773bb2d0855b4263870607e829",
+      "Sample selection.mp3": "15f71e4564f799d7777dd475fae7df86262a281571aeeac5bb9a544689e4f185"
+    },
+    "gui": {
+      "audition": false,
+      "captures": [
+        {
+          "metadata": {
+            "editor_id": null,
+            "frame_number": 221,
+            "height": 768,
+            "instance_id": null,
+            "mode": "waveform",
+            "owner": {
+              "id": "a24dd8f8-f68b-4e73-a259-9cfed15bf6c5",
+              "kind": "document"
+            },
+            "pending_resources": [],
+            "presentation_revision": 1,
+            "preview_id": null,
+            "processing_identity": "208286cfc441acdd95902f24e7fd59c5378fe5362f4351aedaabce06bc0b6aa2",
+            "processing_revision": "07f8dba0-ddef-472d-8a86-793a9ac8f703",
+            "rendered_revision": 33,
+            "scale": 1.25,
+            "session_id": "c8de9105-7b1a-4186-bee2-fcab9f41909b",
+            "width": 1024
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\D:\\a\\WaveBob\\WaveBob\\.tools\\release-dpi\\gui\\waveform.png"
+        },
+        {
+          "metadata": {
+            "editor_id": null,
+            "frame_number": 228,
+            "height": 768,
+            "instance_id": null,
+            "mode": "waveform",
+            "owner": {
+              "id": "a24dd8f8-f68b-4e73-a259-9cfed15bf6c5",
+              "kind": "document"
+            },
+            "pending_resources": [],
+            "presentation_revision": 2,
+            "preview_id": null,
+            "processing_identity": "208286cfc441acdd95902f24e7fd59c5378fe5362f4351aedaabce06bc0b6aa2",
+            "processing_revision": "07f8dba0-ddef-472d-8a86-793a9ac8f703",
+            "rendered_revision": 33,
+            "scale": 1.25,
+            "session_id": "c8de9105-7b1a-4186-bee2-fcab9f41909b",
+            "width": 1024
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\D:\\a\\WaveBob\\WaveBob\\.tools\\release-dpi\\gui\\waveform-hidden.png"
+        },
+        {
+          "metadata": {
+            "editor_id": null,
+            "frame_number": 236,
+            "height": 768,
+            "instance_id": null,
+            "mode": "multitrack",
+            "owner": {
+              "id": "380a852f-b566-415d-b747-81ca82c3ff94",
+              "kind": "clip"
+            },
+            "pending_resources": [],
+            "presentation_revision": 4,
+            "preview_id": null,
+            "processing_identity": "6637893b2da74d57670eeee0505500f8cc51066d425ede358cc2dc379f8882c8",
+            "processing_revision": "0ac41d3b-7e2e-4be2-b906-cb32e64ae837",
+            "rendered_revision": 33,
+            "scale": 1.25,
+            "session_id": "c8de9105-7b1a-4186-bee2-fcab9f41909b",
+            "width": 1024
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\D:\\a\\WaveBob\\WaveBob\\.tools\\release-dpi\\gui\\multitrack.png"
+        },
+        {
+          "metadata": {
+            "editor_id": null,
+            "frame_number": 244,
+            "height": 768,
+            "instance_id": null,
+            "mode": "multitrack",
+            "owner": {
+              "id": "380a852f-b566-415d-b747-81ca82c3ff94",
+              "kind": "clip"
+            },
+            "pending_resources": [],
+            "presentation_revision": 5,
+            "preview_id": null,
+            "processing_identity": "6637893b2da74d57670eeee0505500f8cc51066d425ede358cc2dc379f8882c8",
+            "processing_revision": "0ac41d3b-7e2e-4be2-b906-cb32e64ae837",
+            "rendered_revision": 33,
+            "scale": 1.25,
+            "session_id": "c8de9105-7b1a-4186-bee2-fcab9f41909b",
+            "width": 1024
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\D:\\a\\WaveBob\\WaveBob\\.tools\\release-dpi\\gui\\multitrack-hidden.png"
+        }
+      ],
+      "clipboard_converted_frames": 32000,
+      "clips": 5,
+      "crossfades": 1,
+      "documents": 3,
+      "mix_channels": 2,
+      "mix_frames": 576000,
+      "project_reopen_without_sources": true,
+      "tracks": 4
+    }
+  }
+}

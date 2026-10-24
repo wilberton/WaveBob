@@ -184,3 +184,29 @@ visuals. The test also alternates light/dark/light system events and checks text
 and panel colors. This prevents the one-time custom dark style from being
 replaced by an unstyled light theme bank. `.tools/test21-theme-{red,green}.log`
 retain the local red/green result. Native recapture will verify the final result.
+
+### Final baseline delivery acceptance (`04132f9`)
+
+[Release run 40125142114](https://github.com/wilberton/WaveBob/actions/runs/40125142114)
+and [Rust run 40125120331](https://github.com/wilberton/WaveBob/actions/runs/40125120331)
+pass all three native targets. All eight shipped GUI executions pass (default
+and 1.25× on Windows/macOS and both Linux backends), alongside direct/headless/MCP
+WAV/MP3 parity, portable reopen and clean quit. Actual default/raised-scale
+captures were inspected: the late OS-light-theme event no longer changes the
+approved dark palette; white text, controls, selection handles, crossfade and
+Retry fit their containers. Final screenshots/results use `*-final-*` names in
+this directory, preserving earlier diagnosis evidence.
+
+| Target | Native evidence SHA-256 | Source-complete kit artifact |
+| --- | --- | --- |
+| Windows x86-64 | `4eb921d0e8010fbfa36fb821b852fbfca490c469be8db12f603ef8eded0f7b9b` | [12572677407](https://github.com/wilberton/WaveBob/actions/runs/40125142114/artifacts/12572677407) |
+| macOS ARM64 | `6b666a07c7018c5311aa48c309c7b89729c01d6fe664cd02f00bc9b2c7850dd3` | [12573475900](https://github.com/wilberton/WaveBob/actions/runs/40125142114/artifacts/12573475900) |
+| Linux x86-64 | `e2e50efeff74aaba8006947cf5840eb2ca6875488b78f5718f63048f843fbc6b` | [12573550887](https://github.com/wilberton/WaveBob/actions/runs/40125142114/artifacts/12573550887) |
+
+The retained JSON files record each inner kit ZIP SHA-256, build commit,
+platform, capture dimensions/scales, source-free reopen and output hashes.
+The user explicitly accepted automated verification with physical checks
+unverified. CI software graphics/no physical audio device do not establish
+speaker listening, physical hardware or physical trackpad behavior. Windows
+local native audition remains separately recorded above. Ticket 21 is complete
+under that acceptance; ticket 44 will repeat delivery with all eleven effects.

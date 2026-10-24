@@ -5,13 +5,13 @@ GUI, headless and MCP launch instructions and documented platform prerequisites.
 
 **Blocked by:** 20 â€” Verify a complete AI editing and visual-review workflow.
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] CI produces launchable release artifacts for the agreed desktop targets;
+- [x] CI produces launchable release artifacts for the agreed desktop targets;
   headless operation does not acquire a mandatory graphics/device dependency.
-- [ ] Smoke-check native file paths, DPI, gestures, shortcuts, audio and captures on
+- [x] Smoke-check native file paths, DPI, gestures, shortcuts, audio and captures on
   each OS, including Linux X11/Wayland where available.
-- [ ] Shipped GUI, headless and MCP workflows import and export MP3 on all three
+- [x] Shipped GUI, headless and MCP workflows import and export MP3 on all three
   platforms without separately installed codec executables. Include selected
   codec dependencies and license notices in artifacts and build instructions.
 - [x] Document command discovery, GUI attachment, screenshot inspection and a small
@@ -86,3 +86,24 @@ includes actual shipped GUI captures on Windows/macOS and Linux X11/Wayland.
 No macOS/Linux GUI success, subjective listening, physical gesture or clean-machine
 result is claimed before execution. Earlier no-push/no-CI notes above describe
 historical checks and are superseded by this active execution note.
+
+## Completed native automated acceptance — 24 October 2026
+
+The user approved automated acceptance with physical listening/device checks
+explicitly unverified. [Release run 40125142114](https://github.com/wilberton/WaveBob/actions/runs/40125142114)
+and [Rust run 40125120331](https://github.com/wilberton/WaveBob/actions/runs/40125120331)
+both pass Windows x86-64, macOS ARM64 and Linux x86-64 at source `04132f9`.
+Shipped direct/headless/MCP/GUI WAV/MP3, portable project reopen, Unicode paths,
+attachment/captures/clean quit pass. GUI captures at default and explicit 1.25×
+scale cover Windows, macOS, Linux X11 and Wayland; visual inspection confirms the
+fixed dark palette and usable transport/selection/clip controls. Shared native
+Rust suites exercise scripted gestures, shortcuts and audio output comparisons.
+Retained final screenshots, exact kit hashes and machine-readable results are in
+[release evidence](../../../docs/verification/live-processing-release/README.md).
+
+Physical speaker/listening, hardware audio-device operation and physical
+mouse/trackpad behavior on macOS/Linux remain unverified; CI uses software
+rendering and reports unavailable audio devices visibly. Those limits are
+recorded under the user's acceptance decision. Signing, installers,
+notarization and auto-update remain deferred. Ticket 44 will package and verify
+the final all-effects implementation again; this closes baseline delivery.
