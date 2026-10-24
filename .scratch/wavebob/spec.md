@@ -119,6 +119,9 @@ in this specification and affected tickets.
   spans all channels in the initial release. Empty ranges resolve to no selection;
   nonempty ranges contain at least one frame. Cursor, selection and visible
   interval are separate state.
+  In the main waveform, dragging either visible selection edge adjusts that
+  boundary with the opposite edge fixed. Crossing it normalizes the interval;
+  Escape cancels the preview. Hovering an edge shows a horizontal resize cursor.
 - An **arrangement** contains tracks, clips, a timeline cursor and an optional
   time selection. A **track** has a stable identifier, name, mute, solo, volume
   and pan. A **clip** refers to an audio revision, source interval, track and
@@ -358,6 +361,11 @@ in this specification and affected tickets.
   source audio. For ordinary staggered overlaps, fade the earlier clip out and
   later clip in over the full intersection using equal-power curves. Repositioning,
   trimming or undoing recomputes the region, shown as an X overlay.
+  A visible handle at the right endpoint trims the earlier clip's end to adjust
+  the crossfade length. For containment it trims the contained clip; coincident
+  clips use insertion order. The handle takes precedence over clip bodies,
+  shows a resize cursor and status help, and uses source-bounded trim preview,
+  one undoable commit on release and Escape cancellation.
 - The bounded first release supports at most two simultaneous clips on one
   track. Reject a third simultaneous overlap atomically, with a visible placement
   explanation. For equal-start clips use stable insertion order for transition

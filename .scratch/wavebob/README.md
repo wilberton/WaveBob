@@ -43,6 +43,8 @@ criteria and blockers; only start a ticket when all its blockers are `done`.
 | 21 | [Deliver launchable desktop and automation builds](issues/21-deliver-launchable-desktop-and-automation-builds.md) | 20 |
 | 23 | [Load audio from external file drops](issues/23-load-audio-from-external-file-drops.md) | 06 |
 | 24 | [Render continuous waveforms at intermediate zoom](issues/24-render-continuous-waveforms-at-intermediate-zoom.md) | 07 |
+| 25 | [Adjust waveform selection edges](issues/25-adjust-waveform-selection-edges.md) | 07 |
+| 26 | [Drag the crossfade endpoint](issues/26-drag-the-crossfade-endpoint.md) | 15, 17 |
 
 ## Initial frontier
 

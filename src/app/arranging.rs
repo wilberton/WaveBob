@@ -289,6 +289,22 @@ impl WaveBob {
                     }
                     if overlap.width()>95.0 {painter.rect_filled(Rect::from_center_size(Pos2::new(overlap.center().x,lane.top()+7.0),Vec2::new(if region.kind==CrossfadeKind::Contained{115.0}else{90.0},13.0)),2.0,SURFACE);painter.text(Pos2::new(overlap.center().x,lane.top()+1.0),egui::Align2::CENTER_TOP,if region.kind==CrossfadeKind::Contained{"Auto crossfade · dip"}else{"Auto crossfade"},egui::FontId::proportional(10.0),Color32::WHITE);}
                     let response=ui.interact(overlap.intersect(lane),ui.scope_id().with((&region.first_clip_id,&region.second_clip_id,"crossfade-help")),Sense::hover());help.observe(&response,"Automatic equal-power transition derived from the clip overlap. Moving or trimming clips updates both the sound and these curves.");
+                    // Register after all clip bodies so the later clip cannot cover this edge.
+                    let target=region.contained_clip_id.as_ref().unwrap_or(&region.first_clip_id);
+                    if let Some(clip)=track.clips.iter().find(|clip| &clip.id==target) {
+                        let center=Pos2::new(overlap.right(),overlap.center().y);
+                        let handle_rect=Rect::from_center_size(center,Vec2::new(12.0,24.0)).intersect(lane).intersect(ui.clip_rect());
+                        if handle_rect.is_positive() {
+                            let handle=ui.interact(handle_rect,ui.scope_id().with((&region.first_clip_id,&region.second_clip_id,"crossfade-end")),Sense::drag());
+                            let active=handle.hovered()||handle.dragged();
+                            painter.rect_filled(Rect::from_center_size(center,Vec2::new(6.0,20.0)),2.0,if active{Color32::WHITE}else{color});
+                            if active {ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);}
+                            help.observe(&handle,"Drag the crossfade end to adjust its length by trimming the ending clip. Release commits one edit; Escape cancels.");
+                            if handle.drag_started()&&!frozen&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {
+                                self.arrangement_gesture=Some(Gesture::Trim{clip:clip.clone(),left:false,anchor:frame_at(pos,lane,&view),revision:snapshot.revision});
+                            }
+                        }
+                    }
                 }
                 if let Some(selection)=&arrangement.selection {
                     let x=|frame:u64|lane.left()+(frame as f64-view.start as f64) as f32/(view.end-view.start) as f32*lane.width();

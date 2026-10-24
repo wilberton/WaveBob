@@ -28,6 +28,24 @@ fn frame_at(x: f32, rect: Rect, view: &FrameRange) -> u64 {
             .round() as u64
 }
 
+// Return the fixed opposite boundary for the closest visible selection edge.
+fn selection_edge(x: f32, plot: Rect, view: &FrameRange, selection: &FrameRange) -> Option<u64> {
+    [
+        (selection.start, selection.end),
+        (selection.end, selection.start),
+    ]
+    .into_iter()
+    .filter(|(edge, _)| (view.start..=view.end).contains(edge))
+    .map(|(edge, anchor)| {
+        let edge_x = plot.left()
+            + (edge - view.start) as f32 / (view.end - view.start).max(1) as f32 * plot.width();
+        ((x - edge_x).abs(), anchor)
+    })
+    .filter(|(distance, _)| *distance <= 7.0)
+    .min_by(|a, b| a.0.total_cmp(&b.0))
+    .map(|(_, anchor)| anchor)
+}
+
 impl WaveBob {
     pub(super) fn display_document(&self) -> Option<DocumentInfo> {
         let mut document = self.active_document()?;
@@ -139,10 +157,25 @@ impl WaveBob {
         let plot = visuals::main_plot(response.rect);
         let pointer = ctx.input(|input| input.pointer.interact_pos());
         let origin = ctx.input(|input| input.pointer.press_origin());
+        if response.hovered()
+            && let Some(pointer) = pointer
+            && plot.contains(pointer)
+            && document
+                .selection
+                .as_ref()
+                .is_some_and(|selection| selection_edge(pointer.x, plot, view, selection).is_some())
+        {
+            ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
         if response.drag_started_by(egui::PointerButton::Primary)
             && let Some(origin) = origin
         {
-            let anchor = frame_at(origin.x, plot, view);
+            let anchor = document
+                .selection
+                .as_ref()
+                .filter(|_| plot.contains(origin))
+                .and_then(|selection| selection_edge(origin.x, plot, view, selection))
+                .unwrap_or_else(|| frame_at(origin.x, plot, view));
             self.gesture = Some(Gesture::Selection {
                 document_id: document.id.clone(),
                 audio_revision: document.revision_id.clone(),
@@ -422,7 +455,7 @@ impl WaveBob {
                     },
                 )
                 .inner;
-            help.observe(&response,"Click to place the cursor; drag to select across channels. Scroll or middle-drag pans; Ctrl/Cmd + scroll or pinch zooms. Escape cancels.");
+            help.observe(&response,"Click to place the cursor; drag to select across channels; drag a selection edge to adjust it. Scroll or middle-drag pans; Ctrl/Cmd + scroll or pinch zooms. Escape cancels.");
             self.main_gestures(&response, &document, &view);
         }
         self.host

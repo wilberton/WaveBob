@@ -347,6 +347,111 @@ fn crossfade_overlay_tracks_clip_drag_and_third_drop_has_visible_rejection() {
             .any(|(_, text)| text == "Auto crossfade")
     );
 }
+#[test]
+fn crossfade_endpoint_trims_covered_clip_and_preserves_other_clip() {
+    use wavebob::arrangement::*;
+    let (mut h, _dir) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    h.app.dispatch(Command::AddTrack(AddTrackParams::default()));
+    let track = h.app.host.snapshot().arrangement.tracks[0].id.clone();
+    for position in [0, 2400] {
+        h.app.dispatch(Command::InsertClip(InsertClipParams {
+            track_id: track.clone(),
+            document_id: doc.id.clone(),
+            revision_id: doc.revision_id.clone(),
+            source_start: 0,
+            source_end: doc.frames,
+            position,
+        }));
+    }
+    h.app.set_mode(ViewMode::Multitrack);
+    h.app
+        .dispatch(Command::SetTimelineViewport(TimelineViewportParams {
+            start_frame: 0,
+            end_frame: 14400,
+            expected_presentation_revision: None,
+        }));
+    h.frame(vec![]);
+    let original = h.app.host.snapshot().arrangement;
+    let history = h.app.host.history().undo_count;
+    let endpoint = h
+        .frame(vec![])
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Rect(shape) if shape.rect.size() == Vec2::new(6.0, 20.0) => {
+                Some(shape.rect.center())
+            }
+            _ => None,
+        })
+        .expect("Visible crossfade endpoint handle");
+    let hover = h.frame(vec![egui::Event::PointerMoved(endpoint)]);
+    assert_eq!(
+        hover.platform_output.cursor_icon,
+        egui::CursorIcon::ResizeHorizontal
+    );
+    h.drag(
+        endpoint,
+        endpoint - Vec2::new(818.0 * 1200.0 / 14400.0, 0.0),
+    );
+    let wait = |h: &mut Harness| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h
+            .app
+            .host
+            .snapshot()
+            .jobs
+            .iter()
+            .any(|job| job.status == JobStatus::Running)
+        {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            h.frame(vec![]);
+        }
+        h.frame(vec![]);
+    };
+    wait(&mut h);
+    let edited = h.app.host.snapshot().arrangement;
+    assert_eq!(edited.tracks[0].clips[0].source_end, doc.frames - 1200);
+    assert_eq!(edited.tracks[0].clips[1], original.tracks[0].clips[1]);
+    assert_eq!(edited.crossfades().regions[0].end, doc.frames - 1200);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    h.app.dispatch(Command::Undo(Default::default()));
+    assert_eq!(h.app.host.snapshot().arrangement.tracks, original.tracks);
+    h.app.dispatch(Command::Redo(Default::default()));
+    assert_eq!(h.app.host.snapshot().arrangement.tracks, edited.tracks);
+    // Dragging back beyond the available source clamps to the original end.
+    let shortened = endpoint - Vec2::new(818.0 * 1200.0 / 14400.0, 0.0);
+    h.frame(vec![egui::Event::PointerMoved(shortened)]);
+    h.frame(vec![pointer_event(
+        shortened,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(endpoint)]);
+    assert_eq!(h.app.host.snapshot().arrangement, edited);
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    h.frame(vec![pointer_event(
+        endpoint,
+        egui::PointerButton::Primary,
+        false,
+    )]);
+    assert_eq!(h.app.host.snapshot().arrangement, edited);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    h.drag(shortened, endpoint + Vec2::new(100.0, 0.0));
+    wait(&mut h);
+    assert_eq!(
+        h.app.host.snapshot().arrangement.tracks[0].clips[0].source_end,
+        doc.frames
+    );
+}
+
 impl Harness {
     fn new() -> Self {
         let ctx = egui::Context::default();
@@ -1880,6 +1985,74 @@ fn waveform_click_reversed_drag_preview_and_escape_have_exact_shared_semantics()
         before,
         "Escape cancels the uncommitted selection"
     );
+}
+
+#[test]
+fn waveform_selection_edges_resize_with_opposite_boundary_fixed() {
+    let (mut h, _directory) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    let rect = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = |frame: u64| {
+        Pos2::new(
+            rect.left() + rect.width() * frame as f32 / 4800.0,
+            rect.center().y,
+        )
+    };
+    h.app.dispatch(Command::SetSelection(SelectionParams {
+        document_id: doc.id.clone(),
+        start_frame: 1200,
+        end_frame: 3600,
+    }));
+    h.frame(vec![]);
+    let output = h.frame(vec![egui::Event::PointerMoved(point(1200))]);
+    assert_eq!(
+        output.platform_output.cursor_icon,
+        egui::CursorIcon::ResizeHorizontal
+    );
+    for (from, to, start, end) in [
+        (1200, 600, 600, 3600),
+        (3600, 4200, 600, 4200),
+        (600, 4500, 4200, 4500),
+        (4500, 4800, 4200, 4800),
+    ] {
+        h.drag(point(from), point(to));
+        assert_eq!(
+            h.app.active_document().unwrap().selection,
+            Some(FrameRange { start, end })
+        );
+    }
+    let before = h.app.host.snapshot();
+    let from = point(4200);
+    let to = point(2400);
+    h.frame(vec![egui::Event::PointerMoved(from)]);
+    h.frame(vec![pointer_event(
+        from,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(to)]);
+    assert_eq!(
+        h.app.display_document().unwrap().selection,
+        Some(FrameRange {
+            start: 2400,
+            end: 4800
+        })
+    );
+    assert_eq!(h.app.host.snapshot(), before);
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    h.frame(vec![pointer_event(to, egui::PointerButton::Primary, false)]);
+    assert_eq!(h.app.host.snapshot(), before);
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        doc.revision_id
+    );
+    assert!(!h.app.active_document().unwrap().dirty);
 }
 
 #[test]
