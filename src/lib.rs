@@ -72,9 +72,9 @@ impl Request {
 pub enum CommandResult {
     Snapshot(Box<SessionSnapshot>),
     Capabilities(Capabilities),
-    Presentation(presentation::PresentationSnapshot),
-    Rendered(presentation::RenderMetadata),
-    Capture(presentation::CaptureResult),
+    Presentation(Box<presentation::PresentationSnapshot>),
+    Rendered(Box<presentation::RenderMetadata>),
+    Capture(Box<presentation::CaptureResult>),
     Document(Box<documents::DocumentInfo>),
     Job(Box<documents::JobInfo>),
     Samples(documents::SamplesData),

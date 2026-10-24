@@ -49,7 +49,7 @@ Windows/macOS/Linux packaging and shipped-binary smoke checks. No remote, push,
 public release, signing or installer was created. Keep this ticket in-progress
 until the deferred platform verification is performed; local work is complete.
 
-## Current execution note — 24 October 2026
+## Current execution note â€” 24 October 2026
 
 The repository now has an `origin` remote, so the original no-remote condition is
 no longer current. No CI dispatch, remote push or new macOS/Linux native run was

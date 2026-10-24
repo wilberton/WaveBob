@@ -10,6 +10,8 @@ mod browser;
 mod dropping;
 #[path = "app/editing.rs"]
 mod editing;
+#[path = "app/effect_controls.rs"]
+mod effect_controls;
 #[path = "app/effects.rs"]
 mod effects;
 #[path = "app/projecting.rs"]
@@ -41,10 +43,8 @@ pub struct WaveBob {
     browser_path: String,
     browser_seen_path: Option<String>,
     browser_edit_path: bool,
-    effect: wavebob::effects::Effect,
-    observed_effect: Option<wavebob::effects::Effect>,
-    gain_db: f64,
-    reverb: effects::ReverbControls,
+    native_editors: std::collections::BTreeMap<String, effects::NativeEditor>,
+    stack_drag: Option<String>,
     output_dialog: Option<saving::OutputDialog>,
     save_picker: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
     project_picker: Option<projecting::ProjectPicker>,
@@ -726,6 +726,7 @@ impl WaveBob {
             .map(str::to_owned)
             .collect(),
         );
+        self.effect_windows(ui.ctx());
         self.host.end_frame(ui.ctx());
         if self.host.ready_to_close() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);

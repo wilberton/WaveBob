@@ -44,7 +44,7 @@ verification and leaves every acceptance criterion unchecked.
 
 
 
-## Implementation checkpoint — 24 October 2026
+## Implementation checkpoint â€” 24 October 2026
 
 Streaming source-rate chains, envelope playback, a shared asynchronous offline
 render/query path, latency-aware dry comparison, deterministic tail termination,
@@ -76,7 +76,7 @@ Still required before completion: integrate owner processing into the live
 arrangement clip path (not only document playback and explicit clip renders),
 verify the prepared mix/control update path and complete the remaining adapter
 and readiness/error checks against that path. Production-effect measurement and
-editors remain owned by 29–40/44; linked-source freshness and final body/tail
+editors remain owned by 29â€“40/44; linked-source freshness and final body/tail
 geometry are owned by 42. Keep 29 blocked until this foundation is complete.
 
 Final checkpoint verification: `cargo fmt --all -- --check`, the complete
@@ -86,7 +86,7 @@ all-target Clippy variants with `-D warnings` pass. The complete direct/headless
 WAV/MP3 baseline workflow also passes. This is a verified implementation checkpoint,
 not completion of the remaining live arrangement processing integration above.
 
-## Completion verification — 24 October 2026
+## Completion verification â€” 24 October 2026
 
 Completed the remaining live arrangement adapter. Prepared clip voices now use
 source intervals and the shared streaming chain; clip previews/cancel create safe
@@ -112,5 +112,5 @@ after that process exited passed.
 
 The preceding checkpoints and their outstanding notes describe historical states.
 The foundation is complete; production constructors/editors and measured load
-remain 29–40/44, while linked bounces/final tail geometry/export policy remain
-42–43 as specified in the ticket scope.
+remain 29â€“40/44, while linked bounces/final tail geometry/export policy remain
+42â€“43 as specified in the ticket scope.

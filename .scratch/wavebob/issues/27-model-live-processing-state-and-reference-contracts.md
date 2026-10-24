@@ -62,4 +62,4 @@ claimed by this state ticket.
 See [state contract](../../../docs/live-processing.md),
 [reference contract](../../../docs/effect-reference-contract.md) and
 [pinned source hashes](../reference-manifest.json). No upstream DSP was built or
-rendered for this ticket; those measured comparisons belong to 30–40.
+rendered for this ticket; those measured comparisons belong to 30â€“40.

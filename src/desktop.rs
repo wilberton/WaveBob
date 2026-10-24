@@ -14,6 +14,7 @@ use crate::{
     SessionSnapshot, commands, ipc, presentation::*, protocol,
 };
 use eframe::egui;
+mod editors;
 
 enum RenderKind {
     Barrier,
@@ -24,6 +25,7 @@ enum RenderKind {
 }
 
 struct Pending {
+    editor_id: Option<String>,
     token: String,
     id: String,
     reply: mpsc::Sender<Response>,
@@ -51,6 +53,7 @@ pub struct DesktopHost {
     preferences: Option<crate::preferences::Preferences>,
     transient_resources: Vec<String>,
     ui_resources: Vec<String>,
+    editor_previews: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for DesktopHost {
@@ -72,6 +75,7 @@ impl Default for DesktopHost {
             preferences: None,
             transient_resources: Vec::new(),
             ui_resources: Vec::new(),
+            editor_previews: Default::default(),
         }
     }
 }
@@ -183,6 +187,10 @@ impl DesktopHost {
             return self.session.failure(Some(request.id), error);
         }
         let expected = match &request.command {
+            Command::OpenEffectEditor(params)
+            | Command::FocusEffectEditor(params)
+            | Command::CloseEffectEditor(params) => params.expected_presentation_revision,
+            Command::SetEditorGeometry(params) => params.expected_presentation_revision,
             Command::SetMode(params) => params.expected_presentation_revision,
             Command::SetTimelineViewport(params) => params.expected_presentation_revision,
             Command::SetEffect(params) => params.expected_presentation_revision,
@@ -198,13 +206,22 @@ impl DesktopHost {
                 CommandError::new(ErrorCode::StaleRevision, "Presentation revision changed"),
             );
         }
+        if matches!(
+            &request.command,
+            Command::OpenEffectEditor(_)
+                | Command::FocusEffectEditor(_)
+                | Command::CloseEffectEditor(_)
+                | Command::SetEditorGeometry(_)
+        ) {
+            return self.editor_command(request);
+        }
         let mut presentation = self.presentation.clone();
         let result = match &request.command {
             Command::GetCapabilities(_) => CommandResult::Capabilities(commands::capabilities(
                 true,
                 self.session.audio_output_configured(),
             )),
-            Command::GetPresentation(_) => CommandResult::Presentation(self.presentation()),
+            Command::GetPresentation(_) => CommandResult::Presentation(self.presentation().into()),
             Command::RequestQuit(params) => {
                 if let Err(error) = self.session.check_quit(params.discard_changes) {
                     return self.session.failure(Some(request.id), error);
@@ -313,6 +330,7 @@ impl DesktopHost {
         if layout_changed
             || next.mode != self.presentation.mode
             || next.viewports != self.presentation.viewports
+            || next.editor_windows != self.presentation.editor_windows
             || next.effect != self.presentation.effect
             || next.close_requested != self.presentation.close_requested
         {
@@ -335,8 +353,10 @@ impl DesktopHost {
             next.preferences = PreferenceStatus::Saving;
         }
         self.presentation = next;
-        self.session
-            .success(Some(id), CommandResult::Presentation(self.presentation()))
+        self.session.success(
+            Some(id),
+            CommandResult::Presentation(self.presentation().into()),
+        )
     }
 
     fn ready(&self, pending: &Pending) -> bool {
@@ -347,6 +367,7 @@ impl DesktopHost {
     pub fn begin_frame(&mut self, ctx: &egui::Context) {
         if !self.frozen() {
             self.session.poll_jobs();
+            self.sync_editors();
             let snapshot = self.session.snapshot();
             let mut next = self.presentation.clone();
             next.viewports.retain(|id, view| {
@@ -424,6 +445,7 @@ impl DesktopHost {
                     params.after_revision,
                     params.after_presentation_revision,
                     params.timeout_ms,
+                    params.editor_id.clone(),
                 )),
                 Command::CapturePng(params) => Some((
                     RenderKind::Capture {
@@ -433,11 +455,27 @@ impl DesktopHost {
                     params.after_revision,
                     params.after_presentation_revision,
                     params.timeout_ms,
+                    params.editor_id.clone(),
                 )),
                 _ => None,
             };
-            if let Some((kind, after_revision, after_presentation_revision, timeout_ms)) = render {
-                if !(1..=60_000).contains(&timeout_ms) {
+            if let Some((
+                kind,
+                after_revision,
+                after_presentation_revision,
+                timeout_ms,
+                editor_id,
+            )) = render
+            {
+                if editor_id
+                    .as_ref()
+                    .is_some_and(|id| !self.presentation.editor_windows.iter().any(|w| &w.id == id))
+                {
+                    let _ = incoming.reply.send(self.session.failure(
+                        Some(request.id),
+                        CommandError::new(ErrorCode::NotFound, "Requested editor window is closed"),
+                    ));
+                } else if !(1..=60_000).contains(&timeout_ms) {
                     let _ = incoming.reply.send(self.session.failure(
                         Some(request.id),
                         CommandError::new(
@@ -449,6 +487,7 @@ impl DesktopHost {
                     self.queue.push_back(incoming);
                 } else {
                     self.pending = Some(Pending {
+                        editor_id,
                         token: uuid::Uuid::new_v4().to_string(),
                         id: request.id,
                         reply: incoming.reply,
@@ -467,6 +506,11 @@ impl DesktopHost {
                 let _ = incoming.reply.send(self.execute(request));
             }
         }
+        if let Some(id) = self.pending.as_ref().and_then(|p| p.editor_id.as_ref()) {
+            let viewport = egui::ViewportId::from_hash_of(id);
+            ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::RequestPaintWhileHidden);
+            ctx.request_repaint_of(viewport);
+        }
         if self.pending.is_some() || !self.queue.is_empty() {
             ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
             ctx.request_repaint_after(Duration::from_millis(10));
@@ -478,6 +522,24 @@ impl DesktopHost {
     /// Call after drawing the entire client area. Keep this frame's state fixed
     /// until the framebuffer readback callback has received its actual pixels.
     pub fn end_frame(&mut self, ctx: &egui::Context) {
+        self.end_viewport_frame(ctx, None);
+    }
+    pub fn editor_capture_requested(&self, id: &str) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|p| p.editor_id.as_deref() == Some(id))
+    }
+    pub fn end_editor_frame(&mut self, ctx: &egui::Context, id: &str) {
+        self.end_viewport_frame(ctx, Some(id));
+    }
+    fn end_viewport_frame(&mut self, ctx: &egui::Context, editor_id: Option<&str>) {
+        if self
+            .pending
+            .as_ref()
+            .is_none_or(|p| p.editor_id.as_deref() != editor_id)
+        {
+            return;
+        }
         if self.drawn_revision != self.session.snapshot().revision
             || self.drawn_presentation_revision != self.presentation.revision
         {
@@ -491,9 +553,26 @@ impl DesktopHost {
         if !ready {
             return;
         }
+        let window = editor_id
+            .and_then(|id| self.presentation.editor_windows.iter().find(|w| w.id == id))
+            .cloned();
+        let state = window
+            .as_ref()
+            .and_then(|window| self.processing(window.owner.clone()).ok());
+        let processing_revision = state.as_ref().map(|s| s.committed.edit_revision_id.clone());
+        let processing_identity = state.as_ref().map(|s| {
+            crate::projects::checksum(&(s.preview.as_ref().unwrap_or(&s.committed), s.effect_tempo))
+        });
+        let preview_id = state.and_then(|s| s.preview_id);
         let pending = self.pending.as_mut().unwrap();
         pending.in_flight = true;
         let metadata = RenderMetadata {
+            editor_id: editor_id.map(str::to_owned),
+            owner: window.as_ref().map(|w| w.owner.clone()),
+            instance_id: window.as_ref().map(|w| w.instance_id.clone()),
+            processing_revision,
+            processing_identity,
+            preview_id,
             session_id: self.session.snapshot().session_id,
             rendered_revision: self.session.snapshot().revision,
             presentation_revision: self.presentation.revision,
@@ -534,7 +613,7 @@ impl DesktopHost {
         };
         let response = self.session.success(
             Some(pending.id.clone()),
-            CommandResult::Rendered(metadata.clone()),
+            CommandResult::Rendered(metadata.clone().into()),
         );
         let (reply, deadline, cancelled) = (
             pending.reply.clone(),
@@ -575,15 +654,15 @@ impl DesktopHost {
                 } else if let Some((path, overwrite, create_parent)) = destination {
                     save_png(&image, path, overwrite, create_parent, deadline, &cancelled).map(
                         |path| {
-                            CommandResult::Capture(CaptureResult {
+                            CommandResult::Capture(Box::new(CaptureResult {
                                 path,
                                 mime_type: "image/png".into(),
                                 metadata,
-                            })
+                            }))
                         },
                     )
                 } else {
-                    Ok(CommandResult::Rendered(metadata))
+                    Ok(CommandResult::Rendered(metadata.into()))
                 };
                 let mut response = response;
                 response.outcome = match result {
@@ -701,6 +780,72 @@ impl Drop for DesktopHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effect_capture_is_issued_only_on_its_requested_viewport() {
+        let mut host = DesktopHost::default();
+        let (reply, _receive) = mpsc::channel();
+        let id = "capture-shell-probe".to_owned();
+        host.presentation.editor_windows.push(EditorWindow {
+            id: id.clone(),
+            owner: crate::processing::Owner::Document(uuid::Uuid::new_v4().to_string()),
+            instance_id: uuid::Uuid::new_v4().to_string(),
+            focus_generation: 1,
+        });
+        host.pending = Some(Pending {
+            editor_id: Some(id.clone()),
+            token: "probe".into(),
+            id: "capture".into(),
+            reply,
+            deadline: Instant::now() + Duration::from_secs(5),
+            after_revision: 0,
+            after_presentation_revision: 0,
+            kind: RenderKind::Capture {
+                path: None,
+                overwrite: false,
+            },
+            in_flight: false,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        let ctx = egui::Context::default();
+        host.end_frame(&ctx);
+        host.end_editor_frame(&ctx, "another-window");
+        assert!(!host.pending.as_ref().unwrap().in_flight);
+        let viewport = egui::ViewportId::from_hash_of(&id);
+        let mut input = egui::RawInput {
+            viewport_id: viewport,
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(720.0, 460.0),
+            )),
+            ..Default::default()
+        };
+        input.viewports.insert(
+            viewport,
+            egui::ViewportInfo {
+                parent: Some(egui::ViewportId::ROOT),
+                ..Default::default()
+            },
+        );
+        let mut output = ctx.run_ui(input, |ui| host.end_editor_frame(ui.ctx(), &id));
+        assert!(host.pending.as_ref().unwrap().in_flight);
+        assert!(
+            output.viewport_output[&viewport]
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::ViewportCommand::Screenshot(_)))
+        );
+        assert!(
+            !output
+                .viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|root| root
+                    .commands
+                    .iter()
+                    .any(|command| matches!(command, egui::ViewportCommand::Screenshot(_))))
+        );
+        output.textures_delta.clear();
+    }
 
     #[test]
     fn png_output_is_atomic_and_requires_explicit_overwrite() {

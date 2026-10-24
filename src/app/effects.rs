@@ -1,343 +1,613 @@
 use super::*;
-use wavebob::effects::{ApplyEffectParams, EditTarget, Effect};
-pub(super) struct ReverbControls {
-    room_size: f64,
-    decay_seconds: f64,
-    wet: f64,
+use wavebob::processing::{self, Action, Owner, ParameterValue};
+#[derive(Default)]
+pub(super) struct NativeEditor {
+    focus: u64,
+    preview: Option<String>,
+    control: Option<String>,
+    help: Option<String>,
 }
-impl Default for ReverbControls {
-    fn default() -> Self {
-        Self {
-            room_size: 0.5,
-            decay_seconds: 1.5,
-            wet: 0.25,
-        }
-    }
-}
-impl ReverbControls {
-    fn effect(&self) -> Effect {
-        Effect::Reverb {
-            room_size: self.room_size,
-            decay_seconds: self.decay_seconds,
-            wet: self.wet,
-        }
-    }
-}
-
 impl WaveBob {
     pub(super) fn selected_clip(&self) -> Option<wavebob::arrangement::Clip> {
         if self.host.presentation().mode != ViewMode::Multitrack {
             return None;
         }
-        let arr = self.host.snapshot().arrangement;
-        if arr.selected_clip_ids.len() != 1 {
+        let arrangement = self.host.snapshot().arrangement;
+        if arrangement.selected_clip_ids.len() != 1 {
             return None;
         }
-        arr.clip(&arr.selected_clip_ids[0])
+        arrangement
+            .clip(&arrangement.selected_clip_ids[0])
             .map(|(_, clip)| clip.clone())
     }
-    fn effect_target(&self) -> Option<EditTarget> {
-        if self.host.presentation().mode != ViewMode::Waveform {
-            return None;
+    pub(super) fn stack_owner(&self) -> Option<Owner> {
+        match self.host.presentation().mode {
+            ViewMode::Waveform => self.active_document().map(|d| Owner::Document(d.id)),
+            ViewMode::Multitrack => self.selected_clip().map(|c| Owner::Clip(c.id)),
         }
-        let document = self.active_document()?;
-        if document.frames == 0 {
-            return None;
+    }
+    pub(super) fn processing_action(&mut self, owner: &Owner, change: Action) {
+        if let Ok(state) = self.host.processing(owner.clone()) {
+            self.dispatch(Command::EditProcessing(processing::EditParams {
+                owner: owner.clone(),
+                expected_edit_revision: state.committed.edit_revision_id,
+                change,
+            }));
         }
-        Some(if let Some(range) = document.selection {
-            EditTarget::Range {
-                document_id: document.id,
-                revision_id: document.revision_id,
-                start_frame: range.start,
-                end_frame: range.end,
-            }
-        } else {
-            EditTarget::Whole {
-                document_id: document.id,
-                revision_id: document.revision_id,
-            }
-        })
     }
     pub(super) fn effects(&mut self, ui: &mut egui::Ui, area: Rect, help: &mut Help) {
-        let effect = self.host.presentation().effect;
-        if self.observed_effect.as_ref() != Some(&effect) {
-            match &effect {
-                Effect::Gain { db } => self.gain_db = *db,
-                Effect::Reverb {
-                    room_size,
-                    decay_seconds,
-                    wet,
-                } => {
-                    self.reverb = ReverbControls {
-                        room_size: *room_size,
-                        decay_seconds: *decay_seconds,
-                        wet: *wet,
-                    }
-                }
-                _ => {}
-            }
-            self.effect = effect.clone();
-            self.observed_effect = Some(effect);
-        }
         let mut content = child(ui, area);
         content.horizontal(|ui| {
-            let response = ui.add(egui::Button::new("›").frame(false));
+            let hide = ui.small_button("›");
             help.observe(
-                &response,
+                &hide,
                 "Hide the effects panel. Backtick toggles both panels.",
             );
-            if response.clicked() {
+            if hide.clicked() {
                 self.layout(SetLayoutParams {
                     right_visible: Some(false),
                     ..Default::default()
                 });
             }
-            section(ui, "EDIT & EFFECTS");
+            section(ui, "EFFECTS");
         });
-        content.add_space(18.0);
-        egui::ScrollArea::vertical()
-            .id_salt("effects-scroll")
-            .auto_shrink([false, false])
-            .show(&mut content, |ui| self.effect_controls(ui, help));
-    }
-    fn effect_controls(&mut self, content: &mut egui::Ui, help: &mut Help) {
-        let width = content.available_width();
-        content.label("Target");
-        let target = self.effect_target();
-        let clip = self.selected_clip();
-        let enabled = (target.is_some() || clip.is_some())
-            && self.gesture.is_none()
-            && self.arrangement_gesture.is_none();
-        let label = match &target {
-            Some(EditTarget::Range { .. }) => "Selection",
-            Some(EditTarget::Whole { .. }) => "Whole sample",
-            None if clip.is_some() => "Selected clip",
-            None => "No editing target",
+        content.add_space(12.0);
+        let Some(owner) = self.stack_owner() else {
+            content.label(
+                RichText::new(if self.host.presentation().mode == ViewMode::Multitrack {
+                    "Select exactly one clip to edit its effect stack."
+                } else {
+                    "Open a waveform document to add effects."
+                })
+                .color(MUTED),
+            );
+            return;
         };
-        help.observe(&content.add_enabled(false,centered_button(label).min_size(Vec2::new(width,26.0))),"Waveform effects target the selection or whole sample. Arrangement effects require exactly one selected clip and affect only that instance.");
-        content.add_space(14.0);
-        let (gain_row, _) = content.allocate_exact_size(Vec2::new(width, 18.0), Sense::hover());
-        content.painter().text(
-            gain_row.left_center(),
-            egui::Align2::LEFT_CENTER,
-            "Gain",
-            egui::FontId::proportional(13.0),
-            if matches!(self.effect, Effect::Gain { .. }) {
-                Color32::from_rgb(217, 226, 240)
-            } else {
-                MUTED
-            },
+        let Ok(snapshot) = self.host.processing(owner.clone()) else {
+            return;
+        };
+        let state = snapshot.preview.as_ref().unwrap_or(&snapshot.committed);
+        content.label(RichText::new(self.host.owner_name(&owner)).strong());
+        content.label(
+            RichText::new(match owner {
+                Owner::Document(_) => "Whole document",
+                Owner::Clip(_) => "Selected clip",
+            })
+            .small()
+            .color(MUTED),
         );
-        content.painter().text(
-            gain_row.right_center(),
-            egui::Align2::RIGHT_CENTER,
-            format!("{:.1} dB", self.gain_db),
-            egui::FontId::proportional(11.0),
-            MUTED,
-        );
-        content.spacing_mut().slider_width = width;
-        let response =
-            content.add(egui::Slider::new(&mut self.gain_db, -24.0..=12.0).show_value(false));
+        content.add_space(12.0);
+        let footer = 88.0;
+        egui::ScrollArea::vertical()
+            .id_salt("effect-stack")
+            .max_height((content.available_height() - footer).max(80.0))
+            .show(&mut content, |ui| {
+                for event in stack_rows(ui, state, &mut self.stack_drag, help) {
+                    match event {
+                        StackEvent::Edit(change) => self.processing_action(&owner, change),
+                        StackEvent::Open(id) => {
+                            self.dispatch(Command::OpenEffectEditor(EditorParams {
+                                owner: owner.clone(),
+                                instance_id: id,
+                                expected_presentation_revision: None,
+                            }))
+                        }
+                    }
+                }
+                ui.menu_button("＋ Add effect", |ui| {
+                    let catalogue = processing::catalogue();
+                    if !catalogue.iter().any(|e| e.available) {
+                        ui.label("No effects available.");
+                    }
+                    for info in catalogue.into_iter().filter(|e| e.available) {
+                        if ui
+                            .add_enabled(
+                                state.effects.len() < processing::MAX_EFFECTS,
+                                egui::Button::new(info.kind.label()),
+                            )
+                            .clicked()
+                        {
+                            self.processing_action(&owner, Action::Add { kind: info.kind });
+                            ui.close();
+                        }
+                    }
+                });
+            });
+        content.add_space(12.0);
+        let mut bypass = state.bypassed;
+        let response = content.checkbox(&mut bypass, "Bypass all");
         help.observe(
             &response,
-            "Set gain in dB. Changing parameters does not edit audio; press Apply.",
+            "Bypass this owner's entire stack; the envelope remains active.",
         );
-        if response.changed() || response.clicked() || response.drag_started() {
-            self.effect = Effect::Gain { db: self.gain_db };
+        if response.changed() {
+            self.processing_action(&owner, Action::BypassAll { bypassed: bypass });
         }
-        content.add_space(12.0);
-        for pair in [
-            [Effect::FadeIn, Effect::FadeOut],
-            [Effect::Reverse, self.reverb.effect()],
-        ] {
-            content.horizontal(|ui|{for effect in pair{
-                let selected=effect==self.effect||(matches!(effect,Effect::Reverb{..})&&matches!(self.effect,Effect::Reverb{..}));
-                let response=ui.add(centered_button(effect.label()).selected(selected).min_size(Vec2::new((width-7.0)/2.0,28.0)));
-                help.observe(&response,"Choose this effect, then press Apply. Only the displayed target will change.");
-                if response.clicked(){self.effect=effect;}
-            }});
-            content.add_space(4.0);
+        let transport = self.host.transport();
+        let peak = transport.peak_level;
+        content.label(RichText::new("Processed output").small().color(MUTED));
+        let db = if peak > 0.0 {
+            20.0 * peak.log10()
+        } else {
+            -120.0
+        };
+        content.add(
+            egui::ProgressBar::new(((db + 60.0) / 60.0).clamp(0.0, 1.0) as f32)
+                .fill(if peak > 1.0 {
+                    Color32::RED
+                } else {
+                    Color32::from_rgb(69, 200, 110)
+                })
+                .text(format!("{db:.1} dBFS")),
+        );
+        if transport.processing.pending {
+            content.label(RichText::new("Preparing sound…").small().color(MUTED));
         }
-        content.add_space(5.0);
-        if matches!(self.effect, Effect::Reverb { .. }) {
-            content.label(RichText::new("Reverb").strong().small());
-            content.spacing_mut().slider_width = (width - 110.0).max(30.0);
-            let room =
-                content.add(egui::Slider::new(&mut self.reverb.room_size, 0.0..=1.0).text("Room"));
-            help.observe(
-                &room,
-                "Room size scales the reverb's reflection delays. Press Apply to process.",
+        if let Some(error) = transport.processing.preparation_error {
+            content.colored_label(Color32::LIGHT_RED, error.message);
+        }
+    }
+    pub(super) fn effect_windows(&mut self, ctx: &egui::Context) {
+        let presentation = self.host.presentation();
+        self.native_editors
+            .retain(|id, _| presentation.editor_windows.iter().any(|w| &w.id == id));
+        for window in presentation.editor_windows {
+            let Ok(snapshot) = self.host.processing(window.owner.clone()) else {
+                continue;
+            };
+            let state = snapshot.preview.as_ref().unwrap_or(&snapshot.committed);
+            let Some(instance) = state
+                .effects
+                .iter()
+                .find(|e| e.id == window.instance_id)
+                .cloned()
+            else {
+                continue;
+            };
+            let mut native = self.native_editors.remove(&window.id).unwrap_or_default();
+            let geometry = presentation
+                .layout
+                .editor_geometry
+                .get(&window.id)
+                .cloned()
+                .unwrap_or_default();
+            let title = format!(
+                "{} · {} · {}",
+                instance.kind.label(),
+                self.host.owner_name(&window.owner),
+                &instance.id[..8]
             );
-            let decay = content.add(
-                egui::Slider::new(&mut self.reverb.decay_seconds, 0.1..=10.0)
-                    .logarithmic(true)
-                    .text("Decay s"),
+            let monitor = ctx
+                .input(|i| i.viewport().monitor_size)
+                .unwrap_or(Vec2::new(1920.0, 1080.0));
+            let mut builder = egui::ViewportBuilder::default()
+                .with_title(title)
+                .with_inner_size([
+                    geometry.width.min(monitor.x),
+                    geometry.height.min(monitor.y),
+                ])
+                .with_min_inner_size([320.0, 240.0])
+                .with_clamp_size_to_monitor_size(true);
+            if let (Some(x), Some(y)) = (geometry.x, geometry.y) {
+                builder = builder.with_position([
+                    x.clamp(0.0, (monitor.x - geometry.width).max(0.0)),
+                    y.clamp(0.0, (monitor.y - geometry.height).max(0.0)),
+                ]);
+            }
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of(&window.id),
+                builder,
+                |ctx, class| {
+                    if class == egui::ViewportClass::EmbeddedWindow {
+                        self.error =
+                            Some("This GUI backend cannot create native effect windows.".into());
+                        return;
+                    }
+                    if native.focus != window.focus_generation {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        native.focus = window.focus_generation;
+                    }
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        self.dispatch(Command::CloseEffectEditor(EditorParams {
+                            owner: window.owner.clone(),
+                            instance_id: window.instance_id.clone(),
+                            expected_presentation_revision: None,
+                        }));
+                        return;
+                    }
+                    self.shortcuts(ctx);
+                    let capture = self.host.editor_capture_requested(&window.id);
+                    if ctx.input(|i| i.viewport().visible() == Some(false)) && !capture {
+                        return;
+                    }
+                    if !self.host.frozen() {
+                        let size = ctx.viewport_rect().size();
+                        let position =
+                            ctx.input(|input| input.viewport().inner_rect.map(|rect| rect.min));
+                        let next = WindowGeometry {
+                            width: size.x.clamp(320.0, 4096.0),
+                            height: size.y.clamp(240.0, 2160.0),
+                            x: position.map(|point| point.x),
+                            y: position.map(|point| point.y),
+                        };
+                        if next != geometry {
+                            self.dispatch(Command::SetEditorGeometry(EditorGeometryParams {
+                                editor_id: window.id.clone(),
+                                geometry: next,
+                                expected_presentation_revision: None,
+                            }));
+                        }
+                    }
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if self.host.frozen() {
+                            ui.disable();
+                        }
+                        ui.heading(instance.kind.label());
+                        ui.label(RichText::new(self.host.owner_name(&window.owner)).color(MUTED));
+                        ui.separator();
+                        native.help = None;
+                        self.native_parameters(ui, &window, &instance, &mut native);
+                        let transport = self.host.transport();
+                        ui.label(
+                            RichText::new(format!(
+                                "Transport output · {:.1} dBFS",
+                                if transport.peak_level > 0.0 {
+                                    20.0 * transport.peak_level.log10()
+                                } else {
+                                    -120.0
+                                }
+                            ))
+                            .small()
+                            .color(MUTED),
+                        );
+                        let values: Vec<_> = transport
+                            .analyzer
+                            .iter()
+                            .take(128)
+                            .map(|sample| (sample[0] * 0.5 + 0.5).clamp(0.0, 1.0))
+                            .collect();
+                        effect_controls::graph(ui, &values, 64.0);
+                        ui.separator();
+                        ui.label(
+                            RichText::new(native.help.as_deref().unwrap_or(
+                                "Changes are heard live · double-click a control to reset",
+                            ))
+                            .small()
+                            .color(MUTED),
+                        );
+                        if let Some(error) = &self.error {
+                            ui.colored_label(Color32::LIGHT_RED, error);
+                        }
+                    });
+                    self.host.end_editor_frame(ctx, &window.id);
+                },
             );
-            help.observe(&decay, "Reverb decay in seconds, bounded from 0.1 to 10.");
-            let wet = content.add(egui::Slider::new(&mut self.reverb.wet, 0.0..=1.0).text("Wet"));
-            help.observe(
-                &wet,
-                "Wet/dry mix: zero is unchanged dry audio; one is only the reverberated signal.",
-            );
-            self.effect = self.reverb.effect();
-            content.label(
-                RichText::new("Tail is truncated at target end.")
+            self.native_editors.insert(window.id, native);
+        }
+    }
+    fn native_parameters(
+        &mut self,
+        ui: &mut egui::Ui,
+        window: &EditorWindow,
+        instance: &processing::Instance,
+        native: &mut NativeEditor,
+    ) {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape))
+            && let Some(id) = native.preview.take()
+        {
+            self.dispatch(Command::CancelProcessingPreview(
+                processing::PreviewParams { preview_id: id },
+            ));
+            return;
+        }
+        let Some(info) = processing::catalogue()
+            .into_iter()
+            .find(|e| e.kind == instance.kind)
+        else {
+            return;
+        };
+        if !info.parameters.is_empty() {
+            ui.label(
+                RichText::new("Parameter map · drag to adjust")
                     .small()
                     .color(MUTED),
             );
-            content.add_space(6.0);
-        }
-        let response = content.add_enabled(
-            enabled,
-            centered_button("Apply")
-                .fill(BLUE)
-                .min_size(Vec2::new(width, 30.0)),
-        );
-        help.observe(
-            &response,
-            if enabled {
-                "Apply the selected effect as one undoable background edit."
-            } else {
-                "Select exactly one arrangement clip, or open a nonempty waveform sample. Finish the current gesture to enable Apply."
-            },
-        );
-        if response.clicked()
-            && let Some(clip) = &clip
-        {
-            self.dispatch(Command::ApplyClipEffect(
-                wavebob::arrangement::ClipEffectParams {
-                    clip_id: clip.id.clone(),
-                    edit_revision_id: clip.edit_revision_id.clone(),
-                    effect: self.effect.clone(),
-                },
-            ));
-        } else if response.clicked()
-            && let Some(target) = target
-        {
-            self.dispatch(Command::ApplyEffect(ApplyEffectParams {
-                target,
-                effect: self.effect.clone(),
-            }));
-        }
-        content.add_space(12.0);
-        let history = self.host.history();
-        content.horizontal(|ui| {
-            for (label, available, redo) in [
-                ("Undo", history.can_undo, false),
-                ("Redo", history.can_redo, true),
-            ] {
-                let response = ui.add_enabled(
-                    available,
-                    centered_button(label).min_size(Vec2::new((width - 7.0) / 2.0, 26.0)),
-                );
-                help.observe(
+            let values: Vec<_> = info
+                .parameters
+                .iter()
+                .take(128)
+                .map(|parameter| {
+                    let value = match instance
+                        .parameters
+                        .get(&parameter.id)
+                        .unwrap_or(&parameter.default)
+                    {
+                        ParameterValue::Boolean(value) => f64::from(u8::from(*value)),
+                        ParameterValue::Integer(value) => *value as f64,
+                        ParameterValue::Number(value) => *value,
+                    };
+                    ((value - parameter.minimum) / (parameter.maximum - parameter.minimum)) as f32
+                })
+                .collect();
+            let (plot, mut response) = effect_controls::graph(ui, &values, 92.0);
+            if (response.clicked() || response.dragged())
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                let fraction = ((pointer.x - plot.left()) / plot.width()).clamp(0.0, 1.0);
+                let index = (fraction * (values.len() - 1) as f32).round() as usize;
+                let parameter = &info.parameters[index];
+                let normalized =
+                    ((plot.bottom() - pointer.y) / plot.height()).clamp(0.0, 1.0) as f64;
+                let number =
+                    parameter.minimum + (parameter.maximum - parameter.minimum) * normalized;
+                let value = match parameter.default {
+                    ParameterValue::Boolean(_) => ParameterValue::Boolean(number >= 0.5),
+                    ParameterValue::Integer(_) => ParameterValue::Integer(number.round() as i32),
+                    ParameterValue::Number(_) => ParameterValue::Number(number),
+                };
+                response.mark_changed();
+                self.edit_native_control(
+                    window,
+                    &instance.id,
+                    native,
+                    (parameter.id.clone(), value, true),
                     &response,
-                    if available {
-                        if redo {
-                            "Redo the last undone edit. Ctrl/Cmd+Shift+Z or Ctrl+Y."
-                        } else {
-                            "Undo the last committed edit. Ctrl/Cmd+Z."
-                        }
-                    } else {
-                        if redo {
-                            "There is no undone edit to redo."
-                        } else {
-                            "No audio edits have been committed yet."
-                        }
-                    },
+                    ui.ctx(),
                 );
-                if response.clicked() {
-                    self.dispatch(if redo {
-                        Command::Redo(EmptyParams {})
-                    } else {
-                        Command::Undo(EmptyParams {})
-                    });
+            } else if response.drag_stopped()
+                && let Some(id) = native.preview.take()
+            {
+                self.dispatch(Command::CommitProcessingPreview(
+                    processing::PreviewParams { preview_id: id },
+                ));
+            }
+        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for parameter in info.parameters {
+                let Some(mut value) = instance.parameters.get(&parameter.id).cloned() else {
+                    continue;
+                };
+                let response = ui
+                    .horizontal(|ui| {
+                        ui.label(&parameter.name);
+                        let mut response = match &mut value {
+                            ParameterValue::Boolean(value) => ui.checkbox(value, ""),
+                            ParameterValue::Integer(value) => {
+                                let mut number = *value as f64;
+                                let response = effect_controls::number(
+                                    ui,
+                                    &mut number,
+                                    parameter.minimum,
+                                    parameter.maximum,
+                                    &parameter.unit,
+                                    true,
+                                    matches!(
+                                        parameter.id.as_str(),
+                                        "dry" | "wet" | "early" | "volume"
+                                    ),
+                                );
+                                *value = number.round() as i32;
+                                response
+                            }
+                            ParameterValue::Number(value) => effect_controls::number(
+                                ui,
+                                value,
+                                parameter.minimum,
+                                parameter.maximum,
+                                &parameter.unit,
+                                false,
+                                matches!(parameter.id.as_str(), "dry" | "wet" | "early" | "volume"),
+                            ),
+                        };
+                        if response.double_clicked() {
+                            value = parameter.default.clone();
+                            response.mark_changed();
+                        }
+                        response
+                    })
+                    .inner;
+                if response.hovered() || response.has_focus() {
+                    let formatted = match &value {
+                        ParameterValue::Boolean(value) => {
+                            if *value {
+                                "On".into()
+                            } else {
+                                "Off".into()
+                            }
+                        }
+                        ParameterValue::Integer(value) => value.to_string(),
+                        ParameterValue::Number(value) => format!("{value:.4}"),
+                    };
+                    native.help = Some(format!(
+                        "{}: {} {} · Shift for fine adjustment",
+                        parameter.name, formatted, parameter.unit
+                    ));
                 }
+                self.edit_native_control(
+                    window,
+                    &instance.id,
+                    native,
+                    (parameter.id, value, false),
+                    &response,
+                    ui.ctx(),
+                );
             }
         });
-        if let Some(clip) = clip {
-            content.add_space(16.0);
-            content.separator();
-            content.label(RichText::new("Clip source interval").strong().small());
-            content
-                .add(egui::Label::new(RichText::new(&clip.name).small().color(MUTED)).truncate());
-            let draft =
-                self.clip_trim_draft
-                    .get_or_insert_with(|| super::arranging::ClipTrimDraft {
-                        revision: clip.edit_revision_id.clone(),
-                        start: clip.source_start,
-                        end: clip.source_end,
-                    });
-            if draft.revision != clip.edit_revision_id {
-                draft.revision = clip.edit_revision_id.clone();
-                draft.start = clip.source_start;
-                draft.end = clip.source_end;
+    }
+    fn edit_native_control(
+        &mut self,
+        window: &EditorWindow,
+        instance_id: &str,
+        native: &mut NativeEditor,
+        change: (String, ParameterValue, bool),
+        response: &egui::Response,
+        ctx: &egui::Context,
+    ) {
+        let control_id = if change.2 {
+            "parameter-map".to_owned()
+        } else {
+            change.0.clone()
+        };
+        if response.changed() {
+            if native
+                .control
+                .as_ref()
+                .is_some_and(|control| control != &control_id)
+                && let Some(id) = native.preview.take()
+            {
+                self.dispatch(Command::CommitProcessingPreview(
+                    processing::PreviewParams { preview_id: id },
+                ));
             }
-            content.horizontal(|ui| {
-                ui.label("Start");
-                let response =
-                    ui.add(egui::DragValue::new(&mut draft.start).range(0..=clip.source_frames));
-                help.observe(
-                    &response,
-                    "Exact source frame at the clip's left edge. Press Trim to apply.",
-                );
-            });
-            content.horizontal(|ui| {
-                ui.label("End");
-                let response =
-                    ui.add(egui::DragValue::new(&mut draft.end).range(0..=clip.source_frames));
-                help.observe(
-                    &response,
-                    "Exclusive source frame at the clip's right edge. Press Trim to apply.",
-                );
-            });
-            let interval = (draft.start, draft.end);
-            let response = content.add_enabled(
-                self.arrangement_gesture.is_none(),
-                centered_button("Trim clip").min_size(Vec2::new(width, 26.0)),
-            );
-            help.observe(&response,"Apply exact source bounds and rebuild this clip's effects. Other instances and the original waveform remain unchanged.");
-            if response.clicked() {
-                self.dispatch(Command::TrimClip(wavebob::arrangement::TrimClipParams {
-                    clip_id: clip.id,
-                    edit_revision_id: clip.edit_revision_id,
-                    source_start: interval.0,
-                    source_end: interval.1,
+            native.control = Some(control_id.clone());
+            if native.preview.as_ref().is_some_and(|id| {
+                self.host
+                    .processing(window.owner.clone())
+                    .is_ok_and(|s| s.preview_id.as_ref() != Some(id))
+            }) {
+                native.preview = None;
+            }
+            if native.preview.is_none()
+                && let Ok(state) = self.host.processing(window.owner.clone())
+            {
+                let response = self.host.execute(Request::new(
+                    "native-preview",
+                    Command::BeginProcessingPreview(processing::BeginParams {
+                        owner: window.owner.clone(),
+                        expected_edit_revision: state.committed.edit_revision_id,
+                    }),
+                ));
+                if let Outcome::Ok {
+                    result: CommandResult::Processing(state),
+                } = response.outcome
+                {
+                    native.preview = state.preview_id;
+                    self.host
+                        .register_editor_preview(&window.id, native.preview.clone());
+                }
+            }
+            if let Some(id) = &native.preview {
+                self.dispatch(Command::UpdateProcessingPreview(processing::UpdateParams {
+                    preview_id: id.clone(),
+                    change: Action::SetParameter {
+                        effect_id: instance_id.to_owned(),
+                        parameter_id: change.0.clone(),
+                        value: change.1,
+                    },
                 }));
             }
-            content.label(
-                RichText::new(format!(
-                    "Processing: {} {}",
-                    clip.effects.len(),
-                    if clip.effects.len() == 1 {
-                        "step"
-                    } else {
-                        "steps"
-                    }
-                ))
-                .small()
-                .color(MUTED),
-            );
         }
-        if let Some(document) = self.active_document()
-            && document.overloaded_samples > 0
+        if native.control.as_ref() == Some(&control_id)
+            && (response.drag_stopped()
+                || response.lost_focus()
+                || (response.changed() && !response.dragged() && !ctx.text_edit_focused()))
+            && let Some(id) = native.preview.take()
         {
-            content.add_space(8.0);
-            content.label(
-                RichText::new(format!(
-                    "Peak {:+.1} dB · {} overloaded samples",
-                    20.0 * document.peak_level.log10(),
-                    document.overloaded_samples
-                ))
-                .small()
-                .color(Color32::from_rgb(226, 178, 89)),
-            );
-        }
-        if !self.host.frozen() && self.effect != self.host.presentation().effect {
-            self.dispatch(Command::SetEffect(SetEffectParams {
-                effect: self.effect.clone(),
-                expected_presentation_revision: Some(self.host.presentation().revision),
-            }));
+            self.dispatch(Command::CommitProcessingPreview(
+                processing::PreviewParams { preview_id: id },
+            ));
         }
     }
+}
+
+#[derive(Debug)]
+pub(super) enum StackEvent {
+    Edit(Action),
+    Open(String),
+}
+pub(super) fn stack_rows(
+    ui: &mut egui::Ui,
+    state: &processing::Processing,
+    drag: &mut Option<String>,
+    help: &mut Help,
+) -> Vec<StackEvent> {
+    let mut events = Vec::new();
+    for (index, instance) in state.effects.iter().enumerate() {
+        let row = egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(Stroke::new(1.0, BORDER))
+            .corner_radius(4.0)
+            .inner_margin(6.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let grip = ui.add(egui::Label::new("⠿").sense(Sense::drag()));
+                    help.observe(
+                        &grip,
+                        "Drag to reorder this effect. Processing follows the displayed order.",
+                    );
+                    if grip.drag_started() {
+                        *drag = Some(instance.id.clone());
+                    }
+                    let mut enabled = !instance.bypassed;
+                    let response = ui.checkbox(&mut enabled, "");
+                    help.observe(
+                        &response,
+                        "Enable or bypass this effect with an aligned dry comparison.",
+                    );
+                    if response.changed() {
+                        events.push(StackEvent::Edit(Action::Bypass {
+                            effect_id: instance.id.clone(),
+                            bypassed: !enabled,
+                        }));
+                    }
+                    ui.add(egui::Label::new(instance.kind.label()).truncate());
+                    let open = ui.small_button("↗");
+                    help.observe(
+                        &open,
+                        "Open controls in this effect's separate native window.",
+                    );
+                    if open.clicked() {
+                        events.push(StackEvent::Open(instance.id.clone()));
+                    }
+                    ui.menu_button("⋯", |ui| {
+                        for (label, enabled, change) in [
+                            (
+                                "Move up",
+                                index > 0,
+                                Action::Move {
+                                    effect_id: instance.id.clone(),
+                                    index: index.saturating_sub(1),
+                                },
+                            ),
+                            (
+                                "Move down",
+                                index + 1 < state.effects.len(),
+                                Action::Move {
+                                    effect_id: instance.id.clone(),
+                                    index: (index + 1).min(state.effects.len() - 1),
+                                },
+                            ),
+                            (
+                                "Remove",
+                                true,
+                                Action::Remove {
+                                    effect_id: instance.id.clone(),
+                                },
+                            ),
+                        ] {
+                            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                                events.push(StackEvent::Edit(change));
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+            })
+            .response;
+        if row.contains_pointer()
+            && ui.input(|i| i.pointer.any_released())
+            && let Some(dragged) = drag.take()
+            && dragged != instance.id
+        {
+            events.push(StackEvent::Edit(Action::Move {
+                effect_id: dragged,
+                index,
+            }));
+        }
+        ui.add_space(4.0);
+    }
+    if ui.input(|i| i.pointer.any_released() || i.key_pressed(egui::Key::Escape)) {
+        *drag = None;
+    }
+    events
 }

@@ -66,6 +66,8 @@ pub struct TransportSnapshot {
     /// Peak absolute PCM level in the most recently applied output block, before device clipping.
     pub peak_level: f64,
     pub processing: ProcessingHandoff,
+    /// At most 128 recent stereo output frames; read on the control thread.
+    pub analyzer: Vec<[f32; 2]>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -79,8 +81,21 @@ pub struct ProcessingHandoff {
     pub tail_active: bool,
 }
 
+struct Analysis {
+    samples: [AtomicU32; 256],
+    length: AtomicU32,
+}
+impl Default for Analysis {
+    fn default() -> Self {
+        Self {
+            samples: std::array::from_fn(|_| AtomicU32::new(0)),
+            length: AtomicU32::new(0),
+        }
+    }
+}
 #[derive(Default)]
 struct Shared {
+    analysis: Analysis,
     sequence: AtomicU64,
     generation: AtomicU64,
     frame: AtomicU64,
@@ -99,7 +114,14 @@ struct Shared {
     tail_active: AtomicBool,
 }
 impl Shared {
-    fn publish(&self, plan: Option<&Plan>, peak: f32) {
+    fn publish(
+        &self,
+        plan: Option<&Plan>,
+        peak: f32,
+        samples: &[[f32; 2]; 128],
+        cursor: usize,
+        length: usize,
+    ) {
         self.sequence.fetch_add(1, Ordering::AcqRel);
         self.generation
             .store(plan.map_or(0, |plan| plan.generation), Ordering::Relaxed);
@@ -157,7 +179,33 @@ impl Shared {
         self.processing_key[1].store(key as u64, Ordering::Relaxed);
         self.callbacks.fetch_add(1, Ordering::Relaxed);
         self.peak.store(peak.to_bits(), Ordering::Relaxed);
+        for index in 0..length {
+            let frame = samples[(cursor + 128 - length + index) % 128];
+            for (channel, value) in frame.into_iter().enumerate() {
+                self.analysis.samples[index * 2 + channel]
+                    .store(value.to_bits(), Ordering::Relaxed);
+            }
+        }
+        self.analysis.length.store(length as u32, Ordering::Relaxed);
         self.sequence.fetch_add(1, Ordering::Release);
+    }
+    fn analyzer(&self) -> Option<Vec<[f32; 2]>> {
+        let before = self.sequence.load(Ordering::Acquire);
+        if !before.is_multiple_of(2) {
+            return None;
+        }
+        let length = self.analysis.length.load(Ordering::Relaxed).min(128) as usize;
+        let frames = (0..length)
+            .map(|index| {
+                std::array::from_fn(|channel| {
+                    f32::from_bits(
+                        self.analysis.samples[index * 2 + channel].load(Ordering::Relaxed),
+                    )
+                })
+            })
+            .collect();
+        std::sync::atomic::fence(Ordering::SeqCst);
+        (before == self.sequence.load(Ordering::Acquire)).then_some(frames)
     }
     fn read(&self) -> Option<(AppliedTransport, u64, f64)> {
         let before = self.sequence.load(Ordering::Acquire);
@@ -280,6 +328,9 @@ struct Renderer {
     outgoing: Option<Box<Plan>>,
     transition: u32,
     transition_total: u32,
+    analysis: [[f32; 2]; 128],
+    analysis_cursor: usize,
+    analysis_len: usize,
     last: [f32; 2],
     pause_from: [f32; 2],
     pause_remaining: u32,
@@ -551,11 +602,20 @@ impl Renderer {
             }
         }
         self.last = output;
+        self.analysis[self.analysis_cursor] = output;
+        self.analysis_cursor = (self.analysis_cursor + 1) % 128;
+        self.analysis_len = (self.analysis_len + 1).min(128);
         self.peak = self.peak.max(output[0].abs()).max(output[1].abs());
         output
     }
     fn end(&self) {
-        self.shared.publish(self.current.as_deref(), self.peak);
+        self.shared.publish(
+            self.current.as_deref(),
+            self.peak,
+            &self.analysis,
+            self.analysis_cursor,
+            self.analysis_len,
+        );
     }
 }
 
@@ -714,6 +774,9 @@ impl Playback {
                 outgoing: None,
                 transition: 0,
                 transition_total: 1,
+                analysis: [[0.0; 2]; 128],
+                analysis_cursor: 0,
+                analysis_len: 0,
                 last: [0.0; 2],
                 pause_from: [0.0; 2],
                 pause_remaining: 0,
@@ -1031,6 +1094,9 @@ impl Playback {
             self.state.applied = applied;
             self.state.callback_count = count;
             self.state.peak_level = peak;
+            if let Some(analyzer) = self.shared.analyzer() {
+                self.state.analyzer = analyzer;
+            }
             self.state.processing.applied_generation = self.state.applied.generation;
             self.state.processing.latency_frames = self.shared.latency.load(Ordering::Relaxed);
             self.state.processing.tail_capped = self.shared.tail_capped.load(Ordering::Relaxed);

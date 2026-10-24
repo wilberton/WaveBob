@@ -94,6 +94,10 @@ macro_rules! command_registry {
 }
 
 command_registry! {
+    OpenEffectEditor(crate::presentation::EditorParams) => ("effects.editor.open", "Open or focus the native editor bound to one owner and effect instance.", true, true, false, PresentationSnapshot),
+    FocusEffectEditor(crate::presentation::EditorParams) => ("effects.editor.focus", "Focus an existing native effect editor without retargeting it.", true, true, false, PresentationSnapshot),
+    CloseEffectEditor(crate::presentation::EditorParams) => ("effects.editor.close", "Close the native editor while leaving its processing active.", true, true, false, PresentationSnapshot),
+    SetEditorGeometry(crate::presentation::EditorGeometryParams) => ("effects.editor.geometry", "Remember native editor geometry outside audio history.", true, true, false, PresentationSnapshot),
     RenderProcessing(crate::rendering::RenderParams) => ("processing.render", "Render committed owner audio and bounded tails asynchronously without a device.", true, false, false, JobInfo),
     ReadRenderedSamples(crate::rendering::SamplesParams) => ("processing.samples", "Read a bounded interval of a completed processing render.", false, false, false, SamplesData),
     GetEffectCatalogue(EmptyParams) => ("processing.catalogue", "List built-in processors, availability and typed parameter metadata.", false, false, false, Vec<crate::processing::EffectInfo>),
@@ -206,7 +210,11 @@ pub(crate) fn capabilities(gui: bool, device: bool) -> Capabilities {
         capabilities.push("audio.output".into());
     }
     if gui {
-        capabilities.extend(["presentation".into(), "capture.png".into()]);
+        capabilities.extend([
+            "presentation".into(),
+            "capture.png".into(),
+            "effects.editors".into(),
+        ]);
     }
     Capabilities {
         protocol_version: PROTOCOL_VERSION,

@@ -55,6 +55,44 @@ fn clip_rect(clip: &Clip, lane: Rect, view: &FrameRange) -> Rect {
     )
 }
 impl WaveBob {
+    fn clip_source_inspector(&mut self, ui: &mut egui::Ui, clip: &Clip, help: &mut Help) {
+        let draft = self.clip_trim_draft.get_or_insert_with(|| ClipTrimDraft {
+            revision: clip.edit_revision_id.clone(),
+            start: clip.source_start,
+            end: clip.source_end,
+        });
+        if draft.revision != clip.edit_revision_id {
+            *draft = ClipTrimDraft {
+                revision: clip.edit_revision_id.clone(),
+                start: clip.source_start,
+                end: clip.source_end,
+            };
+        }
+        ui.label("Source interval (frames)");
+        ui.horizontal(|ui| {
+            ui.label("Start");
+            ui.add(egui::DragValue::new(&mut draft.start).range(0..=clip.source_frames));
+        });
+        ui.horizontal(|ui| {
+            ui.label("End");
+            ui.add(egui::DragValue::new(&mut draft.end).range(0..=clip.source_frames));
+        });
+        let interval = (draft.start, draft.end);
+        let trim = ui.button("Trim clip");
+        help.observe(
+            &trim,
+            "Set exact source bounds for this clip as one undoable edit.",
+        );
+        if trim.clicked() {
+            self.dispatch(Command::TrimClip(TrimClipParams {
+                clip_id: clip.id.clone(),
+                edit_revision_id: clip.edit_revision_id.clone(),
+                source_start: interval.0,
+                source_end: interval.1,
+            }));
+            ui.close();
+        }
+    }
     fn timeline_view(&mut self, view: FrameRange) {
         self.dispatch(Command::SetTimelineViewport(TimelineViewportParams {
             start_frame: view.start,
@@ -99,6 +137,7 @@ impl WaveBob {
         }
         ui.horizontal(|ui| {
             ui.label(RichText::new(if arrangement.dirty {"Arrangement *"} else {"Arrangement"}).strong());
+            if let Some(clip) = self.selected_clip() {ui.menu_button("Clip source…",|ui|self.clip_source_inspector(ui,&clip,help));}
             let add=ui.button("+ Track");help.observe(&add,"Create an empty track. Drag open audio onto its timeline.");
             if add.clicked()&&!frozen {self.dispatch(Command::AddTrack(AddTrackParams::default()));}
             if ui.available_width()>300.0 {

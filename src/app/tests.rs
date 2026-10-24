@@ -219,25 +219,24 @@ fn clip_edge_trim_and_single_clip_effect_target_use_shared_jobs() {
         h.app.error
     );
     assert_eq!(h.app.host.history().undo_count, history + 1);
-    let fade = h.text_rect("Fade out").center();
-    h.click(fade);
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
-    while h
-        .app
-        .host
-        .snapshot()
-        .jobs
-        .iter()
-        .any(|j| j.status == JobStatus::Running)
-    {
-        assert!(std::time::Instant::now() < deadline);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        h.frame(vec![]);
-    }
+    let owner = wavebob::processing::Owner::Clip(clip.id.clone());
+    assert_eq!(h.app.stack_owner(), Some(owner.clone()));
+    h.app.processing_action(
+        &owner,
+        wavebob::processing::Action::SetEnvelope {
+            envelope: wavebob::processing::Envelope {
+                gain_db: Some(0.0),
+                fade_in_frames: 0,
+                fade_out_frames: 128,
+            },
+        },
+    );
     assert_eq!(
-        h.app.host.snapshot().arrangement.tracks[0].clips[0].effects,
-        vec![wavebob::effects::Effect::FadeOut]
+        h.app.host.snapshot().arrangement.tracks[0].clips[0]
+            .processing
+            .envelope
+            .fade_out_frames,
+        128
     );
     assert_eq!(
         h.app.active_document().unwrap().revision_id,
@@ -245,10 +244,7 @@ fn clip_edge_trim_and_single_clip_effect_target_use_shared_jobs() {
     );
     h.app.navigate_arrangement(0, None, Vec::new());
     h.frame(vec![]);
-    let history = h.app.host.history().undo_count;
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
-    assert_eq!(h.app.host.history().undo_count, history);
+    assert_eq!(h.app.stack_owner(), None);
     let arrangement = h.app.host.snapshot().arrangement;
     h.app.dispatch(Command::InsertClip(InsertClipParams {
         track_id: arrangement.tracks[0].id.clone(),
@@ -265,10 +261,12 @@ fn clip_edge_trim_and_single_clip_effect_target_use_shared_jobs() {
         .collect();
     h.app.navigate_arrangement(0, None, selected);
     h.frame(vec![]);
-    let history = h.app.host.history().undo_count;
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
-    assert_eq!(h.app.host.history().undo_count, history);
+    assert_eq!(h.app.stack_owner(), None);
+    assert!(
+        text_shapes(&h.frame(vec![]))
+            .iter()
+            .any(|(_, text)| text.contains("Select exactly one clip"))
+    );
 }
 
 #[test]
@@ -1275,7 +1273,7 @@ fn browser_preview_button_is_enabled_for_selected_audio_and_uses_status_help() {
 }
 
 #[test]
-fn effect_choice_apply_and_history_buttons_use_the_current_selection() {
+fn reverse_and_shared_history_remain_edit_actions_with_the_current_selection() {
     let (mut h, _directory) = audio_harness();
     let document = h.app.active_document().unwrap();
     h.app.dispatch(Command::SetSelection(SelectionParams {
@@ -1283,28 +1281,17 @@ fn effect_choice_apply_and_history_buttons_use_the_current_selection() {
         start_frame: 100,
         end_frame: 4000,
     }));
-    let effect = h.text_rect("Fade in").center();
-    h.click(effect);
-    assert_eq!(
-        h.app.active_document().unwrap().revision_id,
-        document.revision_id
-    );
-    assert!(!h.app.host.history().can_undo);
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while h.app.active_document().unwrap().revision_id == document.revision_id {
-        assert!(std::time::Instant::now() < deadline);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        h.frame(vec![]);
-    }
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
+    let reverse = h.text_rect("Reverse").center();
+    h.click(reverse);
+    finish_gui_jobs(&mut h);
     let edited = h.app.active_document().unwrap();
+    assert_ne!(edited.revision_id, document.revision_id);
     assert!(edited.dirty);
     assert_eq!(h.app.host.history().undo_count, 1);
-    assert_eq!(
-        h.app.detail.as_ref().unwrap().revision_id,
-        edited.revision_id
-    );
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
     let undo = h.text_rect("Undo").center();
     h.click(undo);
     assert_eq!(
@@ -1456,53 +1443,40 @@ fn text_clipboard_keys_delegate_to_the_platform_while_audio_keys_stay_raw() {
 }
 
 #[test]
-fn reverb_controls_and_tail_policy_are_visible_without_mutating_audio() {
+fn compact_stack_has_scope_and_management_without_inline_effect_parameters() {
     let (mut h, _d) = audio_harness();
-    let doc = h.app.active_document().unwrap();
-    let reverb = h.text_rect("Reverb").center();
-    h.click(reverb);
-    assert!(matches!(
-        h.app.host.presentation().effect,
-        wavebob::effects::Effect::Reverb { .. }
-    ));
-    assert_eq!(
-        h.app.active_document().unwrap().revision_id,
-        doc.revision_id
-    );
-    assert!(!h.app.host.history().can_undo);
-    let frame = h.frame(vec![]);
-    let texts = text_shapes(&frame);
-    assert!(
-        texts
-            .iter()
-            .any(|(_, text)| text == "Tail is truncated at target end.")
-    );
-    for label in ["Room", "Decay s", "Wet"] {
+    let before = h.app.active_document().unwrap();
+    let texts = text_shapes(&h.frame(vec![]));
+    for label in [
+        "EFFECTS",
+        "Whole document",
+        "＋ Add effect",
+        "Bypass all",
+        "Processed output",
+    ] {
+        assert!(texts.iter().any(|(_, text)| text == label), "{label}");
+    }
+    for old in [
+        "Apply", "Fade in", "Fade out", "Gain", "Room", "Decay s", "Wet",
+    ] {
         assert!(
-            texts
-                .iter()
-                .any(|(rect, text)| text == label && rect.right() <= 1440.0),
-            "{label}: {:?}",
-            texts
-                .iter()
-                .filter(|(rect, _)| rect.left() > 1240.0)
-                .collect::<Vec<_>>()
+            !texts.iter().any(|(_, text)| text == old),
+            "Old inline control {old}"
         );
     }
+    assert_eq!(h.app.active_document().unwrap(), before);
+    assert!(!h.app.host.history().can_undo);
     h.size = Vec2::new(800.0, 520.0);
     h.frame(vec![]);
-    assert!(
-        h.text_rect("›").top() < 70.0,
-        "Panel handle remains accessible above scrolling controls"
-    );
+    assert!(h.text_rect("›").top() < 70.0);
 }
 
 fn dirty_audio_harness() -> (Harness, tempfile::TempDir) {
     let (mut h, d) = audio_harness();
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
     let reverse = h.text_rect("Reverse").center();
     h.click(reverse);
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while !h.app.active_document().unwrap().dirty {
         assert!(std::time::Instant::now() < deadline);
@@ -1794,10 +1768,10 @@ fn closing_an_edited_mp3_confirms_encoding_and_offers_lossless_wav_save_as() {
         std::thread::sleep(std::time::Duration::from_millis(2));
         h.frame(vec![]);
     }
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
     let reverse = h.text_rect("Reverse").center();
     h.click(reverse);
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
     while !h.app.active_document().unwrap().dirty {
         assert!(std::time::Instant::now() < deadline);
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -2285,4 +2259,154 @@ fn selection_keyboard_shortcuts_respect_text_focus_and_narrow_status_help() {
     );
     output.textures_delta.clear();
     assert_eq!(h.app.host.snapshot(), before);
+}
+
+#[test]
+fn native_knob_drag_and_fine_keyboard_emit_bounded_values() {
+    let ctx = egui::Context::default();
+    let mut value = 50.0;
+    let mut render = |mut events: Vec<egui::Event>, modifiers| {
+        events.insert(0, egui::Event::ModifiersChanged(modifiers));
+        let mut center = Pos2::ZERO;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(300.0, 200.0))),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                let response = effect_controls::knob(ui, &mut value, 0.0, 100.0, 1.0);
+                center = response.rect.center();
+            },
+        );
+        output.textures_delta.clear();
+        (center, value)
+    };
+    let (center, _) = render(vec![], egui::Modifiers::NONE);
+    let pointer = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    render(
+        vec![egui::Event::PointerMoved(center), pointer(center, true)],
+        egui::Modifiers::NONE,
+    );
+    let (_, dragged) = render(
+        vec![egui::Event::PointerMoved(center - Vec2::new(0.0, 32.0))],
+        egui::Modifiers::NONE,
+    );
+    assert!((dragged - 70.0).abs() < 0.001, "{dragged}");
+    render(
+        vec![pointer(center - Vec2::new(0.0, 32.0), false)],
+        egui::Modifiers::NONE,
+    );
+    render(
+        vec![egui::Event::PointerMoved(center), pointer(center, true)],
+        egui::Modifiers::NONE,
+    );
+    render(vec![pointer(center, false)], egui::Modifiers::NONE);
+    let (_, fine) = render(
+        vec![egui::Event::Key {
+            key: egui::Key::ArrowUp,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::SHIFT,
+        }],
+        egui::Modifiers::SHIFT,
+    );
+    assert!((fine - 70.1).abs() < 0.001, "{fine}");
+}
+
+#[test]
+fn compact_rows_emit_stable_bypass_open_and_drag_reorder_actions() {
+    use wavebob::processing::{Action, EffectKind, Instance, Processing};
+    let ctx = egui::Context::default();
+    let first = uuid::Uuid::new_v4().to_string();
+    let second = uuid::Uuid::new_v4().to_string();
+    let state = Processing {
+        effects: vec![
+            Instance {
+                id: first.clone(),
+                kind: EffectKind::SoftClipper,
+                bypassed: false,
+                parameters: Default::default(),
+            },
+            Instance {
+                id: second.clone(),
+                kind: EffectKind::Reverb,
+                bypassed: false,
+                parameters: Default::default(),
+            },
+        ],
+        ..Default::default()
+    };
+    let mut drag = None;
+    let mut time = 0.0;
+    let mut render = |events| {
+        time += 0.1;
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events,
+                time: Some(time),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(320.0, 240.0))),
+                ..Default::default()
+            },
+            |ui| actions = effects::stack_rows(ui, &state, &mut drag, &mut Help::default()),
+        );
+        output.textures_delta.clear();
+        (output, actions)
+    };
+    let (output, _) = render(Vec::new());
+    let texts = text_shapes(&output);
+    let first_label = texts
+        .iter()
+        .find(|(_, text)| text == "Soft Clipper")
+        .unwrap()
+        .0;
+    let grips: Vec<_> = texts
+        .iter()
+        .filter(|(_, text)| text == "⠿")
+        .map(|(rect, _)| rect.center())
+        .collect();
+    let opens: Vec<_> = texts
+        .iter()
+        .filter(|(_, text)| text == "↗")
+        .map(|(rect, _)| rect.center())
+        .collect();
+    let checkbox = Pos2::new(first_label.left() - 18.0, first_label.center().y);
+    let pointer = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    render(vec![
+        egui::Event::PointerMoved(checkbox),
+        pointer(checkbox, true),
+    ]);
+    let (_, actions) = render(vec![pointer(checkbox, false)]);
+    assert!(actions.iter().any(|action|matches!(action,effects::StackEvent::Edit(Action::Bypass{effect_id,bypassed:true}) if effect_id == &first)),"{actions:?}");
+    render(vec![
+        egui::Event::PointerMoved(opens[0]),
+        pointer(opens[0], true),
+    ]);
+    let (_, actions) = render(vec![pointer(opens[0], false)]);
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action,effects::StackEvent::Open(id) if id == &first)),
+        "{actions:?}"
+    );
+    render(vec![
+        egui::Event::PointerMoved(grips[0]),
+        pointer(grips[0], true),
+    ]);
+    render(vec![egui::Event::PointerMoved(grips[1])]);
+    let (_, actions) = render(vec![pointer(grips[1], false)]);
+    assert!(actions.iter().any(|action|matches!(action,effects::StackEvent::Edit(Action::Move{effect_id,index:1}) if effect_id == &first)),"{actions:?}");
 }

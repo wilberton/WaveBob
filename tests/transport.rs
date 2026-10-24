@@ -805,3 +805,19 @@ fn arrangement_clip_preview_and_cancel_preserve_callback_resource_rules() {
     assert_eq!((ALLOCS.get(), FREES.get()), (0, 0));
     assert_eq!(frames[599], [0.5; 2]);
 }
+
+#[test]
+fn analyzer_snapshots_are_finite_bounded_actual_stereo_output() {
+    let (mut session, mut output, _directory, id) = fixture(48000, 2, &[16384, -8192].repeat(512));
+    ok(send(
+        &mut session,
+        "transport.play",
+        json!({"document_id":id}),
+    ));
+    output.render_into(&mut [[0.0; 2]; 256]);
+    let snapshot = state(&mut session);
+    assert_eq!(snapshot["analyzer"].as_array().unwrap().len(), 128);
+    for frame in snapshot["analyzer"].as_array().unwrap() {
+        assert_eq!(*frame, json!([0.5, -0.25]));
+    }
+}

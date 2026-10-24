@@ -55,6 +55,47 @@ impl WaveBob {
         }
     }
     pub(super) fn edit_menu(&mut self, ui: &mut egui::Ui, help: &mut Help) {
+        let history = self.host.history();
+        for (label, enabled, command) in [
+            ("Undo", history.can_undo, Command::Undo(EmptyParams {})),
+            ("Redo", history.can_redo, Command::Redo(EmptyParams {})),
+        ] {
+            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                self.dispatch(command);
+                ui.close();
+            }
+        }
+        let reverse = ui.add_enabled(
+            self.active_document().is_some() && self.host.presentation().mode == ViewMode::Waveform,
+            egui::Button::new("Reverse"),
+        );
+        help.observe(
+            &reverse,
+            "Reverse the selection or whole source as one structural edit.",
+        );
+        if reverse.clicked()
+            && let Some(document) = self.active_document()
+        {
+            let target = if let Some(range) = document.selection {
+                EditTarget::Range {
+                    document_id: document.id,
+                    revision_id: document.revision_id,
+                    start_frame: range.start,
+                    end_frame: range.end,
+                }
+            } else {
+                EditTarget::Whole {
+                    document_id: document.id,
+                    revision_id: document.revision_id,
+                }
+            };
+            self.dispatch(Command::ApplyEffect(wavebob::effects::ApplyEffectParams {
+                target,
+                effect: wavebob::effects::Effect::Reverse,
+            }));
+            ui.close();
+        }
+        ui.separator();
         for (action, label, description) in [
             (
                 Action::Cut,

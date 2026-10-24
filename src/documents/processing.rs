@@ -67,7 +67,7 @@ impl Editor {
         document.processing = snapshot.preview.unwrap_or(snapshot.committed);
         Ok((document, audio))
     }
-    pub(super) fn processing_read(&self, owner: Owner) -> Result<Snapshot, CommandError> {
+    pub(crate) fn processing_read(&self, owner: Owner) -> Result<Snapshot, CommandError> {
         self.processing_snapshot(owner)
     }
     fn processing_snapshot(&self, owner: Owner) -> Result<Snapshot, CommandError> {

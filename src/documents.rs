@@ -475,6 +475,13 @@ impl Editor {
             Command::GetEffectCatalogue(_) => Ok(CommandResult::EffectCatalogue(
                 crate::processing::catalogue(),
             )),
+            Command::OpenEffectEditor(_)
+            | Command::FocusEffectEditor(_)
+            | Command::CloseEffectEditor(_)
+            | Command::SetEditorGeometry(_) => Err(CommandError::new(
+                ErrorCode::MissingCapability,
+                "Native effect editors require an attached GUI",
+            )),
             Command::PrepareMix(params) => {
                 if params.revision_id != self.arrangement.revision_id {
                     Err(CommandError::new(
@@ -819,4 +826,188 @@ fn advance(revision: &mut u64) -> Result<(), CommandError> {
         CommandError::new(ErrorCode::RevisionExhausted, "Session revision exhausted")
     })?;
     Ok(())
+}
+
+#[cfg(all(test, feature = "gui"))]
+mod native_editor_host_tests {
+    use super::*;
+    use crate::{
+        Outcome, Request, Session,
+        desktop::DesktopHost,
+        presentation::*,
+        processing::{EffectKind, Instance, Owner, Processing},
+    };
+    fn fixture() -> (DesktopHost, Vec<(Owner, String)>) {
+        let mut session = Session::default();
+        let mut owners = Vec::new();
+        for name in ["First", "Second"] {
+            let id = uuid::Uuid::new_v4().to_string();
+            let revision = uuid::Uuid::new_v4().to_string();
+            let effect = uuid::Uuid::new_v4().to_string();
+            let mut processing = Processing::default();
+            // A shell probe only: unavailable DSP is never registered or played.
+            processing.effects.push(Instance {
+                id: effect.clone(),
+                kind: EffectKind::SoftClipper,
+                bypassed: false,
+                parameters: Default::default(),
+            });
+            let document:DocumentInfo = serde_json::from_value(serde_json::json!({"id":id,"revision_id":revision,"name":name,"path":"probe.wav","sample_rate":48000,"channels":1,"frames":128,"encoding":"float32","dirty":false,"cursor":0,"selection":null,"peak_level":0.0,"overloaded_samples":0,"processing":processing,"saved_processing":processing})).unwrap();
+            let audio = audio::prepare(
+                48000,
+                1,
+                "float32".into(),
+                Default::default(),
+                vec![0.0; 128],
+                &AtomicBool::new(false),
+                |_| {},
+            )
+            .unwrap();
+            session.editor.revisions.insert(revision, Arc::new(audio));
+            session.editor.documents.push(document);
+            owners.push((Owner::Document(id), effect));
+        }
+        (DesktopHost::with_session(session), owners)
+    }
+    fn params(owner: &(Owner, String)) -> EditorParams {
+        EditorParams {
+            owner: owner.0.clone(),
+            instance_id: owner.1.clone(),
+            expected_presentation_revision: None,
+        }
+    }
+    fn execute(host: &mut DesktopHost, command: Command) {
+        let response = host.execute(Request::new("shell-probe", command));
+        assert!(
+            matches!(response.outcome, Outcome::Ok { .. }),
+            "{response:?}"
+        );
+    }
+    #[test]
+    fn native_bindings_focus_close_remove_and_undo_preserve_owner_identity() {
+        let (mut host, owners) = fixture();
+        let initial = host.snapshot().revision;
+        execute(&mut host, Command::OpenEffectEditor(params(&owners[0])));
+        execute(&mut host, Command::OpenEffectEditor(params(&owners[1])));
+        let first = host.presentation().editor_windows[0].clone();
+        execute(&mut host, Command::OpenEffectEditor(params(&owners[0])));
+        assert_eq!(host.presentation().editor_windows.len(), 2);
+        assert_eq!(host.presentation().editor_windows[0].id, first.id);
+        assert_eq!(host.presentation().editor_windows[0].focus_generation, 2);
+        execute(
+            &mut host,
+            Command::SetMode(SetModeParams {
+                mode: ViewMode::Multitrack,
+                expected_presentation_revision: None,
+            }),
+        );
+        assert_eq!(host.presentation().editor_windows[0].owner, owners[0].0);
+        let processing = host.processing(owners[1].0.clone()).unwrap();
+        execute(
+            &mut host,
+            Command::BeginProcessingPreview(crate::processing::BeginParams {
+                owner: owners[1].0.clone(),
+                expected_edit_revision: processing.committed.edit_revision_id.clone(),
+            }),
+        );
+        let preview = host
+            .processing(owners[1].0.clone())
+            .unwrap()
+            .preview_id
+            .unwrap();
+        let id = host.presentation().editor_windows[1].id.clone();
+        host.register_editor_preview(&id, Some(preview));
+        execute(&mut host, Command::CloseEffectEditor(params(&owners[1])));
+        assert_eq!(host.processing(owners[1].0.clone()).unwrap(), processing);
+        assert_eq!(host.snapshot().revision, initial);
+        let processing = host.processing(owners[0].0.clone()).unwrap();
+        execute(
+            &mut host,
+            Command::EditProcessing(crate::processing::EditParams {
+                owner: owners[0].0.clone(),
+                expected_edit_revision: processing.committed.edit_revision_id,
+                change: crate::processing::Action::Remove {
+                    effect_id: owners[0].1.clone(),
+                },
+            }),
+        );
+        host.begin_frame(&eframe::egui::Context::default());
+        assert!(host.presentation().editor_windows.is_empty());
+        execute(&mut host, Command::Undo(crate::EmptyParams {}));
+        assert_eq!(
+            host.processing(owners[0].0.clone())
+                .unwrap()
+                .committed
+                .effects
+                .len(),
+            1
+        );
+        host.begin_frame(&eframe::egui::Context::default());
+        assert!(
+            host.presentation().editor_windows.is_empty(),
+            "Undo must not reopen windows"
+        );
+    }
+    #[test]
+    fn native_editor_validation_and_geometry_are_presentation_only() {
+        let (mut host, owners) = fixture();
+        let revision = host.snapshot().revision;
+        assert!(matches!(
+            host.execute(Request::new(
+                "focus-closed",
+                Command::FocusEffectEditor(params(&owners[0]))
+            ))
+            .outcome,
+            Outcome::Error {
+                error: CommandError {
+                    code: ErrorCode::NotFound,
+                    ..
+                }
+            }
+        ));
+        execute(&mut host, Command::OpenEffectEditor(params(&owners[0])));
+        let id = host.presentation().editor_windows[0].id.clone();
+        execute(
+            &mut host,
+            Command::SetEditorGeometry(EditorGeometryParams {
+                editor_id: id.clone(),
+                geometry: WindowGeometry {
+                    width: 800.0,
+                    height: 500.0,
+                    x: Some(-1400.0),
+                    y: Some(50.0),
+                },
+                expected_presentation_revision: None,
+            }),
+        );
+        assert_eq!(host.presentation().layout.editor_geometry[&id].width, 800.0);
+        let before = host.presentation();
+        let response = host.execute(Request::new(
+            "invalid-size",
+            Command::SetEditorGeometry(EditorGeometryParams {
+                editor_id: id,
+                geometry: WindowGeometry {
+                    width: f32::NAN,
+                    ..Default::default()
+                },
+                expected_presentation_revision: None,
+            }),
+        ));
+        assert!(matches!(response.outcome, Outcome::Error { .. }));
+        assert_eq!(host.presentation(), before);
+        assert_eq!(host.snapshot().revision, revision);
+        let response = Session::default().execute(Request::new(
+            "headless",
+            Command::OpenEffectEditor(params(&owners[0])),
+        ));
+        assert!(matches!(
+            response.outcome,
+            Outcome::Error {
+                error: CommandError {
+                    code: ErrorCode::MissingCapability,
+                    ..
+                }
+            }
+        ));
+    }
 }

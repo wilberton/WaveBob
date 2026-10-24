@@ -87,6 +87,22 @@ pub enum EffectKind {
     TransientProcessor,
 }
 impl EffectKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SoftClipper => "Soft Clipper",
+            Self::Reverb => "Reverb",
+            Self::ParametricEq => "Parametric EQ",
+            Self::FastDistortion => "Fast Distortion",
+            Self::Delay => "Delay",
+            Self::Chorus => "Chorus",
+            Self::Limiter => "Limiter",
+            Self::Balance => "Balance",
+            Self::StereoEnhancer => "Stereo Enhancer",
+            Self::StereoShaper => "Stereo Shaper",
+            Self::TransientProcessor => "Transient Processor",
+        }
+    }
+
     pub const ALL: [Self; 11] = [
         Self::SoftClipper,
         Self::Reverb,
