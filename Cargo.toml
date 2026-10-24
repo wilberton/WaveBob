@@ -43,6 +43,7 @@ rfd = { version = "0.17", optional = true }
 cpal = {version="=0.18.2",optional=true}
 rtrb = "=0.4.0"
 mp3lame-sys = {version="=0.1.11",default-features=false}
+sha2 = "=0.10.9"
 
 [dev-dependencies]
 tempfile = "3"

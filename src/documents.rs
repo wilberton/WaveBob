@@ -12,6 +12,7 @@ mod arranging;
 mod clip_processing;
 mod editing;
 mod mixing;
+mod projecting;
 mod saving;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -77,6 +78,8 @@ pub enum JobOutput {
     AudioExport(crate::exports::ExportSummary),
     ClipEdit(crate::arrangement::Clip),
     MixPrepared(crate::mixing::MixPrepared),
+    ProjectSaved(crate::projects::ProjectSummary),
+    ProjectOpened(crate::projects::ProjectSummary),
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Peak {
@@ -170,6 +173,15 @@ enum Event {
     Edited(String, Result<Option<audio::Audio>, CommandError>),
     ClipProcessed(String, Result<audio::Audio, CommandError>),
     MixPrepared(String, Result<audio::mix::Graph, CommandError>),
+    ProjectSavePrepared(String, mpsc::SyncSender<bool>),
+    ProjectSaved(
+        String,
+        Result<crate::projects::ProjectSummary, CommandError>,
+    ),
+    ProjectLoaded(
+        String,
+        Result<Box<crate::projects::storage::LoadedProject>, CommandError>,
+    ),
     OutputPrepared(String, mpsc::SyncSender<bool>),
     OutputFinished(String, Result<crate::exports::ExportSummary, CommandError>),
 }
@@ -191,6 +203,9 @@ pub(crate) struct Editor {
     mix: Option<Arc<audio::mix::Graph>>,
     mix_attempt: Option<String>,
     mix_bases: BTreeMap<String, String>,
+    project: projecting::ProjectState,
+    pending_projects: BTreeMap<String, projecting::PendingProject>,
+    loaded_loop: Option<bool>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -212,21 +227,23 @@ impl Default for Editor {
             mix: None,
             mix_attempt: None,
             mix_bases: BTreeMap::new(),
+            project: projecting::ProjectState::default(),
+            pending_projects: BTreeMap::new(),
+            loaded_loop: None,
         }
     }
 }
 impl Editor {
     #[cfg(feature = "gui")]
     pub fn check_quit(&self, discard: bool) -> Result<(), CommandError> {
-        if !discard
-            && (self.arrangement.dirty || self.documents.iter().any(|document| document.dirty))
-        {
+        if !discard && self.project_info().dirty {
             return Err(CommandError::new(
                 ErrorCode::DirtyDocument,
                 "Save dirty documents or specify explicit discard intent before quitting",
             ));
         }
         if !self.pending_outputs.is_empty()
+            || !self.pending_projects.is_empty()
             || self
                 .jobs
                 .values()
@@ -298,6 +315,11 @@ impl Editor {
                 Event::Edited(id, result) => self.finish_edit(id, result, revision),
                 Event::ClipProcessed(id, result) => self.finish_clip(id, result, revision),
                 Event::MixPrepared(id, result) => self.finish_mix(id, result),
+                Event::ProjectSavePrepared(id, permit) => {
+                    self.approve_project_save(id, permit, *revision)
+                }
+                Event::ProjectSaved(id, result) => self.finish_project_save(id, result, revision),
+                Event::ProjectLoaded(id, result) => self.finish_project_load(id, result, revision),
                 Event::OutputPrepared(id, permit) => self.approve_output(id, permit, *revision),
                 Event::OutputFinished(id, result) => self.finish_output(id, result, revision),
                 Event::Progress(id, percent) => {
@@ -443,7 +465,8 @@ impl Editor {
             }
             Command::CloseDocument(params) => {
                 let document = self.document(&params.document_id)?.clone();
-                if document.dirty && !params.discard_changes {
+                if document.dirty && !params.discard_changes && !self.document_in_project(&document)
+                {
                     return Err(CommandError::new(
                         ErrorCode::DirtyDocument,
                         "Closing this document requires explicit discard intent",
@@ -503,6 +526,16 @@ impl Editor {
                     .into(),
             )),
             Command::CancelJob(params) => {
+                if self
+                    .pending_projects
+                    .get(&params.job_id)
+                    .is_some_and(|pending| pending.committing)
+                {
+                    return Err(CommandError::new(
+                        ErrorCode::Busy,
+                        "Project publication has started; wait for its result",
+                    ));
+                }
                 if self
                     .pending_outputs
                     .get(&params.job_id)
@@ -674,6 +707,11 @@ impl Drop for Editor {
         let (_, empty) = mpsc::channel();
         drop(std::mem::replace(&mut self.receiver, empty));
         for pending in self.pending_outputs.values_mut() {
+            if let Some(worker) = pending.worker.take() {
+                let _ = worker.join();
+            }
+        }
+        for pending in self.pending_projects.values_mut() {
             if let Some(worker) = pending.worker.take() {
                 let _ = worker.join();
             }

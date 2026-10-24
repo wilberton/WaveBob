@@ -233,6 +233,7 @@ pub(crate) struct OutputRequest {
     pub overload: OverloadPolicy,
     pub protected_source: Option<String>,
     pub protected_sources: Vec<String>,
+    pub protected_directories: Vec<String>,
 }
 pub(crate) fn prepare(
     audio: &Audio,
@@ -319,6 +320,15 @@ fn prepare_from(
         .canonicalize()
         .map_err(io_error)?;
     let destination = parent.join(path.file_name().unwrap());
+    if request
+        .protected_directories
+        .iter()
+        .any(|root| parent.starts_with(root))
+    {
+        return Err(invalid(
+            "Managed project assets are immutable; choose an output path outside the asset directory",
+        ));
+    }
     if !request.overwrite && destination.try_exists().map_err(io_error)? {
         return Err(CommandError::new(
             ErrorCode::OutputExists,
@@ -433,7 +443,7 @@ fn prepare_from(
         },
     })
 }
-fn write_wav(
+pub(crate) fn write_wav(
     file: &mut std::fs::File,
     samples: &[f32],
     rate: u32,

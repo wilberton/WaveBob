@@ -17,6 +17,7 @@ pub mod mixing;
 #[cfg(feature = "gui")]
 mod preferences;
 pub mod presentation;
+pub mod projects;
 pub mod protocol;
 pub mod transport;
 
@@ -37,6 +38,7 @@ pub struct SessionSnapshot {
     pub active_document_id: Option<String>,
     pub jobs: Vec<documents::JobInfo>,
     pub arrangement: arrangement::Arrangement,
+    pub project: projects::ProjectInfo,
 }
 
 /// Typed requests are used directly by the GUI. Protocol adapters construct the
@@ -83,6 +85,7 @@ pub enum CommandResult {
     Mix(Box<mixing::MixState>),
     MixSamples(mixing::MixSamples),
     Crossfades(arrangement::CrossfadeData),
+    Project(projects::ProjectInfo),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -126,6 +129,9 @@ pub enum ErrorCode {
     Busy,
     DirtyDocument,
     AudioDeviceError,
+    InvalidProject,
+    UnsupportedProjectVersion,
+    MissingAsset,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -171,6 +177,7 @@ impl Default for Session {
                 active_document_id: None,
                 jobs: Vec::new(),
                 arrangement: arrangement::Arrangement::default(),
+                project: projects::ProjectInfo::default(),
             },
             editor: documents::Editor::default(),
             playback: transport::Playback::default(),
@@ -191,11 +198,20 @@ impl Session {
         snapshot.active_document_id = self.editor.active();
         snapshot.jobs = self.editor.jobs();
         snapshot.arrangement = self.editor.arrangement();
+        snapshot.project = self.editor.project_info();
         snapshot
     }
 
     pub fn poll_jobs(&mut self) {
         self.editor.poll(&mut self.snapshot.revision);
+        if let Some(looped) = self.editor.take_project_loop() {
+            self.browser.stop();
+            self.snapshot.loop_enabled = looped;
+            self.pending_mix_play = false;
+            self.pending_mix_seek = None;
+            self.mix_failure = None;
+            let _ = self.playback.clear();
+        }
         self.browser.poll();
         if let Some((document, audio)) = self.browser.take_ready() {
             match self
@@ -291,6 +307,11 @@ impl Session {
                 Ok(CommandResult::Transport(self.playback.snapshot().into()))
             }
             Command::PlayDocument(params) => self.play_document(&params.document_id, false),
+            Command::GetProject(_) => Ok(CommandResult::Project(self.editor.project_info())),
+            Command::SaveProject(params) => {
+                self.editor.save_project(params, self.snapshot.loop_enabled)
+            }
+            Command::OpenProject(params) => self.editor.open_project(params),
             Command::GetMix(_) => Ok(CommandResult::Mix(self.mix_snapshot().into())),
             Command::PlayMix(_) => self.play_mix(false),
             Command::ToggleMixPlayback(_) => self.play_mix(true),

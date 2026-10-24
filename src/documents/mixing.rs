@@ -217,6 +217,7 @@ impl Editor {
             overload: params.overload,
             protected_source: None,
             protected_sources: self.documents.iter().map(|doc| doc.path.clone()).collect(),
+            protected_directories: self.guarded_asset_roots(),
         };
         self.launch_output(
             identity,

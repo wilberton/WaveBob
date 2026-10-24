@@ -94,6 +94,9 @@ macro_rules! command_registry {
 }
 
 command_registry! {
+    GetProject(EmptyParams) => ("project.get", "Inspect portable project path, dirty state and saved working revisions.", false, false, false, crate::projects::ProjectInfo),
+    SaveProject(crate::projects::SaveProjectParams) => ("project.save", "Atomically save a workspace snapshot and checksummed managed lossless assets.", true, false, false, JobInfo),
+    OpenProject(crate::projects::OpenProjectParams) => ("project.open", "Validate and open a portable project without source files; dirty work requires explicit policy.", true, false, false, JobInfo),
     ExportMix(crate::exports::MixExportParams) => ("mix.export", "Render an explicit immutable arrangement interval to WAV or MP3 as a cancellable atomic job.", true, false, false, JobInfo),
     GetCrossfades(EmptyParams) => ("arrangement.crossfades", "Inspect derived equal-power overlap regions and containment roles.", false, false, false, crate::arrangement::CrossfadeData),
     GetMix(EmptyParams) => ("mix.get", "Inspect prepared mix revision, effective tracks and output levels.", false, false, false, crate::mixing::MixState),

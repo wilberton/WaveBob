@@ -27,6 +27,15 @@ impl Editor {
     }
     pub(super) fn save_audio(&mut self, params: SaveParams) -> Result<CommandResult, CommandError> {
         let document = self.document(&params.document_id)?;
+        if params.path.is_none()
+            && self.project_info().path.is_some()
+            && std::path::Path::new(&document.path).is_relative()
+        {
+            return Err(CommandError::new(
+                ErrorCode::InvalidParams,
+                "This project's source path is relative or from another platform; choose an explicit Save As destination",
+            ));
+        }
         let sample_rate = params.sample_rate.or_else(|| {
             if params.format.is_none() {
                 document.save_sample_rate
@@ -92,6 +101,7 @@ impl Editor {
             } else {
                 self.documents.iter().map(|doc| doc.path.clone()).collect()
             },
+            protected_directories: self.guarded_asset_roots(),
         };
         self.launch_output(
             identity,

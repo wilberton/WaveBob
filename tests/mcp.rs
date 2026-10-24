@@ -183,7 +183,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 57);
+        assert_eq!(tools.len(), 60);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -260,6 +260,12 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
                     value.as_object_mut().unwrap().remove("session_id");
                     if let Some(object) = value["result"].as_object_mut() {
                         object.remove("session_id");
+                        if let Some(project) =
+                            object.get_mut("project").and_then(Value::as_object_mut)
+                        {
+                            project.remove("revision_id");
+                            project.remove("saved_revision_id");
+                        }
                         if let Some(arrangement) =
                             object.get_mut("arrangement").and_then(Value::as_object_mut)
                         {
@@ -2832,7 +2838,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 74);
+        assert_eq!(tools.len(), 77);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);
