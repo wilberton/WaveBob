@@ -44,6 +44,26 @@ registry packages and Rust notices are downloaded from the compiler's exact comm
 The packaged toolchain file pins the recorded compiler version. Archive timestamps,
 native compiler differences and linker output are not promised to be byte-reproducible.
 The local workspace's ignored Rust environment remains documented in the README.
+Packaging requires a clean committed tree and rejects source/commit changes while
+building. Registry timestamps predating ZIP's 1980 epoch are clamped for archival.
+The complete ZIP is staged and published exclusively on the same local volume.
+
+Verify the packaged executables in a new extraction directory with:
+
+```sh
+python scripts/smoke-release.py dist/WaveBob-VERSION-HOST.zip --out release-check
+python scripts/smoke-release.py dist/WaveBob-VERSION-HOST.zip --out desktop-check --gui --audition
+```
+
+The first command is device-free; the second needs a desktop/audio device and
+retrieves both modes through attached MCP before a guarded clean quit. The smoke
+script checks archive/executable hashes and identical sample/mix output bytes
+across the shipped direct example, headless runner and MCP server. To run just the
+example from an extracted Windows kit:
+
+```powershell
+.\bin\wavebob-workflow.exe --adapter mcp --binary .\bin\wavebob-mcp.exe --out review
+```
 
 The prepared GitHub Actions release workflow runs this packaging on all three
 native hosts when manually dispatched, and uploads the ZIP plus checksum. It is

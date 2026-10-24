@@ -23,6 +23,9 @@ jobs:
         run: cargo test --locked --no-default-features --all-targets
       - name: Package native GUI, device-free runners, source and notices
         run: python scripts/package-release.py
+      - name: Smoke-check shipped automation binaries
+        shell: bash
+        run: python scripts/smoke-release.py dist/*.zip --out .tools/release-smoke
       - uses: actions/upload-artifact@v4
         with:
           name: WaveBob-${{ runner.os }}-${{ runner.arch }}

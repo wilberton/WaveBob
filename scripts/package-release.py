@@ -7,6 +7,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import pathlib
 import platform
 import subprocess
@@ -37,6 +38,8 @@ rust = run("rustc", "--version", "--verbose", capture=True)
 rust_fields = dict(line.split(": ", 1) for line in rust.splitlines()[1:] if ": " in line)
 host = rust_fields["host"]
 suffix = ".exe" if "windows" in host else ""
+commit = run("git", "rev-parse", "HEAD", capture=True).strip()
+assert not run("git", "status", "--porcelain", capture=True).strip(), "Commit source changes before packaging"
 name = f"WaveBob-{version}-{host}"
 args.output = args.output.resolve()
 args.output.mkdir(parents=True, exist_ok=True)
@@ -51,7 +54,7 @@ run("cargo", "build", "--locked", "--release", "--bin", "wavebob")
 run("cargo", "build", "--locked", "--release", "--no-default-features",
     "--bin", "wavebob-headless", "--bin", "wavebob-mcp", "--example", "workflow")
 
-with tempfile.TemporaryDirectory(prefix="wavebob-release-") as temporary:
+with tempfile.TemporaryDirectory(prefix=".wavebob-release-", dir=args.output) as temporary:
     temporary = pathlib.Path(temporary)
     vendor = args.vendor.resolve() if args.vendor else temporary / "vendor"
     if args.vendor is None:
@@ -82,8 +85,9 @@ with tempfile.TemporaryDirectory(prefix="wavebob-release-") as temporary:
         with urllib.request.urlopen(url, timeout=60) as response:
             (runtime_notices / filename).write_bytes(response.read())
     files = run("git", "ls-files", "-z", capture=True).split("\0")
-    commit = run("git", "rev-parse", "HEAD", capture=True).strip()
+    assert run("git", "rev-parse", "HEAD", capture=True).strip() == commit, "Commit changed during packaging"
     dirty = bool(run("git", "status", "--porcelain", capture=True).strip())
+    assert not dirty, "Source changed during packaging"
     binaries = {binary: ROOT / "target/release" / (binary + suffix)
                 for binary in ["wavebob", "wavebob-headless", "wavebob-mcp"]}
     binaries["wavebob-workflow"] = ROOT / "target/release/examples" / ("workflow" + suffix)
@@ -109,7 +113,8 @@ this kit is for the user's local development/review. Third-party licenses remain
 in their original sources. Signing, installers and automatic updates are deferred.
 """
     # ZipInfo preserves executable mode on Unix; ZipFile uses Zip64 when needed.
-    with zipfile.ZipFile(archive, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as output:
+    staged_archive = temporary / archive.name
+    with zipfile.ZipFile(staged_archive, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6, strict_timestamps=False) as output:
         for binary, path in binaries.items():
             output.write(path, f"{name}/bin/{binary}{suffix}")
         for relative in sorted(filter(None, files)):
@@ -125,7 +130,8 @@ in their original sources. Signing, installers and automatic updates are deferre
         output.writestr(f"{name}/START-HERE.md", start)
         output.writestr(f"{name}/THIRD_PARTY_NOTICES.md", "\n\n".join(notices) + "\n")
         output.writestr(f"{name}/BUILD-MANIFEST.json", json.dumps(manifest, indent=2) + "\n")
-    checksum = digest(archive)
+    checksum = digest(staged_archive)
+    os.link(staged_archive, archive)  # Atomic, exclusive publication on the same volume.
     (archive.with_suffix(".zip.sha256")).write_text(f"{checksum}  {archive.name}\n", encoding="utf-8")
     print(json.dumps({"archive": str(archive), "sha256": checksum, "bytes": archive.stat().st_size,
                       "commit": commit, "dirty": dirty, "dependency_sources": len(packages)}, indent=2))
