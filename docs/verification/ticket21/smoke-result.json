@@ -1,0 +1,122 @@
+{
+  "archive": "C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\dist\\WaveBob-0.1.0-x86_64-pc-windows-msvc.zip",
+  "archive_sha256": "fcbca119f4d18aba65de80f66fa976ceaffac0fee90ec20ced6bae0132d10a64",
+  "build_commit": "19bf4e8a0a7139edd19d8dc1b8791ea433fbc162",
+  "host": "x86_64-pc-windows-msvc",
+  "results": {
+    "direct": {
+      "audition": false,
+      "captures": [],
+      "clipboard_converted_frames": 32000,
+      "clips": 5,
+      "crossfades": 1,
+      "documents": 3,
+      "mix_channels": 2,
+      "mix_frames": 576000,
+      "project_reopen_without_sources": true,
+      "tracks": 4
+    },
+    "headless": {
+      "audition": false,
+      "captures": [],
+      "clipboard_converted_frames": 32000,
+      "clips": 5,
+      "crossfades": 1,
+      "documents": 3,
+      "mix_channels": 2,
+      "mix_frames": 576000,
+      "project_reopen_without_sources": true,
+      "tracks": 4
+    },
+    "mcp": {
+      "audition": false,
+      "captures": [],
+      "clipboard_converted_frames": 32000,
+      "clips": 5,
+      "crossfades": 1,
+      "documents": 3,
+      "mix_channels": 2,
+      "mix_frames": 576000,
+      "project_reopen_without_sources": true,
+      "tracks": 4
+    },
+    "output_hashes": {
+      "Mix.wav": "0fbc474a69e0a082e3f0397f8aa7a9db49e9a82734a58515967b46160092d082",
+      "Mix.mp3": "59654d1507b0db382868edf453424fd350b917dbf7bc58dd93b99c2f4b17396f",
+      "Sample selection.mp3": "15f71e4564f799d7777dd475fae7df86262a281571aeeac5bb9a544689e4f185"
+    },
+    "gui": {
+      "audition": true,
+      "captures": [
+        {
+          "metadata": {
+            "frame_number": 89,
+            "height": 900,
+            "mode": "waveform",
+            "pending_resources": [],
+            "presentation_revision": 1,
+            "rendered_revision": 35,
+            "scale": 1.0,
+            "session_id": "3d16b400-5e5b-4b3c-9ffa-8b267c70e183",
+            "width": 1440
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\.tools\\release-smoke\\\u00e5\u00af\u00a9\u00e6\u0178\u00bb review kit\\gui\\waveform.png"
+        },
+        {
+          "metadata": {
+            "frame_number": 94,
+            "height": 900,
+            "mode": "waveform",
+            "pending_resources": [],
+            "presentation_revision": 2,
+            "rendered_revision": 35,
+            "scale": 1.0,
+            "session_id": "3d16b400-5e5b-4b3c-9ffa-8b267c70e183",
+            "width": 1440
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\.tools\\release-smoke\\\u00e5\u00af\u00a9\u00e6\u0178\u00bb review kit\\gui\\waveform-hidden.png"
+        },
+        {
+          "metadata": {
+            "frame_number": 100,
+            "height": 900,
+            "mode": "multitrack",
+            "pending_resources": [],
+            "presentation_revision": 4,
+            "rendered_revision": 35,
+            "scale": 1.0,
+            "session_id": "3d16b400-5e5b-4b3c-9ffa-8b267c70e183",
+            "width": 1440
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\.tools\\release-smoke\\\u00e5\u00af\u00a9\u00e6\u0178\u00bb review kit\\gui\\multitrack.png"
+        },
+        {
+          "metadata": {
+            "frame_number": 105,
+            "height": 900,
+            "mode": "multitrack",
+            "pending_resources": [],
+            "presentation_revision": 5,
+            "rendered_revision": 35,
+            "scale": 1.0,
+            "session_id": "3d16b400-5e5b-4b3c-9ffa-8b267c70e183",
+            "width": 1440
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\.tools\\release-smoke\\\u00e5\u00af\u00a9\u00e6\u0178\u00bb review kit\\gui\\multitrack-hidden.png"
+        }
+      ],
+      "clipboard_converted_frames": 32000,
+      "clips": 5,
+      "crossfades": 1,
+      "documents": 3,
+      "mix_channels": 2,
+      "mix_frames": 576000,
+      "project_reopen_without_sources": true,
+      "tracks": 4
+    }
+  }
+}

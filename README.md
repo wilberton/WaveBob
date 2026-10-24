@@ -31,6 +31,9 @@ available; see [waveform controls](docs/waveform.md).
 For the local packaged Windows build and platform prerequisites, see
 [native development kits](docs/release.md). The release workflow is prepared;
 macOS/Linux CI and native verification remain deferred until a remote exists.
+The current local kit is `dist/WaveBob-0.1.0-x86_64-pc-windows-msvc.zip`;
+its [verification record](docs/verification/ticket21/README.md) covers the shipped
+executables, source-only offline rebuild and encoder relinking.
 
 Install stable Rust using [rustup](https://rustup.rs/), then:
 

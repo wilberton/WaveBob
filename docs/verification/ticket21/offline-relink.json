@@ -1,0 +1,25 @@
+{
+  "original_source_offline_build": true,
+  "fresh_cargo_home": true,
+  "qa_only_encoder_identifier": "3.101",
+  "path_patch_build": true,
+  "headless_and_mcp_workflows": true,
+  "archive_unchanged": true,
+  "outputs": {
+    "Mix.wav": {
+      "sha256": "0fbc474a69e0a082e3f0397f8aa7a9db49e9a82734a58515967b46160092d082",
+      "matches_unmodified_audio_file": true,
+      "modified_encoder_tag": false
+    },
+    "Mix.mp3": {
+      "sha256": "c48af429e4e2b56069e9f104c0b44ad30561c22ab04ecebe6213473033d3e34e",
+      "matches_unmodified_audio_file": false,
+      "modified_encoder_tag": true
+    },
+    "Sample selection.mp3": {
+      "sha256": "e0aabd5811c2ffd05d9229682e26d9337818ebed14708124dd4012ed9a560aaf",
+      "matches_unmodified_audio_file": false,
+      "modified_encoder_tag": true
+    }
+  }
+}
