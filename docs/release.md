@@ -112,6 +112,20 @@ The application is licensed under [GNU GPL v3](../LICENSE). The bundled
 third-party source/license texts retain their own terms; this document does not
 replace them.
 
+## Current live-processing build
+
+The source now includes owner-scoped streaming processing, Soft Clipper, separate
+native effect editors and document/clip gain/fade controls. The catalogue exposes
+other effect kinds as unavailable until their implementations are delivered.
+These builds retain the baseline WAV/MP3 workflows. Live document processing
+cannot yet be saved/exported as wet audio; those requests fail explicitly pending
+the linked-bounce/export tickets. Browser audition remains dry. See
+[live processing](live-processing.md) and [envelope controls](envelope-controls.md).
+
+The earlier Windows kit and its original verification describe the baseline
+commit recorded in its manifest. New kits have a separate output directory and
+record their exact source commit; they do not replace that historical evidence.
+
 ## Known limits
 
 - Native macOS/Linux, physical trackpad and subjective audio acceptance remain
@@ -119,8 +133,10 @@ replace them.
   are recorded under `docs/verification/`.
 - Editing accepts mono/stereo WAV and MP3. MP3 export offers CBR 128/192/256/320
   kbit/s at 32/44.1/48 kHz. Project audio stays lossless.
-- Reverb tails are bounded to the explicit editing/clip/range interval. At most
-  two clips overlap simultaneously per track; a third is rejected.
+- Legacy source reverb is bounded to the explicit editing/clip/range interval.
+  Live processors use the documented renderer tail policy; linked tail geometry
+  and wet export remain pending. At most two clips overlap simultaneously per
+  track; a third is rejected.
 - Managed project assets are append-only; keep the manifest and assets together.
   Undo history and clipboard do not survive reopen. Memory budgets are 512 MiB
   per decoded/processed audio and 2 GiB retained PCM; arbitrarily large streaming

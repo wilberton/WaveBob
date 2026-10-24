@@ -57,3 +57,16 @@ performed during the live-processing foundation implementation. The first three
 acceptance boxes remain open. The existing local-delivery verification above is
 historical evidence for the baseline build, not evidence for the new processing
 work. Rebuild and reverify release artifacts after the new implementation is ready.
+
+## Live-processing release preparation — 24 October 2026
+
+Ticket 41's document/clip envelope controls are committed and verified. Rebuild a
+separate development kit from a clean checkout of the current source, preserving
+the existing baseline ZIP/evidence and the user's uncommitted Cargo profile edit.
+The generated START-HERE text now names the repository's selected GNU GPL v3
+license and retains third-party/effect provenance. The release guide distinguishes
+current live-processing limitations from the older baseline acceptance.
+
+Remote read access was verified noninteractively with `git ls-remote origin`;
+`main` was `8742c8bb46bdcb9dba1e17aa2936191a3bb33c7f` at that check.
+This is connectivity evidence only, not a CI or native platform verification.
