@@ -4,6 +4,14 @@ Waveform editing and arrangement use distinct document, audio and view identitie
 
 ## Language
 
+**Project**: A portable snapshot of open documents, their lossless working audio
+and the arrangement, saved as a versioned manifest with managed audio assets.
+Its saved baseline is distinct from each document's original source-file baseline.
+
+**Managed audio asset**: An immutable lossless float-WAV revision stored beside a
+project manifest. It preserves source or processed PCM without an MP3 generation.
+
+
 **Audio document**: An open sample with its own identity, working audio revision,
 cursor and selection; its source file is a separate object.
 _Avoid_: File (when referring to the open editable document).

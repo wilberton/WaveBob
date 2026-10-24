@@ -639,6 +639,180 @@ mod live {
 
     #[tokio::test]
     #[ignore = "requires native GUI renderer"]
+    async fn portable_project_reopens_without_sources_and_captures_both_modes() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "portable-project-check");
+        let client = named_client(runtime.path(), "portable-project-check").await;
+        let source = runtime.path().join("音色 texture.mp3");
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3"),
+            &source,
+        )
+        .unwrap();
+        let opened =
+            response(&call(&client, "documents.open", json!({"params":{"path":source}})).await);
+        let doc = finish_mcp_job(&client, opened).await;
+        let edited = response(&call(&client, "effects.apply", json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":{"kind":"gain","db":-3.0}}})).await);
+        let doc = finish_mcp_job(&client, edited).await;
+        let track = response(
+            &call(
+                &client,
+                "tracks.add",
+                json!({"params":{"name":"Portable texture"}}),
+            )
+            .await,
+        )["result"]["tracks"][0]["id"]
+            .clone();
+        let length = doc["frames"].as_u64().unwrap() / 2;
+        for position in [0, 2000] {
+            assert_eq!(response(&call(&client, "clips.insert", json!({"params":{"track_id":track,"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":0,"source_end":length,"position":position}})).await)["status"], "ok");
+        }
+        let before = response(&call(&client, "session.get", json!({})).await)["result"].clone();
+        let revision = &before["arrangement"]["revision_id"];
+        let prepared = response(
+            &call(
+                &client,
+                "mix.prepare",
+                json!({"params":{"revision_id":revision}}),
+            )
+            .await,
+        );
+        finish_mcp_output(&client, prepared).await;
+        let samples = response(
+            &call(
+                &client,
+                "mix.samples",
+                json!({"params":{"revision_id":revision,"start_frame":2000,"frames":128}}),
+            )
+            .await,
+        )["result"]
+            .clone();
+        let project_path = runtime.path().join("Portable session.wavebob");
+        let started = response(
+            &call(
+                &client,
+                "project.save",
+                json!({"params":{"path":project_path}}),
+            )
+            .await,
+        );
+        let saved = finish_mcp_output(&client, started).await;
+        fs::remove_file(source).unwrap();
+        response(
+            &call(
+                &client,
+                "tracks.add",
+                json!({"params":{"name":"Discarded change"}}),
+            )
+            .await,
+        );
+        let started = response(
+            &call(
+                &client,
+                "project.open",
+                json!({"params":{"path":project_path,"discard_changes":true}}),
+            )
+            .await,
+        );
+        let reopened = finish_mcp_output(&client, started).await;
+        let after = response(&call(&client, "session.get", json!({})).await);
+        assert_eq!(after["result"]["documents"], before["documents"]);
+        assert_eq!(
+            after["result"]["arrangement"]["tracks"],
+            before["arrangement"]["tracks"]
+        );
+        assert_eq!(after["result"]["project"]["dirty"], false);
+        let prepared = response(
+            &call(
+                &client,
+                "mix.prepare",
+                json!({"params":{"revision_id":revision}}),
+            )
+            .await,
+        );
+        finish_mcp_output(&client, prepared).await;
+        assert_eq!(
+            response(
+                &call(
+                    &client,
+                    "mix.samples",
+                    json!({"params":{"revision_id":revision,"start_frame":2000,"frames":128}})
+                )
+                .await
+            )["result"],
+            samples
+        );
+        let mut captures = Vec::new();
+        response(
+            &call(
+                &client,
+                "documents.selection.set",
+                json!({"params":{"document_id":doc["id"],"start_frame":819,"end_frame":4096}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "presentation.timeline.set",
+                json!({"params":{"start_frame":0,"end_frame":8192}}),
+            )
+            .await,
+        );
+        for mode in ["waveform", "multitrack"] {
+            response(
+                &call(
+                    &client,
+                    "presentation.set_mode",
+                    json!({"params":{"mode":mode}}),
+                )
+                .await,
+            );
+            let captured = call(
+                &client,
+                "capture.png",
+                json!({"params":{"after_revision":after["revision"]}}),
+            )
+            .await;
+            let metadata = response(&captured);
+            assert_eq!(metadata["status"], "ok");
+            assert_eq!(metadata["result"]["metadata"]["mode"], mode);
+            assert!(
+                metadata["result"]["metadata"]["rendered_revision"]
+                    .as_u64()
+                    .unwrap()
+                    >= after["revision"].as_u64().unwrap()
+            );
+            let image = captured
+                .content
+                .iter()
+                .find_map(|block| {
+                    if let ContentBlock::Image(image) = block {
+                        Some(image)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+                fs::create_dir_all(&directory).unwrap();
+                fs::write(
+                    Path::new(&directory).join(format!("project-{mode}.png")),
+                    BASE64_STANDARD.decode(&image.data).unwrap(),
+                )
+                .unwrap();
+            }
+            captures.push(metadata);
+        }
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::write(Path::new(&directory).join("project-roundtrip.json"), serde_json::to_vec_pretty(&json!({"saved":saved,"reopened":reopened,"mixed_pcm_equal":true,"captures":captures})).unwrap()).unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
     async fn wav_and_mp3_mix_export_reimport_and_capture_through_mcp() {
         let runtime = tempfile::tempdir().unwrap();
         let _gui = Gui::start(runtime.path(), "mix-output-check");

@@ -1133,6 +1133,104 @@ fn dirty_audio_harness() -> (Harness, tempfile::TempDir) {
     }
     (h, d)
 }
+fn finish_gui_jobs(h: &mut Harness) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        h.frame(vec![]);
+        if !h
+            .app
+            .host
+            .snapshot()
+            .jobs
+            .iter()
+            .any(|job| job.status == JobStatus::Running)
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{:?}", h.app.error);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+#[test]
+fn project_picker_save_preserves_source_and_project_close_saves_arrangement() {
+    let (mut h, directory) = dirty_audio_harness();
+    let source = directory.path().join("Gestures.wav");
+    let original = std::fs::read(&source).unwrap();
+    h.app.dispatch(Command::AddTrack(
+        wavebob::arrangement::AddTrackParams::default(),
+    ));
+    let path = directory.path().join("Portable.wavebob");
+    let (sender, receiver) = mpsc::channel();
+    h.app.project_picker = Some(projecting::ProjectPicker {
+        receiver,
+        save: true,
+        close_after: false,
+        revision: h.app.host.snapshot().project.revision_id,
+    });
+    sender.send(Some(path.clone())).unwrap();
+    finish_gui_jobs(&mut h);
+    assert!(path.exists(), "{:?}", h.app.error);
+    assert!(!h.app.host.snapshot().project.dirty);
+    assert!(h.app.active_document().unwrap().dirty);
+    assert_eq!(std::fs::read(source).unwrap(), original);
+    h.app.dispatch(Command::AddTrack(
+        wavebob::arrangement::AddTrackParams::default(),
+    ));
+    h.app.begin_close(saving::CloseTarget::Quit);
+    h.frame(vec![]);
+    let save = h.text_rect("Save project").center();
+    h.click(save);
+    finish_gui_jobs(&mut h);
+    h.frame(vec![]);
+    assert!(
+        h.app.host.presentation().close_requested,
+        "{:?}",
+        h.app.error
+    );
+    assert!(!h.app.host.snapshot().project.dirty);
+    assert!(h.app.active_document().unwrap().dirty);
+}
+#[test]
+fn project_open_cancel_discard_and_failed_load_keep_workspace_safe() {
+    let (mut h, directory) = dirty_audio_harness();
+    let original = h.app.active_document().unwrap();
+    let missing = directory.path().join("Missing.wavebob");
+    h.app.begin_close(saving::CloseTarget::OpenProject(
+        missing.to_string_lossy().into_owned(),
+    ));
+    h.frame(vec![]);
+    let cancel = h.text_rect("Cancel").center();
+    h.click(cancel);
+    assert!(h.app.close_flow.is_none());
+    assert_eq!(h.app.active_document().unwrap(), original);
+    h.app.begin_close(saving::CloseTarget::OpenProject(
+        missing.to_string_lossy().into_owned(),
+    ));
+    h.frame(vec![]);
+    let discard = h.text_rect("Discard").center();
+    h.click(discard);
+    finish_gui_jobs(&mut h);
+    assert_eq!(h.app.active_document().unwrap(), original);
+    assert!(
+        h.app
+            .host
+            .snapshot()
+            .jobs
+            .iter()
+            .any(|job| job.status == JobStatus::Failed)
+    );
+    let (sender, receiver) = mpsc::channel();
+    h.app.project_picker = Some(projecting::ProjectPicker {
+        receiver,
+        save: true,
+        close_after: false,
+        revision: h.app.host.snapshot().project.revision_id,
+    });
+    sender.send(None).unwrap();
+    h.frame(vec![]);
+    assert!(h.app.project_picker.is_none());
+    assert_eq!(h.app.active_document().unwrap(), original);
+}
 #[test]
 fn dirty_document_close_can_cancel_discard_or_save_before_closing() {
     for save in [false, true] {

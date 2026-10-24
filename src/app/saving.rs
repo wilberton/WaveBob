@@ -11,10 +11,11 @@ pub(super) enum FileAction {
 pub(super) enum CloseTarget {
     Document(String),
     Quit,
+    OpenProject(String),
 }
 pub(super) struct CloseFlow {
     target: CloseTarget,
-    saving: bool,
+    pub(super) saving: bool,
     discard: bool,
     cancelled_jobs: bool,
     save_authorized: bool,
@@ -94,7 +95,7 @@ impl WaveBob {
             close_after: false,
         });
     }
-    pub(super) fn file_action(&mut self, action: FileAction, id: &str, close_after: bool) {
+    pub(super) fn file_action(&mut self, mut action: FileAction, id: &str, close_after: bool) {
         if self.host.frozen() {
             return;
         }
@@ -115,6 +116,12 @@ impl WaveBob {
             return;
         }
         self.error = None;
+        if self.host.snapshot().project.path.is_some()
+            && !std::path::Path::new(&document.path).is_absolute()
+            && matches!(action, FileAction::Save)
+        {
+            action = FileAction::SaveAs;
+        }
         let existing = document
             .save_format
             .clone()
@@ -175,7 +182,7 @@ impl WaveBob {
             close_after,
         });
     }
-    fn submit_output(&mut self, command: Command, close_after: bool) -> bool {
+    pub(super) fn submit_output(&mut self, command: Command, close_after: bool) -> bool {
         if self.host.frozen() {
             return false;
         }
@@ -204,14 +211,14 @@ impl WaveBob {
         if self.host.frozen() {
             return;
         }
-        let dirty = (matches!(target, CloseTarget::Quit) && self.host.snapshot().arrangement.dirty)
-            || self.host.snapshot().documents.iter().any(|doc| {
-                doc.dirty
-                    && match &target {
-                        CloseTarget::Quit => true,
-                        CloseTarget::Document(id) => id == &doc.id,
-                    }
-            });
+        let snapshot = self.host.snapshot();
+        let dirty = match &target {
+            CloseTarget::Quit | CloseTarget::OpenProject(_) => snapshot.project.dirty,
+            CloseTarget::Document(id) => snapshot
+                .documents
+                .iter()
+                .any(|doc| &doc.id == id && self.document_unsaved(doc)),
+        };
         if !dirty && let CloseTarget::Document(id) = &target {
             self.dispatch(Command::CloseDocument(CloseParams {
                 document_id: id.clone(),
@@ -385,6 +392,7 @@ impl WaveBob {
         let frozen = self.host.frozen();
         if !frozen {
             self.poll_save_picker();
+            self.poll_project_picker();
         }
         if !frozen
             && let Some(id) = &self.close_save_job
@@ -397,16 +405,16 @@ impl WaveBob {
             && job.status != JobStatus::Running
         {
             self.close_save_job = None;
-            if job.status != JobStatus::Succeeded {
-                self.error = Some(
+            let changed = matches!(job.output, Some(JobOutput::ProjectSaved(_)))
+                && self.host.snapshot().project.dirty
+                || job.result.is_some_and(|doc| self.document_unsaved(&doc));
+            if job.status != JobStatus::Succeeded || changed {
+                self.error = Some(if changed {
+                    "Work changed during the save. Choose Save again to review the current revision.".into()
+                } else {
                     job.error
-                        .map_or("Save was cancelled".into(), |error| error.message),
-                );
-                if let Some(flow) = &mut self.close_flow {
-                    flow.saving = false;
-                }
-            } else if job.result.is_some_and(|document| document.dirty) {
-                self.error=Some("Audio changed during the save. Choose Save again to review the current revision.".into());
+                        .map_or("Save was cancelled".into(), |error| error.message)
+                });
                 if let Some(flow) = &mut self.close_flow {
                     flow.saving = false;
                 }
@@ -419,32 +427,40 @@ impl WaveBob {
         let Some(mut flow) = self.close_flow.take() else {
             return;
         };
+        let snapshot = self.host.snapshot();
         if let CloseTarget::Document(id) = &flow.target
-            && !self
-                .host
-                .snapshot()
-                .documents
-                .iter()
-                .any(|doc| &doc.id == id)
+            && !snapshot.documents.iter().any(|doc| &doc.id == id)
         {
             return;
         }
-        if !frozen && flow.saving && self.close_save_job.is_none() {
-            let dirty = self.host.snapshot().documents.into_iter().find(|doc| {
-                doc.dirty
-                    && match &flow.target {
-                        CloseTarget::Quit => true,
-                        CloseTarget::Document(id) => id == &doc.id,
-                    }
-            });
-            if !flow.discard
-                && let Some(doc) = dirty
-            {
+        let project_target = !matches!(flow.target, CloseTarget::Document(_))
+            && (snapshot.project.path.is_some() || snapshot.arrangement.dirty);
+        let dirty_doc = snapshot.documents.into_iter().find(|doc| {
+            self.document_unsaved(doc)
+                && match &flow.target {
+                    CloseTarget::Document(id) => id == &doc.id,
+                    _ => true,
+                }
+        });
+        let dirty = if matches!(flow.target, CloseTarget::Document(_)) {
+            dirty_doc.is_some()
+        } else {
+            snapshot.project.dirty
+        };
+        if !frozen && flow.saving && self.close_save_job.is_none() && self.project_picker.is_none()
+        {
+            if !flow.discard && dirty {
                 if flow.save_authorized {
-                    self.file_action(FileAction::Save, &doc.id, true);
+                    if project_target {
+                        self.project_save(ctx, false, true);
+                    } else if let Some(doc) = &dirty_doc {
+                        self.file_action(FileAction::Save, &doc.id, true);
+                    }
                 }
                 if !flow.save_authorized
-                    || (self.output_dialog.is_none() && self.close_save_job.is_none())
+                    || (self.output_dialog.is_none()
+                        && self.close_save_job.is_none()
+                        && self.project_picker.is_none())
                 {
                     flow.saving = false;
                 }
@@ -458,7 +474,7 @@ impl WaveBob {
                         .filter(|job| job.status == JobStatus::Running)
                     {
                         self.host.execute(Request::new(
-                            "quit-cancel",
+                            "close-cancel",
                             Command::CancelJob(JobParams { job_id: job.id }),
                         ));
                     }
@@ -473,6 +489,12 @@ impl WaveBob {
                         discard_changes: flow.discard,
                         expected_presentation_revision: None,
                     }),
+                    CloseTarget::OpenProject(path) => {
+                        Command::OpenProject(wavebob::projects::OpenProjectParams {
+                            path: path.clone(),
+                            discard_changes: flow.discard,
+                        })
+                    }
                 };
                 match self
                     .host
@@ -496,61 +518,32 @@ impl WaveBob {
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::unique("dirty-close-dialog")).show(ctx, |ui| {
             ui.set_max_width(430.0);
-            ui.heading(if flow.saving {
-                "Finishing work…"
-            } else {
-                "Unsaved audio"
-            });
+            ui.heading(if flow.saving { "Finishing work…" } else if project_target { "Unsaved project" } else { "Unsaved audio" });
             if !flow.saving {
-                ui.label("Save changes before closing?");
-                let arrangement_dirty=matches!(flow.target,CloseTarget::Quit)&&self.host.snapshot().arrangement.dirty;
-                if arrangement_dirty {ui.label("Arrangement has unsaved changes. Project saving is added in ticket 19; cancel to retain it, or explicitly discard.");}
-                for doc in self.host.snapshot().documents.into_iter().filter(|doc| {
-                    doc.dirty
-                        && match &flow.target {
-                            CloseTarget::Quit => true,
-                            CloseTarget::Document(id) => id == &doc.id,
-                        }
-                }) {
-                    ui.label(doc.name);
-                }
-                if let Some(error) = &self.error {
-                    ui.colored_label(Color32::LIGHT_RED, error);
-                }
+                ui.label(if matches!(flow.target, CloseTarget::OpenProject(_)) { "Save changes before opening another project?" } else { "Save changes before closing?" });
+                if project_target { ui.label("The project stores the arrangement and lossless working audio together."); }
+                if let Some(doc) = &dirty_doc { ui.label(&doc.name); }
+                if let Some(error) = &self.error { ui.colored_label(Color32::LIGHT_RED, error); }
                 ui.horizontal(|ui| {
-                    let response = ui.add_enabled(!arrangement_dirty,egui::Button::new("Save"));
-                    help.observe(
-                        &response,
-                        "Save dirty audio before closing. MP3 settings are confirmed explicitly.",
-                    );
-                    if response.clicked() && !frozen {
-                        flow.saving = true;
-                        flow.save_authorized=true;
-                    }
+                    let response = ui.button(if project_target { "Save project" } else { "Save" });
+                    help.observe(&response, "Save the current work before continuing. Project assets preserve working audio losslessly.");
+                    if response.clicked() && !frozen { flow.saving = true; flow.save_authorized = true; }
                     let response = ui.button("Discard");
-                    help.observe(
-                        &response,
-                        "Close and discard unsaved audio revisions without writing them.",
-                    );
-                    if response.clicked() && !frozen {
-                        flow.discard = true;
-                        flow.saving = true;
-                    }
+                    help.observe(&response, "Discard unsaved workspace changes without writing them.");
+                    if response.clicked() && !frozen { flow.discard = true; flow.saving = true; }
                     let response = ui.button("Cancel");
-                    help.observe(&response, "Keep the editor open with all current work.");
+                    help.observe(&response, "Keep the current workspace open.");
                     cancel = response.clicked() && !frozen;
                 });
             } else {
                 ui.label("Waiting for save or output publication to finish.");
-                if matches!(flow.target,CloseTarget::Quit)&&!flow.discard {
-                    let response=ui.button("Stop jobs and close");help.observe(&response,"Cancel unfinished work and close with explicit discard intent; output already committing is allowed to finish.");
-                    if response.clicked()&&!frozen{flow.discard=true;flow.cancelled_jobs=false;}
+                if !matches!(flow.target, CloseTarget::Document(_)) && !flow.discard && self.project_picker.is_none() {
+                    let response = ui.button("Stop jobs and close");
+                    help.observe(&response, "Cancel unfinished work and continue with explicit discard intent.");
+                    if response.clicked() && !frozen { flow.discard = true; flow.cancelled_jobs = false; }
                 }
                 let response = ui.button("Cancel close");
-                help.observe(
-                    &response,
-                    "Keep editing; an already accepted save may still finish.",
-                );
+                help.observe(&response, "Keep editing; an already accepted save may still finish.");
                 cancel = response.clicked() && !frozen;
             }
         });

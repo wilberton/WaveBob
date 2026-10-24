@@ -19,6 +19,8 @@ Two overlapping clips on a track now derive [automatic equal-power crossfades](d
 including contained clips; third simultaneous overlaps are rejected.
 [WAV/MP3 arrangement export](docs/mix-export.md) renders an immutable mix snapshot,
 including selected time ranges, processing, track controls and silent gaps.
+[Portable projects](docs/projects.md) preserve edited audio, pinned sources and
+the arrangement with managed lossless assets, independent of original files.
 Native sample playback supports pause, seek and selection/whole-sample loops;
 see [transport controls and commands](docs/transport.md).
 Precise cursor/selection controls and overview/mouse/trackpad zoom and pan are
@@ -84,20 +86,20 @@ waveform and arrangement captures at wide, compact, narrow and 150% scale.
 - Stdio MCP tools generated from the command registry, including PNG image delivery.
 - Background PCM/float WAV and CBR/VBR MP3 import, exact sample queries and cached waveform peaks.
 - Native Open action, multiple documents and real overview/channel waveforms.
-- Clearly labeled synthetic arrangement preview until track editing lands.
 - Resizable/collapsible panels, a remembered library/browser split and bottom status help.
 - Filesystem navigation and independent preview, plus undoable gain/fades/reverse.
 - Native sample playback with requested/applied position and recoverable device errors.
 - Structural editing and an internal audio clipboard with deterministic resampling.
 - Bounded, deterministic reverb with an explicit truncated-tail policy.
 - WAV/MP3 sample save/export, exact saved revisions and guarded close/quit.
-- Editable arrangement and project persistence arrive in subsequent tickets.
+- Editable tracks, individual clip processing, automatic crossfades and mix export.
+- Portable project save/reopen with managed lossless audio assets.
 - The generated design sheet is a visual proposal, not a screenshot of the shell.
 
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
-current execution status. Tickets 01–18 and 22 are complete; derive subsequent
+current execution status. Tickets 01–19 and 22 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 

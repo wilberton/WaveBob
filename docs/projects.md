@@ -44,5 +44,8 @@ destination when writing a standalone sample.
 
 Both commands return jobs. Their output kinds are project_saved/project_opened,
 with path, schema/revision, object/asset counts and asset reuse information.
-The core persistence path is shared by GUI, headless and MCP. GUI project dialogs
-and project-aware close flows are the remaining part of ticket 19.
+The core persistence path is shared by GUI, headless and MCP. The File menu offers
+Open project, Save project and Save project as. In multitrack mode Ctrl/Cmd+S saves
+the project and Ctrl/Cmd+Shift+S chooses a new project destination. In waveform
+mode those shortcuts save the standalone sample. Project close/open prompts offer
+Save project, Discard and Cancel; failed loads retain the current workspace.

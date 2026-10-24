@@ -6,6 +6,7 @@ mod arranging;
 mod browser;
 mod editing;
 mod effects;
+mod projecting;
 mod saving;
 mod visuals;
 mod waveform;
@@ -35,6 +36,7 @@ pub struct WaveBob {
     reverb: effects::ReverbControls,
     output_dialog: Option<saving::OutputDialog>,
     save_picker: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
+    project_picker: Option<projecting::ProjectPicker>,
     close_flow: Option<saving::CloseFlow>,
     close_save_job: Option<String>,
     os_close_pending: bool,
@@ -279,6 +281,7 @@ impl WaveBob {
             || self.open_requested
             || self.output_dialog.is_some()
             || self.save_picker.is_some()
+            || self.project_picker.is_some()
             || self.close_flow.is_some()
             || !ctx.input(|input| input.focused)
             || ctx.memory(|memory| memory.top_modal_layer().is_some())
@@ -372,11 +375,12 @@ impl WaveBob {
                 _ => None,
             })
         });
-        if let Some(action) = save_action
-            && self.host.presentation().mode == ViewMode::Waveform
-            && let Some(doc) = self.active_document()
-        {
-            self.file_action(action, &doc.id, false);
+        if let Some(action) = save_action {
+            if self.host.presentation().mode == ViewMode::Multitrack {
+                self.project_save(ctx, matches!(action, saving::FileAction::SaveAs), false);
+            } else if let Some(doc) = self.active_document() {
+                self.file_action(action, &doc.id, false);
+            }
         }
         if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) {
             self.edit_action(editing::Action::Delete);
@@ -458,6 +462,15 @@ impl WaveBob {
                             self.open_requested = true;
                             ui.close();
                         }
+                        ui.separator();
+                        for (label, save_as) in [("Save project    Ctrl/Cmd+S in multitrack", false), ("Save project as…", true)] {
+                            let response = ui.button(label);
+                            help.observe(&response, "Save documents, lossless working audio and the arrangement as a portable project.");
+                            if response.clicked() { self.project_save(ui.ctx(), save_as, false); ui.close(); }
+                        }
+                        let response = ui.button("Open project…");
+                        help.observe(&response, "Open a portable project after saving or discarding current changes.");
+                        if response.clicked() { self.choose_project(ui.ctx(), false, false); ui.close(); }
                         ui.separator();
                         for (action,label) in [(saving::FileAction::Save,"Save    Ctrl/Cmd+S"),(saving::FileAction::SaveAs,"Save As…"),(saving::FileAction::Export,"Export audio…")]{
                             let mix=mode==ViewMode::Multitrack&&matches!(action,saving::FileAction::Export);
@@ -685,6 +698,9 @@ impl WaveBob {
             [
                 self.output_dialog.is_some().then_some("output-dialog"),
                 self.save_picker.is_some().then_some("native-output-picker"),
+                self.project_picker
+                    .is_some()
+                    .then_some("native-project-picker"),
                 self.dialog.is_some().then_some("native-open-dialog"),
                 self.close_flow.is_some().then_some("dirty-close-dialog"),
             ]
