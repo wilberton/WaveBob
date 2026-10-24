@@ -8,6 +8,7 @@ WAV and MP3 files open as background jobs and display real mono/stereo waveforms
 The [filesystem browser](docs/browser.md) supports independent WAV/MP3 audition.
 Selection/whole-sample [gain, fades, reverse and reverb](docs/editing.md) support undo/redo.
 [Cut/copy/paste/delete/trim](docs/structural-edits.md) share history, with rate/channel conversion.
+[WAV/MP3 save and export](docs/export.md) use atomic jobs and protect dirty work on close.
 Native sample playback supports pause, seek and selection/whole-sample loops;
 see [transport controls and commands](docs/transport.md).
 Precise cursor/selection controls and overview/mouse/trackpad zoom and pan are
@@ -79,13 +80,14 @@ waveform and arrangement captures at wide, compact, narrow and 150% scale.
 - Native sample playback with requested/applied position and recoverable device errors.
 - Structural editing and an internal audio clipboard with deterministic resampling.
 - Bounded, deterministic reverb with an explicit truncated-tail policy.
-- Export and project persistence arrive in subsequent tickets.
+- WAV/MP3 sample save/export, exact saved revisions and guarded close/quit.
+- Editable arrangement and project persistence arrive in subsequent tickets.
 - The generated design sheet is a visual proposal, not a screenshot of the shell.
 
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
-current execution status. Tickets 01–12 and 22 are complete; derive subsequent
+current execution status. Tickets 01–13 and 22 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 

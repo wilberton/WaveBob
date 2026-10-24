@@ -8,8 +8,9 @@ use crate::edits::{ClipboardInfo, EditParams, PasteParams};
 use crate::effects::{ApplyEffectParams, HistoryInfo};
 use crate::exports::{ExportParams, SaveParams};
 use crate::presentation::{
-    CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, RenderMetadata,
-    RenderParams, SetEffectParams, SetLayoutParams, SetModeParams, SetViewportParams,
+    CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, QuitParams,
+    RenderMetadata, RenderParams, SetEffectParams, SetLayoutParams, SetModeParams,
+    SetViewportParams,
 };
 use crate::transport::TransportSnapshot;
 use crate::{CommandError, ErrorCode, PROTOCOL_VERSION, SessionSnapshot};
@@ -138,6 +139,7 @@ command_registry! {
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, false, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, false, PresentationSnapshot),
     SetEffect(SetEffectParams) => ("presentation.effects.set", "Choose visible effect parameters without applying an audio edit.", true, true, false, PresentationSnapshot),
+    RequestQuit(QuitParams) => ("presentation.quit", "Close the attached GUI only when work is saved or discard is explicit; unfinished output must settle first.", true, true, false, PresentationSnapshot),
     SetViewport(SetViewportParams) => ("presentation.viewport.set", "Set a document's visible frame interval without changing its selection or audio.", true, true, false, PresentationSnapshot),
     SetLayout(SetLayoutParams) => ("presentation.layout.set", "Set panel widths, visibility and library/browser split.", true, true, false, PresentationSnapshot),
     TogglePanels(PresentationRevisionParams) => ("presentation.panels.toggle", "Hide both panels if either is visible; otherwise restore both.", true, true, false, PresentationSnapshot),

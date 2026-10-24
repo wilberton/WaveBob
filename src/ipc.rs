@@ -250,10 +250,16 @@ pub(crate) struct Server {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     record_path: PathBuf,
+    #[cfg(feature = "gui")]
+    active: Arc<AtomicUsize>,
 }
 
 #[cfg(any(feature = "gui", test))]
 impl Server {
+    #[cfg(feature = "gui")]
+    pub fn is_idle(&self) -> bool {
+        self.active.load(Ordering::Acquire) == 0
+    }
     pub fn start(
         directory: &Path,
         session_id: &str,
@@ -313,6 +319,8 @@ impl Server {
         let (sender, receiver) = mpsc::sync_channel(32);
         let wake = Arc::new(wake);
         let active = Arc::new(AtomicUsize::new(0));
+        #[cfg(feature = "gui")]
+        let server_active = active.clone();
         let thread = thread::spawn(move || {
             while !thread_stop.load(Ordering::Acquire) {
                 match listener.accept() {
@@ -349,6 +357,8 @@ impl Server {
                 stop,
                 thread: Some(thread),
                 record_path,
+                #[cfg(feature = "gui")]
+                active: server_active,
             },
             receiver,
         ))

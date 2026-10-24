@@ -63,6 +63,86 @@ fn effect_parameters_are_revision_guarded_presentation_without_audio_mutation() 
 }
 
 #[test]
+fn quit_waits_for_cancelled_output_acknowledgement_and_rejects_new_mutations() {
+    use wavebob::{documents::*, effects::EditTarget, exports::*};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("quit.wav");
+    let mut writer = hound::WavWriter::create(
+        &path,
+        hound::WavSpec {
+            channels: 1,
+            sample_rate: 48000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .unwrap();
+    for _ in 0..1000 {
+        writer.write_sample(1000_i16).unwrap();
+    }
+    writer.finalize().unwrap();
+    let mut host = DesktopHost::default();
+    command(
+        &mut host,
+        Command::OpenDocument(OpenParams {
+            path: path.to_str().unwrap().into(),
+        }),
+    );
+    let context = eframe::egui::Context::default();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while host.snapshot().documents.is_empty() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        host.begin_frame(&context);
+    }
+    let doc = host.snapshot().documents[0].clone();
+    let result = command(
+        &mut host,
+        Command::ExportAudio(ExportParams {
+            target: EditTarget::Whole {
+                document_id: doc.id,
+                revision_id: doc.revision_id,
+            },
+            path: directory
+                .path()
+                .join("cancelled.wav")
+                .to_str()
+                .unwrap()
+                .into(),
+            format: ExportFormat::default(),
+            sample_rate: None,
+            overwrite: false,
+            overload: OverloadPolicy::Reject,
+        }),
+    );
+    let Outcome::Ok {
+        result: wavebob::CommandResult::Job(job),
+    } = result.outcome
+    else {
+        panic!("Output must start")
+    };
+    assert!(
+        matches!(command(&mut host,Command::RequestQuit(QuitParams::default())).outcome,Outcome::Error{error} if error.code==ErrorCode::Busy)
+    );
+    assert!(!host.presentation().close_requested);
+    command(&mut host, Command::CancelJob(JobParams { job_id: job.id }));
+    loop {
+        host.begin_frame(&context);
+        let response = command(&mut host, Command::RequestQuit(QuitParams::default()));
+        if matches!(response.outcome, Outcome::Ok { .. }) {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(!directory.path().join("cancelled.wav").exists());
+    assert!(host.ready_to_close());
+    assert!(
+        matches!(command(&mut host,Command::ToggleLoop(wavebob::EmptyParams{})).outcome,Outcome::Error{error} if error.code==ErrorCode::Busy)
+    );
+}
+
+#[test]
 fn viewport_commands_validate_bounds_and_preserve_core_selection_and_audio() {
     use wavebob::documents::*;
     let directory = tempfile::tempdir().unwrap();

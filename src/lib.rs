@@ -242,6 +242,10 @@ impl Session {
         self.editor.clipboard_info()
     }
     #[cfg(feature = "gui")]
+    pub(crate) fn check_quit(&self, discard: bool) -> Result<(), CommandError> {
+        self.editor.check_quit(discard)
+    }
+    #[cfg(feature = "gui")]
     pub(crate) fn initialize_browser(&mut self, path: String) {
         let _ = self.browser.navigate(path);
     }
@@ -340,6 +344,7 @@ impl Session {
             Command::GetPresentation(_)
             | Command::SetMode(_)
             | Command::SetEffect(_)
+            | Command::RequestQuit(_)
             | Command::SetViewport(_)
             | Command::SetLayout(_)
             | Command::TogglePanels(_)

@@ -45,6 +45,8 @@ pub struct DocumentInfo {
     pub saved_revision_id: Option<String>,
     #[serde(default)]
     pub save_format: Option<crate::exports::ExportFormat>,
+    #[serde(default)]
+    pub save_sample_rate: Option<u32>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -197,6 +199,27 @@ impl Default for Editor {
     }
 }
 impl Editor {
+    #[cfg(feature = "gui")]
+    pub fn check_quit(&self, discard: bool) -> Result<(), CommandError> {
+        if !discard && self.documents.iter().any(|document| document.dirty) {
+            return Err(CommandError::new(
+                ErrorCode::DirtyDocument,
+                "Save dirty documents or specify explicit discard intent before quitting",
+            ));
+        }
+        if !self.pending_outputs.is_empty()
+            || self
+                .jobs
+                .values()
+                .any(|(job, _)| job.status == JobStatus::Running)
+        {
+            return Err(CommandError::new(
+                ErrorCode::Busy,
+                "Wait for audio jobs to finish or acknowledge cancellation before quitting",
+            ));
+        }
+        Ok(())
+    }
     pub fn documents(&self) -> Vec<DocumentInfo> {
         self.documents.clone()
     }
@@ -307,6 +330,10 @@ impl Editor {
                                     save_format: crate::exports::ExportFormat::source_wav(
                                         &audio.encoding,
                                     ),
+                                    save_sample_rate: crate::exports::ExportFormat::source_wav(
+                                        &audio.encoding,
+                                    )
+                                    .map(|_| audio.rate),
                                 };
                                 document.saved_revision_id = Some(document.revision_id.clone());
                                 self.revisions
@@ -589,6 +616,15 @@ impl Drop for Editor {
     fn drop(&mut self) {
         for (_, cancel) in self.jobs.values() {
             cancel.store(true, Ordering::Release);
+        }
+        // Close publication permits before joining output workers, so EOF/drop
+        // cannot leave a prepared temporary file waiting on the command thread.
+        let (_, empty) = mpsc::channel();
+        drop(std::mem::replace(&mut self.receiver, empty));
+        for pending in self.pending_outputs.values_mut() {
+            if let Some(worker) = pending.worker.take() {
+                let _ = worker.join();
+            }
         }
     }
 }

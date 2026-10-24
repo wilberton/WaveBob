@@ -9,6 +9,7 @@ pub(super) struct PendingOutput {
     save: bool,
     pub committing: bool,
     error: Option<CommandError>,
+    pub worker: Option<std::thread::JoinHandle<()>>,
 }
 impl Editor {
     pub(super) fn export_audio(
@@ -19,6 +20,13 @@ impl Editor {
     }
     pub(super) fn save_audio(&mut self, params: SaveParams) -> Result<CommandResult, CommandError> {
         let document = self.document(&params.document_id)?;
+        let sample_rate = params.sample_rate.or_else(|| {
+            if params.format.is_none() {
+                document.save_sample_rate
+            } else {
+                None
+            }
+        });
         let format=params.format.clone().map(ExportFormat::from).or_else(||document.save_format.clone()).or_else(||ExportFormat::source_wav(&document.encoding)).ok_or_else(||CommandError::new(ErrorCode::InvalidParams,"Saving an MP3 requires explicit MP3 encoding settings; lossless WAV Save As is also available"))?;
         if format.lossy() && params.format.is_none() {
             return Err(CommandError::new(
@@ -34,7 +42,7 @@ impl Editor {
                 },
                 path: params.path.unwrap_or_else(|| document.path.clone()),
                 format,
-                sample_rate: params.sample_rate,
+                sample_rate,
                 overwrite: params.overwrite,
                 overload: params.overload,
             },
@@ -98,6 +106,7 @@ impl Editor {
                 save,
                 committing: false,
                 error: None,
+                worker: None,
             },
         );
         self.jobs.insert(id.clone(), (job.clone(), cancel.clone()));
@@ -112,7 +121,8 @@ impl Editor {
         };
         let sender = self.sender.clone();
         let wake = self.wake.clone();
-        std::thread::spawn(move || {
+        let worker_id = id.clone();
+        let worker = std::thread::spawn(move || {
             let last = std::cell::Cell::new(255);
             let notify = || {
                 if let Some(wake) = &wake {
@@ -144,6 +154,7 @@ impl Editor {
             let _ = sender.send(Event::OutputFinished(id, result));
             notify();
         });
+        self.pending_outputs.get_mut(&worker_id).unwrap().worker = Some(worker);
         Ok(CommandResult::Job(job.into()))
     }
     pub(super) fn approve_output(
@@ -225,6 +236,7 @@ impl Editor {
                 .to_string_lossy()
                 .into_owned();
             after.save_format = Some(summary.format.clone());
+            after.save_sample_rate = Some(summary.sample_rate);
             if after != *document {
                 if let Some(next) = revision.checked_add(1) {
                     *revision = next;

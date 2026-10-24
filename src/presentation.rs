@@ -19,6 +19,15 @@ pub struct PresentationSnapshot {
     pub viewports: std::collections::BTreeMap<String, crate::documents::FrameRange>,
     #[serde(default)]
     pub effect: crate::effects::Effect,
+    #[serde(default)]
+    pub close_requested: bool,
+}
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuitParams {
+    #[serde(default)]
+    pub discard_changes: bool,
+    pub expected_presentation_revision: Option<u64>,
 }
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

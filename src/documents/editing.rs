@@ -506,6 +506,7 @@ impl Editor {
         restored.name = current.name.clone();
         restored.saved_revision_id = current.saved_revision_id.clone();
         restored.save_format = current.save_format.clone();
+        restored.save_sample_rate = current.save_sample_rate;
         restored.dirty = restored.saved_revision_id.as_ref() != Some(&restored.revision_id);
         *self
             .documents

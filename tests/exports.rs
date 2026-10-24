@@ -247,6 +247,30 @@ fn save_tracks_exact_revision_and_undo_redo_recompute_dirty_without_reencoding_w
         )["error"]["code"],
         "invalid_params"
     );
+    assert_eq!(
+        send(
+            &mut s,
+            "documents.save",
+            json!({"document_id":doc["id"],"revision_id":edited["revision_id"],"overwrite":true,"format":{"kind":"mp3"}})
+        )["error"]["code"],
+        "invalid_params"
+    );
+    let started = ok(
+        &mut s,
+        "documents.save",
+        json!({"document_id":doc["id"],"revision_id":edited["revision_id"],"path":d.path().join("converted.wav"),"format":{"kind":"wav","encoding":"pcm24"},"sample_rate":32000}),
+    );
+    assert_eq!(wait(&mut s, &started["id"])["status"], "succeeded");
+    let started = ok(
+        &mut s,
+        "documents.save",
+        json!({"document_id":doc["id"],"revision_id":edited["revision_id"],"overwrite":true}),
+    );
+    assert_eq!(
+        wait(&mut s, &started["id"])["output"]["details"]["sample_rate"],
+        32000,
+        "Ordinary WAV Save retains its last chosen rate"
+    );
 }
 #[test]
 fn cancelled_and_failed_outputs_leave_destinations_and_dirty_state_unchanged() {
@@ -390,6 +414,30 @@ fn one_frame_mp3_export_recovers_one_frame_with_gapless_metadata() {
     let job = wait(&mut s, &started["id"]);
     assert_eq!(job["status"], "succeeded", "{job}");
     assert_eq!(imported(&mut s, &path)["frames"], 1);
+}
+
+#[test]
+fn dropping_a_session_cancels_uncommitted_output_and_cleans_temporary_files() {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = Session::default();
+    let doc = source(&mut s, d.path(), 48000, 1, "float32");
+    let output = d.path().join("abandoned.mp3");
+    ok(
+        &mut s,
+        "audio.export",
+        json!({"target":target(&doc),"path":output,"format":{"kind":"mp3"}}),
+    );
+    drop(s);
+    assert!(!output.exists());
+    let files = std::fs::read_dir(d.path())
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        files.len(),
+        1,
+        "Only the source fixture may remain after the session closes"
+    );
 }
 
 #[test]

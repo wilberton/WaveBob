@@ -772,6 +772,208 @@ fn reverb_controls_and_tail_policy_are_visible_without_mutating_audio() {
     );
 }
 
+fn dirty_audio_harness() -> (Harness, tempfile::TempDir) {
+    let (mut h, d) = audio_harness();
+    let reverse = h.text_rect("Reverse").center();
+    h.click(reverse);
+    let apply = h.text_rect("Apply").center();
+    h.click(apply);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !h.app.active_document().unwrap().dirty {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    (h, d)
+}
+#[test]
+fn dirty_document_close_can_cancel_discard_or_save_before_closing() {
+    for save in [false, true] {
+        let (mut h, d) = dirty_audio_harness();
+        let id = h.app.active_document().unwrap().id;
+        let close = h.text_rect("×").center();
+        h.click(close);
+        assert!(h.app.close_flow.is_some());
+        assert!(h.app.active_document().unwrap().dirty);
+        let cancel = h.text_rect("Cancel").center();
+        h.click(cancel);
+        assert!(h.app.close_flow.is_none());
+        assert_eq!(h.app.active_document().unwrap().id, id);
+        h.click(close);
+        let action = h.text_rect(if save { "Save" } else { "Discard" }).center();
+        h.click(action);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !h.app.host.snapshot().documents.is_empty() {
+            assert!(std::time::Instant::now() < deadline, "{:?}", h.app.error);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            h.frame(vec![]);
+        }
+        assert!(h.app.close_flow.is_none());
+        if save {
+            let mut reader = hound::WavReader::open(d.path().join("Gestures.wav")).unwrap();
+            assert_eq!(reader.samples::<i16>().next().unwrap().unwrap(), 19600);
+        }
+    }
+}
+#[test]
+fn gui_export_dialog_shows_lossy_settings_and_submits_mp3_through_the_core() {
+    let (mut h, d) = audio_harness();
+    let file = h.text_rect("File").center();
+    h.click(file);
+    let export = h.text_rect("Export audio…").center();
+    h.click(export);
+    assert!(h.app.output_dialog.is_some());
+    let format = h.text_rect("WAV · 24-bit PCM").center();
+    h.click(format);
+    let mp3 = h.text_rect("MP3 · lossy").center();
+    h.click(mp3);
+    assert!(
+        text_shapes(&h.frame(vec![]))
+            .iter()
+            .any(|(_, text)| text.contains("MP3 uses lossy encoding"))
+    );
+    let path = d.path().join("UI export.mp3");
+    let (sender, receiver) = mpsc::channel();
+    h.app.save_picker = Some(receiver);
+    sender.send(Some(path.clone())).unwrap();
+    h.frame(vec![]);
+    let export = h.text_rect("Export").center();
+    h.click(export);
+    assert!(h.app.output_dialog.is_none());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        h.frame(vec![]);
+        if h.app
+            .host
+            .snapshot()
+            .jobs
+            .iter()
+            .any(|job| job.kind == "Export" && job.status == JobStatus::Succeeded)
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{:?}", h.app.error);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(path.exists());
+    assert!(!h.app.active_document().unwrap().dirty);
+    assert!(!h.app.host.history().can_undo);
+}
+#[test]
+fn native_quit_intent_requires_a_dirty_work_choice_and_discard_is_explicit() {
+    let (mut h, _d) = dirty_audio_harness();
+    h.app.os_close_pending = true;
+    h.frame(vec![]);
+    assert!(h.app.close_flow.is_some());
+    assert!(!h.app.host.presentation().close_requested);
+    let cancel = h.text_rect("Cancel").center();
+    h.click(cancel);
+    assert!(!h.app.host.presentation().close_requested);
+    h.app.os_close_pending = true;
+    h.frame(vec![]);
+    let discard = h.text_rect("Discard").center();
+    h.click(discard);
+    h.frame(vec![]);
+    assert!(h.app.host.presentation().close_requested);
+}
+
+#[test]
+fn closing_an_edited_mp3_confirms_encoding_and_offers_lossless_wav_save_as() {
+    let mut h = Harness::new();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3");
+    let original = std::fs::read(&path).unwrap();
+    h.app.open_path(path.clone());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.active_document().is_none() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    let reverse = h.text_rect("Reverse").center();
+    h.click(reverse);
+    let apply = h.text_rect("Apply").center();
+    h.click(apply);
+    while !h.app.active_document().unwrap().dirty {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    let close = h.text_rect("×").center();
+    h.click(close);
+    let save = h.text_rect("Save").center();
+    h.click(save);
+    assert!(h.app.output_dialog.is_some());
+    assert!(
+        text_shapes(&h.frame(vec![]))
+            .iter()
+            .any(|(_, text)| text.contains("MP3 uses lossy encoding"))
+    );
+    let format = h.text_rect("MP3 · lossy").center();
+    h.click(format);
+    let wav = h.text_rect("WAV · 24-bit PCM").center();
+    h.click(wav);
+    let d = tempfile::tempdir().unwrap();
+    let output = d.path().join("Lossless edit.wav");
+    let (sender, receiver) = mpsc::channel();
+    h.app.save_picker = Some(receiver);
+    sender.send(Some(output.clone())).unwrap();
+    h.frame(vec![]);
+    let save = h.text_rect("Save").center();
+    h.click(save);
+    while !h.app.host.snapshot().documents.is_empty() {
+        assert!(std::time::Instant::now() < deadline, "{:?}", h.app.error);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    let reader = hound::WavReader::open(output).unwrap();
+    assert_eq!(reader.spec().bits_per_sample, 24);
+    assert_eq!(reader.duration(), 8192);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+fn quit_during_an_edit_waits_and_prompts_instead_of_saving_without_consent() {
+    let (mut h, d) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    let original = std::fs::read(d.path().join("Gestures.wav")).unwrap();
+    h.app
+        .dispatch(Command::ApplyEffect(wavebob::effects::ApplyEffectParams {
+            target: wavebob::effects::EditTarget::Whole {
+                document_id: doc.id,
+                revision_id: doc.revision_id,
+            },
+            effect: wavebob::effects::Effect::Reverse,
+        }));
+    h.app.begin_close(saving::CloseTarget::Quit);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !h.app.active_document().unwrap().dirty {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    h.frame(vec![]);
+    assert!(!h.app.host.presentation().close_requested);
+    assert!(h.app.close_flow.is_some());
+    assert!(
+        !h.app
+            .host
+            .snapshot()
+            .jobs
+            .iter()
+            .any(|job| job.kind == "Save")
+    );
+    assert_eq!(
+        std::fs::read(d.path().join("Gestures.wav")).unwrap(),
+        original
+    );
+    assert!(
+        text_shapes(&h.frame(vec![]))
+            .iter()
+            .any(|(_, text)| text == "Unsaved audio")
+    );
+}
+
 fn canvas_rects(h: &mut Harness) -> [Rect; 2] {
     fn collect(shape: &egui::Shape, out: &mut Vec<Rect>) {
         match shape {

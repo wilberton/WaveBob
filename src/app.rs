@@ -5,6 +5,7 @@ use wavebob::{CommandResult, documents::*};
 mod browser;
 mod editing;
 mod effects;
+mod saving;
 mod visuals;
 mod waveform;
 use visuals::{Icon, icon_button};
@@ -31,6 +32,11 @@ pub struct WaveBob {
     observed_effect: Option<wavebob::effects::Effect>,
     gain_db: f64,
     reverb: effects::ReverbControls,
+    output_dialog: Option<saving::OutputDialog>,
+    save_picker: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
+    close_flow: Option<saving::CloseFlow>,
+    close_save_job: Option<String>,
+    os_close_pending: bool,
 }
 
 #[derive(Default)]
@@ -260,6 +266,9 @@ impl WaveBob {
             || ctx.text_edit_focused()
             || self.dialog.is_some()
             || self.open_requested
+            || self.output_dialog.is_some()
+            || self.save_picker.is_some()
+            || self.close_flow.is_some()
             || !ctx.input(|input| input.focused)
             || ctx.memory(|memory| memory.top_modal_layer().is_some())
             || egui::Popup::is_any_open(ctx)
@@ -332,6 +341,32 @@ impl WaveBob {
         if let Some(action) = edit_key {
             self.edit_action(action);
         }
+        let save_action = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Key {
+                    key: egui::Key::S,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                    ..
+                } if (modifiers.command || modifiers.ctrl || modifiers.mac_cmd)
+                    && !modifiers.alt =>
+                {
+                    Some(if modifiers.shift {
+                        saving::FileAction::SaveAs
+                    } else {
+                        saving::FileAction::Save
+                    })
+                }
+                _ => None,
+            })
+        });
+        if let Some(action) = save_action
+            && self.host.presentation().mode == ViewMode::Waveform
+            && let Some(doc) = self.active_document()
+        {
+            self.file_action(action, &doc.id, false);
+        }
         if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) {
             self.edit_action(editing::Action::Delete);
         }
@@ -372,6 +407,7 @@ impl WaveBob {
     // Independent of eframe::Frame for real egui pointer/key/focus tests.
     fn draw(&mut self, ui: &mut egui::Ui) {
         self.host.begin_frame(ui.ctx());
+        self.handle_native_close(ui.ctx());
         if !self.host.frozen() && !ui.ctx().input(|input| input.focused) {
             self.cancel_gesture();
         }
@@ -408,6 +444,13 @@ impl WaveBob {
                             self.open_requested = true;
                             ui.close();
                         }
+                        ui.separator();
+                        for (action,label) in [(saving::FileAction::Save,"Save    Ctrl/Cmd+S"),(saving::FileAction::SaveAs,"Save As…"),(saving::FileAction::Export,"Export audio…")]{
+                            let enabled=self.active_document().is_some_and(|doc|doc.frames>0)&&mode==ViewMode::Waveform;
+                            let response=ui.add_enabled(enabled,egui::Button::new(label));help.observe(&response,if enabled{"Save the document or export its selection with explicit format and overwrite settings."}else{"Open a nonempty waveform document to enable sample output."});
+                            if response.clicked()&&let Some(doc)=self.active_document(){self.file_action(action,&doc.id,false);ui.close();}
+                        }
+                        ui.separator();let response=ui.button("Quit");help.observe(&response,"Quit WaveBob after saving or explicitly discarding dirty work.");if response.clicked(){self.begin_close(saving::CloseTarget::Quit);ui.close();}
                     });
                     help.observe(
                         &menu.response,
@@ -610,13 +653,31 @@ impl WaveBob {
                     self.multitrack_view(ui, &mut help);
                 }
             });
+        self.file_modals(ui.ctx(), &mut help);
         self.status(ui, status, mode, &help, error.as_deref());
+        self.host.set_ui_resources(
+            [
+                self.output_dialog.is_some().then_some("output-dialog"),
+                self.save_picker.is_some().then_some("native-output-picker"),
+                self.dialog.is_some().then_some("native-open-dialog"),
+                self.close_flow.is_some().then_some("dirty-close-dialog"),
+            ]
+            .into_iter()
+            .flatten()
+            .map(str::to_owned)
+            .collect(),
+        );
         self.host.end_frame(ui.ctx());
+        if self.host.ready_to_close() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         let transport = self.host.transport();
         if transport.requested.playing
             || transport.applied.playing
             || transport.pending
             || transport.output.status == wavebob::transport::OutputStatus::Initializing
+            || self.close_flow.is_some()
+            || self.host.presentation().close_requested
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(16));
@@ -714,10 +775,7 @@ impl WaveBob {
                         let close = ui.add_sized([22.0, 22.0], egui::Button::new("×").frame(false));
                         help.observe(&close, "Close this audio document.");
                         if close.clicked() {
-                            self.dispatch(Command::CloseDocument(CloseParams {
-                                document_id: document.id.clone(),
-                                discard_changes: false,
-                            }));
+                            self.begin_close(saving::CloseTarget::Document(document.id.clone()));
                         }
                     });
                 }
@@ -946,6 +1004,19 @@ fn panel_frame() -> egui::Frame {
         .stroke(Stroke::new(1.0, BORDER))
 }
 fn encoding_label(document: &DocumentInfo) -> String {
+    if let Some(format) = &document.save_format {
+        use wavebob::exports::{ExportFormat, WavEncoding};
+        return match format {
+            ExportFormat::Mp3 { bitrate_kbps } => format!("MP3 CBR {bitrate_kbps}"),
+            ExportFormat::Wav { encoding } => match encoding {
+                WavEncoding::Pcm16 => "16-bit",
+                WavEncoding::Pcm24 => "24-bit",
+                WavEncoding::Pcm32 => "32-bit",
+                WavEncoding::Float32 => "float 32-bit",
+            }
+            .into(),
+        };
+    }
     if document.encoding == "mp3" {
         format!(
             "MP3 {}",

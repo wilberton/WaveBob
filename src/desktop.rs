@@ -50,6 +50,7 @@ pub struct DesktopHost {
     drawn_presentation_revision: u64,
     preferences: Option<crate::preferences::Preferences>,
     transient_resources: Vec<String>,
+    ui_resources: Vec<String>,
 }
 
 impl Default for DesktopHost {
@@ -70,6 +71,7 @@ impl Default for DesktopHost {
             drawn_presentation_revision: 0,
             preferences: None,
             transient_resources: Vec::new(),
+            ui_resources: Vec::new(),
         }
     }
 }
@@ -145,6 +147,15 @@ impl DesktopHost {
     pub fn set_transient_resources(&mut self, resources: Vec<String>) {
         self.transient_resources = resources;
     }
+    pub fn set_ui_resources(&mut self, resources: Vec<String>) {
+        self.ui_resources = resources;
+    }
+    pub fn ready_to_close(&self) -> bool {
+        self.presentation.close_requested
+            && self.server.as_ref().is_none_or(ipc::Server::is_idle)
+            && self.queue.is_empty()
+            && self.pending.is_none()
+    }
 
     pub fn frozen(&self) -> bool {
         self.pending
@@ -153,12 +164,25 @@ impl DesktopHost {
     }
 
     pub fn execute(&mut self, request: Request) -> Response {
+        if self.presentation.close_requested
+            && request.command.mutates()
+            && !matches!(&request.command, Command::RequestQuit(_))
+        {
+            return self.session.failure(
+                Some(request.id),
+                CommandError::new(
+                    ErrorCode::Busy,
+                    "This GUI is closing and no longer accepts mutations",
+                ),
+            );
+        }
         if let Err(error) = self.session.validate(&request) {
             return self.session.failure(Some(request.id), error);
         }
         let expected = match &request.command {
             Command::SetMode(params) => params.expected_presentation_revision,
             Command::SetEffect(params) => params.expected_presentation_revision,
+            Command::RequestQuit(params) => params.expected_presentation_revision,
             Command::SetViewport(params) => params.expected_presentation_revision,
             Command::SetLayout(params) => params.expected_presentation_revision,
             Command::TogglePanels(params) => params.expected_presentation_revision,
@@ -177,6 +201,13 @@ impl DesktopHost {
                 self.session.audio_output_configured(),
             )),
             Command::GetPresentation(_) => CommandResult::Presentation(self.presentation()),
+            Command::RequestQuit(params) => {
+                if let Err(error) = self.session.check_quit(params.discard_changes) {
+                    return self.session.failure(Some(request.id), error);
+                }
+                presentation.close_requested = true;
+                return self.commit_presentation(request.id, presentation, false);
+            }
             Command::SetEffect(params) => {
                 if let Err(error) = params.effect.validate() {
                     return self.session.failure(Some(request.id), error);
@@ -261,6 +292,7 @@ impl DesktopHost {
             || next.mode != self.presentation.mode
             || next.viewports != self.presentation.viewports
             || next.effect != self.presentation.effect
+            || next.close_requested != self.presentation.close_requested
         {
             let Some(revision) = self.presentation.revision.checked_add(1) else {
                 return self.session.failure(
@@ -456,6 +488,7 @@ impl DesktopHost {
                 .filter(|job| job.status == crate::documents::JobStatus::Running)
                 .map(|job| format!("job:{}", job.id))
                 .chain(self.transient_resources.iter().cloned())
+                .chain(self.ui_resources.iter().cloned())
                 .chain(self.session.transport_snapshot().pending.then(|| {
                     format!(
                         "transport-handoff:{}",

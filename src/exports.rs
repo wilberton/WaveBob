@@ -72,6 +72,21 @@ impl Default for ExportFormat {
 fn default_bitrate() -> u16 {
     192
 }
+pub fn converted_frames(
+    frames: u64,
+    source_rate: u32,
+    output_rate: u32,
+) -> Result<u64, CommandError> {
+    if source_rate == 0 || output_rate == 0 {
+        Err(invalid("Audio conversion requires nonzero sample rates"))
+    } else {
+        Ok(audio::resample::frame_count(
+            frames,
+            source_rate,
+            output_rate,
+        ))
+    }
+}
 impl ExportFormat {
     pub fn extension(&self) -> &'static str {
         match self {

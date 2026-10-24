@@ -96,6 +96,42 @@ fn finish_sync_job(call: &mut impl FnMut(&str, Value) -> Value, started: Value) 
         std::thread::sleep(Duration::from_millis(2));
     }
 }
+fn finish_sync_output(call: &mut impl FnMut(&str, Value) -> Value, started: Value) -> Value {
+    assert_eq!(started["status"], "ok", "{started}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let job = call("jobs.get", json!({"job_id":started["result"]["id"]}));
+        if job["result"]["status"] != "running" {
+            assert_eq!(job["result"]["status"], "succeeded", "{job}");
+            return job["result"]["output"]["details"].clone();
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+async fn finish_mcp_output(
+    client: &RunningService<RoleClient, ClientConfig>,
+    started: Value,
+) -> Value {
+    assert_eq!(started["status"], "ok", "{started}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let job = response(
+            &call(
+                client,
+                "jobs.get",
+                json!({"params":{"job_id":started["result"]["id"]}}),
+            )
+            .await,
+        );
+        if job["result"]["status"] != "running" {
+            assert_eq!(job["result"]["status"], "succeeded", "{job}");
+            return job["result"]["output"]["details"].clone();
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+}
 async fn finish_mcp_job(
     client: &RunningService<RoleClient, ClientConfig>,
     started: Value,
@@ -283,12 +319,14 @@ async fn target_guards_and_invalid_envelopes_leave_the_session_usable() {
 }
 
 #[tokio::test]
-async fn mp3_import_and_effects_match_direct_headless_and_mcp_adapters() {
+async fn mp3_import_effects_and_output_match_direct_headless_and_mcp_adapters() {
     use std::io::{BufRead, BufReader, Write};
     use std::process::Stdio;
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3");
     let mut session = Session::default();
+    let outputs = tempfile::tempdir().unwrap();
+    let export_params = |doc: &Value, path: &std::path::Path| json!({"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"path":path,"format":{"kind":"wav","encoding":"float32"}});
     let mut direct = |name: &str, params: Value| {
         serde_json::to_value(protocol::dispatch_line(
             &mut session,
@@ -311,7 +349,12 @@ async fn mp3_import_and_effects_match_direct_headless_and_mcp_adapters() {
         "effects.apply",
         json!({"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}),
     );
-    finish_sync_job(&mut direct, started);
+    let edited = finish_sync_job(&mut direct, started);
+    let started = direct(
+        "audio.export",
+        export_params(&edited, &outputs.path().join("direct.wav")),
+    );
+    finish_sync_output(&mut direct, started);
     let expected = direct(
         "documents.samples",
         json!({"document_id":doc["id"],"start_frame":500,"frames":4096}),
@@ -351,7 +394,16 @@ async fn mp3_import_and_effects_match_direct_headless_and_mcp_adapters() {
         "effects.apply",
         json!({"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}),
     );
-    finish_sync_job(&mut wire, started);
+    let edited = finish_sync_job(&mut wire, started);
+    let started = wire(
+        "audio.export",
+        export_params(&edited, &outputs.path().join("headless.wav")),
+    );
+    finish_sync_output(&mut wire, started);
+    assert_eq!(
+        std::fs::read(outputs.path().join("direct.wav")).unwrap(),
+        std::fs::read(outputs.path().join("headless.wav")).unwrap()
+    );
     assert_same_audio(
         &wire(
             "documents.samples",
@@ -382,7 +434,20 @@ async fn mp3_import_and_effects_match_direct_headless_and_mcp_adapters() {
         tokio::time::sleep(Duration::from_millis(2)).await;
     };
     let started=response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}})).await);
-    finish_mcp_job(&client, started).await;
+    let edited = finish_mcp_job(&client, started).await;
+    let started = response(
+        &call(
+            &client,
+            "audio.export",
+            json!({"params":export_params(&edited,&outputs.path().join("mcp.wav"))}),
+        )
+        .await,
+    );
+    finish_mcp_output(&client, started).await;
+    assert_eq!(
+        std::fs::read(outputs.path().join("direct.wav")).unwrap(),
+        std::fs::read(outputs.path().join("mcp.wav")).unwrap()
+    );
     assert_same_audio(
         &response(
             &call(
@@ -1038,6 +1103,103 @@ mod live {
                 .unwrap(),
             )
             .unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn mp3_export_save_reimport_capture_and_guarded_quit_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let mut gui = Gui::start(runtime.path(), "save-check");
+        let client = named_client(runtime.path(), "save-check").await;
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3");
+        let started =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let doc = finish_mcp_job(&client, started).await;
+        let effect = json!({"kind":"gain","db":-3.0});
+        response(
+            &call(
+                &client,
+                "presentation.effects.set",
+                json!({"params":{"effect":effect}}),
+            )
+            .await,
+        );
+        let started=response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":effect}})).await);
+        let edited = finish_mcp_job(&client, started).await;
+        let refusal = response(
+            &call(
+                &client,
+                "presentation.quit",
+                json!({"params":{"discard_changes":false}}),
+            )
+            .await,
+        );
+        assert_eq!(refusal["error"]["code"], "dirty_document");
+        let output = runtime.path().join("Edited texture.mp3");
+        let started=response(&call(&client,"documents.save",json!({"params":{"document_id":doc["id"],"revision_id":edited["revision_id"],"path":output,"format":{"kind":"mp3","bitrate_kbps":192},"sample_rate":48000}})).await);
+        let summary = finish_mcp_output(&client, started).await;
+        assert_eq!(summary["sample_rate"], 48000);
+        assert_eq!(summary["lossy"], true);
+        let saved = response(
+            &call(
+                &client,
+                "documents.get",
+                json!({"params":{"document_id":doc["id"]}}),
+            )
+            .await,
+        );
+        assert_eq!(saved["result"]["dirty"], false);
+        assert_eq!(saved["result"]["revision_id"], edited["revision_id"]);
+        let started =
+            response(&call(&client, "documents.open", json!({"params":{"path":output}})).await);
+        let reimported = finish_mcp_job(&client, started).await;
+        assert_eq!(reimported["frames"], summary["frames"]);
+        assert_eq!(reimported["sample_rate"], 48000);
+        let capture = call(
+            &client,
+            "capture.png",
+            json!({"params":{"path":runtime.path().join("saved-mp3.png")}}),
+        )
+        .await;
+        let metadata = response(&capture);
+        assert_eq!(metadata["status"], "ok");
+        let image = capture
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("saved-mp3.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(Path::new(&directory).join("native-save.json"),serde_json::to_vec_pretty(&json!({"export":summary,"saved_document":saved,"reimported":reimported,"capture":metadata})).unwrap()).unwrap();
+        }
+        let quit = response(
+            &call(
+                &client,
+                "presentation.quit",
+                json!({"params":{"discard_changes":false}}),
+            )
+            .await,
+        );
+        assert_eq!(quit["status"], "ok");
+        assert_eq!(quit["result"]["close_requested"], true);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while gui.0.try_wait().unwrap().is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "GUI did not close after delivering the quit response"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
         client.cancel().await.unwrap();
     }
@@ -1820,7 +1982,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 50);
+        assert_eq!(tools.len(), 51);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

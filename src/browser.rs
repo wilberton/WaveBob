@@ -229,6 +229,7 @@ impl Browser {
                 overloaded_samples: audio.overloaded_samples,
                 saved_revision_id: None,
                 save_format: None,
+                save_sample_rate: None,
             },
             audio,
         ))

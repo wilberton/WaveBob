@@ -132,7 +132,7 @@ fn live_gui_attachment_capture_and_revision_fences() {
     let other = Client::attach(runtime.path(), second_id).unwrap();
     assert!(Client::attach(runtime.path(), "not-a-session-id").is_err());
     let catalogue = success(request(&client, "session.capabilities", json!({})));
-    assert_eq!(catalogue["commands"].as_array().unwrap().len(), 50);
+    assert_eq!(catalogue["commands"].as_array().unwrap().len(), 51);
     assert!(
         catalogue["capabilities"]
             .as_array()
