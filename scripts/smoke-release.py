@@ -2,7 +2,9 @@
 import argparse
 import hashlib
 import json
+import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import time
@@ -13,6 +15,7 @@ parser.add_argument("archive", type=pathlib.Path)
 parser.add_argument("--out", required=True, type=pathlib.Path)
 parser.add_argument("--gui", action="store_true")
 parser.add_argument("--audition", action="store_true")
+parser.add_argument("--gl-runtime", type=pathlib.Path, help="Use an installed Windows Mesa runtime for CI GUI checks")
 args = parser.parse_args()
 assert not args.out.exists(), "Use a fresh smoke-test directory"
 args.out.mkdir(parents=True)
@@ -43,12 +46,27 @@ for name, info in manifest["binaries"].items():
     assert digest(path) == info["sha256"], name
 
 
+graphics_runtime = None
+if args.gl_runtime:
+    assert args.gui and os.name == "nt", "An external GL runtime is only supported for Windows GUI checks"
+    runtime = args.gl_runtime.resolve()
+    graphics_runtime = {"directory": str(runtime), "driver": "llvmpipe", "dll_sha256": {}}
+    for name in ["opengl32.dll", "libgallium_wgl.dll"]:
+        library = runtime / name
+        assert library.is_file(), f"Incomplete Mesa runtime: {library}"
+        shutil.copyfile(library, kit / "bin" / name)
+        graphics_runtime["dll_sha256"][name] = digest(library)
+    os.environ["PATH"] = str(runtime) + os.pathsep + os.environ.get("PATH", "")
+    os.environ["GALLIUM_DRIVER"] = "llvmpipe"
+    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "true"
+
+
 def executable(name):
     return str(kit / "bin" / (name + suffix))
 
 
 def command(*items, **kwargs):
-    result = subprocess.run(items, capture_output=True, text=True,
+    result = subprocess.run(items, capture_output=True, text=True, encoding="utf-8",
                             creationflags=creationflags, timeout=240, **kwargs)
     if result.returncode:
         print(result.stderr[-16000:], file=sys.stderr)
@@ -110,7 +128,7 @@ if args.gui:
         if gui.returncode:
             print((args.out / "gui-native.log").read_text(encoding="utf-8", errors="replace")[-16000:])
 record = {"archive": str(args.archive.resolve()), "archive_sha256": archive_hash,
-          "build_commit": manifest["commit"], "host": manifest["host"], "results": results}
+          "build_commit": manifest["commit"], "host": manifest["host"], "graphics_runtime": graphics_runtime, "results": results}
 (args.out / "smoke-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 print(json.dumps({"host": manifest["host"], "gui_checked": args.gui,
                   "result": str(args.out / "smoke-result.json")}, indent=2))
