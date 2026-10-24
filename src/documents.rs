@@ -402,6 +402,7 @@ impl Editor {
                 }
             }
             Command::ReadMixSamples(params) => self.mix_samples(params),
+            Command::ExportMix(params) => self.export_mix(params),
             Command::TrimClip(params) => self.trim_clip(params),
             Command::ApplyClipEffect(params) => self.process_clip(params),
             Command::ReadClipSamples(params) => self.clip_samples(params),

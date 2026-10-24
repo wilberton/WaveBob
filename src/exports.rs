@@ -162,6 +162,21 @@ pub struct SaveParams {
     #[serde(default)]
     pub overload: OverloadPolicy,
 }
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MixExportParams {
+    pub revision_id: String,
+    pub start_frame: u64,
+    pub end_frame: u64,
+    pub path: String,
+    #[serde(default)]
+    pub format: ExportFormat,
+    pub sample_rate: Option<u32>,
+    #[serde(default)]
+    pub overwrite: bool,
+    #[serde(default)]
+    pub overload: OverloadPolicy,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct ExportSummary {
     pub path: String,
@@ -171,6 +186,10 @@ pub struct ExportSummary {
     pub sample_rate: u32,
     pub channels: u16,
     pub source_frames: u64,
+    #[serde(default)]
+    pub source_start_frame: u64,
+    #[serde(default)]
+    pub source_end_frame: u64,
     pub frames: u64,
     pub lossy: bool,
     pub resampled: bool,
@@ -213,6 +232,7 @@ pub(crate) struct OutputRequest {
     pub overwrite: bool,
     pub overload: OverloadPolicy,
     pub protected_source: Option<String>,
+    pub protected_sources: Vec<String>,
 }
 pub(crate) fn prepare(
     audio: &Audio,
@@ -226,7 +246,62 @@ pub(crate) fn prepare(
             "Output requires a nonempty interval within the audio",
         ));
     }
-    request.format.output_rate(audio.rate, Some(request.rate))?;
+    let rate = request.rate;
+    prepare_from(
+        audio.rate,
+        audio.channels,
+        range.clone(),
+        request,
+        cancel,
+        progress,
+        |progress| audio::resample::convert(audio, &range, rate, audio.channels, cancel, progress),
+    )
+}
+pub(crate) fn prepare_mix(
+    graph: &audio::mix::Graph,
+    range: FrameRange,
+    request: OutputRequest,
+    cancel: &AtomicBool,
+    progress: impl Fn(u8),
+) -> Result<PreparedOutput, CommandError> {
+    if range.start >= range.end || range.end > crate::arrangement::MAX_TIMELINE_FRAME {
+        return Err(invalid(
+            "Mix export requires a nonempty project-frame interval within 24 hours",
+        ));
+    }
+    let rate = request.rate;
+    prepare_from(
+        graph.rate,
+        2,
+        range.clone(),
+        request,
+        cancel,
+        progress,
+        |progress| {
+            audio::resample::convert_from(
+                range.end - range.start,
+                graph.rate,
+                rate,
+                2,
+                cancel,
+                progress,
+                |frame| graph.frame(range.start + frame).map(|value| value as f64),
+            )
+        },
+    )
+}
+fn prepare_from(
+    source_rate: u32,
+    channels: u16,
+    range: FrameRange,
+    request: OutputRequest,
+    cancel: &AtomicBool,
+    progress: impl Fn(u8),
+    render: impl FnOnce(&dyn Fn(u8)) -> Result<Vec<f32>, CommandError>,
+) -> Result<PreparedOutput, CommandError> {
+    request
+        .format
+        .output_rate(source_rate, Some(request.rate))?;
     let path = Path::new(&request.path);
     if path.file_name().is_none()
         || !path
@@ -261,15 +336,19 @@ pub(crate) fn prepare(
             "Export cannot replace the document's backing file; use whole-document Save with explicit settings",
         ));
     }
+    if let Ok(destination) = destination.canonicalize()
+        && request.protected_sources.iter().any(|source| {
+            Path::new(source)
+                .canonicalize()
+                .is_ok_and(|source| source == destination)
+        })
+    {
+        return Err(invalid(
+            "Export cannot replace an open document's backing file",
+        ));
+    }
     check_cancel(cancel)?;
-    let mut samples = audio::resample::convert(
-        audio,
-        &range,
-        request.rate,
-        audio.channels,
-        cancel,
-        |value| progress(value / 2),
-    )?;
+    let mut samples = render(&|value| progress(value / 2))?;
     let overloaded_samples = samples.iter().filter(|sample| sample.abs() > 1.0).count() as u64;
     let preserves_overloads = matches!(
         request.format,
@@ -293,7 +372,7 @@ pub(crate) fn prepare(
             *sample = sample.clamp(-1.0, 1.0);
         }
     }
-    let frames = samples.len() as u64 / audio.channels as u64;
+    let frames = samples.len() as u64 / channels as u64;
     let mut temporary = tempfile::NamedTempFile::new_in(&parent).map_err(io_error)?;
     let (encoder_delay, encoder_padding) = match request.format {
         ExportFormat::Wav { encoding } => {
@@ -301,7 +380,7 @@ pub(crate) fn prepare(
                 temporary.as_file_mut(),
                 &samples,
                 request.rate,
-                audio.channels,
+                channels,
                 encoding,
                 cancel,
                 |value| progress(40 + value / 2),
@@ -313,7 +392,7 @@ pub(crate) fn prepare(
                 temporary.as_file_mut(),
                 &samples,
                 request.rate,
-                audio.channels,
+                channels,
                 bitrate_kbps,
                 cancel,
                 |value| progress(40 + value / 2),
@@ -338,12 +417,14 @@ pub(crate) fn prepare(
             source_revision_id: request.revision_id,
             lossy: request.format.lossy(),
             format: request.format,
-            source_rate: audio.rate,
+            source_rate,
             sample_rate: request.rate,
-            channels: audio.channels,
+            channels,
             source_frames: range.end - range.start,
+            source_start_frame: range.start,
+            source_end_frame: range.end,
             frames,
-            resampled: audio.rate != request.rate,
+            resampled: source_rate != request.rate,
             overloaded_samples,
             clipped_samples,
             bytes,

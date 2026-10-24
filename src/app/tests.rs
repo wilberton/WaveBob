@@ -1206,6 +1206,87 @@ fn gui_export_dialog_shows_lossy_settings_and_submits_mp3_through_the_core() {
     assert!(!h.app.active_document().unwrap().dirty);
     assert!(!h.app.host.history().can_undo);
 }
+
+#[test]
+fn multitrack_export_dialog_submits_selected_stereo_mp3_without_a_device() {
+    use wavebob::arrangement::*;
+    let (mut h, d) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    h.app.dispatch(Command::AddTrack(AddTrackParams::default()));
+    let track = h.app.host.snapshot().arrangement.tracks[0].id.clone();
+    for position in [0, 2400] {
+        h.app.dispatch(Command::InsertClip(InsertClipParams {
+            track_id: track.clone(),
+            document_id: doc.id.clone(),
+            revision_id: doc.revision_id.clone(),
+            source_start: 0,
+            source_end: doc.frames,
+            position,
+        }));
+    }
+    h.app.set_mode(ViewMode::Multitrack);
+    h.app.navigate_arrangement(
+        1200,
+        Some(FrameRange {
+            start: 1200,
+            end: 6000,
+        }),
+        Vec::new(),
+    );
+    h.frame(vec![]);
+    let file = h.text_rect("File").center();
+    h.click(file);
+    let export = h.text_rect("Export audio…").center();
+    h.click(export);
+    assert!(h.app.output_dialog.is_some());
+    assert!(
+        text_shapes(&h.frame(vec![]))
+            .iter()
+            .any(|(_, text)| text == "Export arrangement")
+    );
+    let format = h.text_rect("WAV · 24-bit PCM").center();
+    h.click(format);
+    let mp3 = h.text_rect("MP3 · lossy").center();
+    h.click(mp3);
+    let path = d.path().join("UI mix.mp3");
+    let (sender, receiver) = mpsc::channel();
+    h.app.save_picker = Some(receiver);
+    sender.send(Some(path.clone())).unwrap();
+    h.frame(vec![]);
+    let export = h.text_rect("Export").center();
+    h.click(export);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h
+        .app
+        .host
+        .snapshot()
+        .jobs
+        .iter()
+        .any(|job| job.status == JobStatus::Running)
+    {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    assert!(path.exists(), "{:?}", h.app.error);
+    let summary = h
+        .app
+        .host
+        .snapshot()
+        .jobs
+        .into_iter()
+        .find(|job| job.kind == "Export mix")
+        .unwrap();
+    assert_eq!(summary.status, JobStatus::Succeeded);
+    let Some(JobOutput::AudioExport(output)) = summary.output else {
+        panic!("mix output summary")
+    };
+    assert_eq!(output.source_start_frame, 1200);
+    assert_eq!(output.source_end_frame, 6000);
+    assert_eq!(output.frames, 4800);
+    assert_eq!(output.channels, 2);
+    assert!(h.app.host.snapshot().arrangement.dirty);
+}
 #[test]
 fn native_quit_intent_requires_a_dirty_work_choice_and_discard_is_explicit() {
     let (mut h, _d) = dirty_audio_harness();

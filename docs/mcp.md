@@ -58,7 +58,7 @@ session identity, revision, result or error. Schema references remain resolvable
 after nesting. No separate editing implementation or handwritten command list
 exists in the adapter.
 
-An independent session advertises fifty-six tools: session/loop commands, document
+An independent session advertises fifty-seven tools: session/loop commands, document
 open/get/activate/close, cursor/selection, exact samples/waveforms, jobs and
 device-free transport inspection/seek/rewind, filesystem browsing and preview
 stop/volume controls, effects, structural edits/clipboard, audio export/document save
@@ -67,6 +67,8 @@ clip trimming, instance effects and processed clip samples.
 Mix inspection/preparation, bounded offline audio, master gain and seek/rewind
 are also available without a device. See [mix commands](mixing.md).
 `arrangement.crossfades` exposes the derived overlap regions and containment roles.
+`mix.export` writes an immutable arrangement range as WAV or MP3 without a device;
+see [mix output](mix-export.md).
 See [arrangement commands](arrangement.md).
 See [browser and audition commands](browser.md) and [editing](editing.md).
 An attached GUI also advertises
@@ -74,7 +76,7 @@ An attached GUI also advertises
 `presentation.panels.toggle`, `presentation.barrier` and `capture.png`, plus four
 device playback commands, audition start, `presentation.effects.set` and guarded
 `presentation.quit` and `presentation.timeline.set`, plus mix play/play-pause
-(seventy-three tools in total). Command descriptors explicitly
+(seventy-four tools in total). Command descriptors explicitly
 report `requires_audio_output`. See [playback](transport.md) and
 [panel commands and preferences](layout.md).
 Use `tools/list` for tool discovery or call `session.capabilities` for the full

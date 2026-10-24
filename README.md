@@ -17,6 +17,8 @@ processes one selected clip without altering its source or other instances.
 track/master gain, mute/solo and mono pan/stereo balance, with output metering.
 Two overlapping clips on a track now derive [automatic equal-power crossfades](docs/crossfades.md),
 including contained clips; third simultaneous overlaps are rejected.
+[WAV/MP3 arrangement export](docs/mix-export.md) renders an immutable mix snapshot,
+including selected time ranges, processing, track controls and silent gaps.
 Native sample playback supports pause, seek and selection/whole-sample loops;
 see [transport controls and commands](docs/transport.md).
 Precise cursor/selection controls and overview/mouse/trackpad zoom and pan are
@@ -95,7 +97,7 @@ waveform and arrangement captures at wide, compact, narrow and 150% scale.
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
-current execution status. Tickets 01–17 and 22 are complete; derive subsequent
+current execution status. Tickets 01–18 and 22 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 

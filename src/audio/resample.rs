@@ -29,7 +29,41 @@ pub(crate) fn convert(
         ));
     }
     let input = range.end - range.start;
-    let frames = frame_count(input, source.rate, rate) as u128;
+    convert_from(
+        input,
+        source.rate,
+        rate,
+        channels,
+        cancel,
+        progress,
+        |frame| {
+            let index = (range.start + frame) as usize * source.channels as usize;
+            let left = source.samples[index] as f64;
+            let right = source.samples[index + usize::from(source.channels == 2)] as f64;
+            if channels == 1 && source.channels == 2 {
+                [(left + right) * 0.5; 2]
+            } else {
+                [left, right]
+            }
+        },
+    )
+}
+pub(crate) fn convert_from(
+    input: u64,
+    source_rate: u32,
+    rate: u32,
+    channels: u16,
+    cancel: &AtomicBool,
+    progress: impl Fn(u8),
+    read_frame: impl Fn(u64) -> [f64; 2],
+) -> Result<Vec<f32>, CommandError> {
+    if source_rate == 0 || rate == 0 || !(1..=2).contains(&channels) || input > i64::MAX as u64 {
+        return Err(CommandError::new(
+            ErrorCode::InvalidParams,
+            "Invalid audio conversion format or duration",
+        ));
+    }
+    let frames = frame_count(input, source_rate, rate) as u128;
     if frames * channels as u128 > MAX_VALUES as u128 {
         return Err(CommandError::new(
             ErrorCode::ResourceLimit,
@@ -45,16 +79,7 @@ pub(crate) fn convert(
                 "Unable to allocate converted audio",
             )
         })?;
-    let read = |frame: i64, channel: usize| {
-        let frame = range.start + frame.clamp(0, input.saturating_sub(1) as i64) as u64;
-        let index = frame as usize * source.channels as usize;
-        if source.channels == 2 && channels == 1 {
-            (source.samples[index] as f64 + source.samples[index + 1] as f64) * 0.5
-        } else {
-            source.samples[index + channel.min(source.channels as usize - 1)] as f64
-        }
-    };
-    let cutoff = (rate as f64 / source.rate as f64).min(1.0) * 0.94;
+    let cutoff = (rate as f64 / source_rate as f64).min(1.0) * 0.94;
     for output in 0..frames as u64 {
         if output.is_multiple_of(1024) {
             if cancel.load(Ordering::Acquire) {
@@ -65,13 +90,13 @@ pub(crate) fn convert(
             }
             progress((output as u128 * 80 / frames.max(1)) as u8);
         }
-        if rate == source.rate {
-            for channel in 0..channels as usize {
-                result.push(read(output as i64, channel) as f32);
+        if rate == source_rate {
+            for value in read_frame(output).into_iter().take(channels as usize) {
+                result.push(value as f32);
             }
             continue;
         }
-        let position = output as f64 * source.rate as f64 / rate as f64;
+        let position = output as f64 * source_rate as f64 / rate as f64;
         let center = position.floor() as i64;
         let mut values = [0.0_f64; 2];
         let mut weight_sum = 0.0;
@@ -87,8 +112,9 @@ pub(crate) fn convert(
                 + 0.08 * (std::f64::consts::TAU * distance / 32.0).cos();
             let weight = sinc * window * cutoff;
             weight_sum += weight;
+            let samples = read_frame(frame.clamp(0, input.saturating_sub(1) as i64) as u64);
             for (channel, value) in values.iter_mut().enumerate().take(channels as usize) {
-                *value += read(frame, channel) * weight;
+                *value += samples[channel] * weight;
             }
         }
         for value in values.into_iter().take(channels as usize) {

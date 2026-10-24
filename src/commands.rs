@@ -94,6 +94,7 @@ macro_rules! command_registry {
 }
 
 command_registry! {
+    ExportMix(crate::exports::MixExportParams) => ("mix.export", "Render an explicit immutable arrangement interval to WAV or MP3 as a cancellable atomic job.", true, false, false, JobInfo),
     GetCrossfades(EmptyParams) => ("arrangement.crossfades", "Inspect derived equal-power overlap regions and containment roles.", false, false, false, crate::arrangement::CrossfadeData),
     GetMix(EmptyParams) => ("mix.get", "Inspect prepared mix revision, effective tracks and output levels.", false, false, false, crate::mixing::MixState),
     PrepareMix(crate::mixing::PrepareMixParams) => ("mix.prepare", "Prepare immutable clip resampling and a project-clock mixer without an audio device.", true, false, false, JobInfo),

@@ -460,9 +460,11 @@ impl WaveBob {
                         }
                         ui.separator();
                         for (action,label) in [(saving::FileAction::Save,"Save    Ctrl/Cmd+S"),(saving::FileAction::SaveAs,"Save As…"),(saving::FileAction::Export,"Export audio…")]{
-                            let enabled=self.active_document().is_some_and(|doc|doc.frames>0)&&mode==ViewMode::Waveform;
-                            let response=ui.add_enabled(enabled,egui::Button::new(label));help.observe(&response,if enabled{"Save the document or export its selection with explicit format and overwrite settings."}else{"Open a nonempty waveform document to enable sample output."});
-                            if response.clicked()&&let Some(doc)=self.active_document(){self.file_action(action,&doc.id,false);ui.close();}
+                            let mix=mode==ViewMode::Multitrack&&matches!(action,saving::FileAction::Export);
+                            let arrangement=self.host.snapshot().arrangement;
+                            let enabled=if mix {arrangement.frames()>0||arrangement.selection.is_some()}else{self.active_document().is_some_and(|doc|doc.frames>0)&&mode==ViewMode::Waveform};
+                            let response=ui.add_enabled(enabled,egui::Button::new(label));help.observe(&response,if mix{"Export the selected timeline interval or complete arrangement as WAV or MP3."}else if enabled{"Save the document or export its selection with explicit format and overwrite settings."}else{"Open a nonempty waveform document to enable sample output."});
+                            if response.clicked(){if mix{self.begin_mix_export();}else if let Some(doc)=self.active_document(){self.file_action(action,&doc.id,false);}ui.close();}
                         }
                         ui.separator();let response=ui.button("Quit");help.observe(&response,"Quit WaveBob after saving or explicitly discarding dirty work.");if response.clicked(){self.begin_close(saving::CloseTarget::Quit);ui.close();}
                     });

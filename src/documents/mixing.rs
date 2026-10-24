@@ -71,16 +71,7 @@ impl Editor {
                 "Two audio jobs are already running",
             ));
         }
-        let inputs = self
-            .arrangement
-            .tracks
-            .iter()
-            .flat_map(|track| &track.clips)
-            .map(|clip| {
-                self.clip_audio(&clip.id)
-                    .map(|(clip, audio, range)| mix::Input { clip, audio, range })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let inputs = self.mix_inputs()?;
         let extra = inputs
             .iter()
             .filter(|input| input.audio.rate != self.arrangement.sample_rate)
@@ -134,6 +125,120 @@ impl Editor {
             }
         });
         Ok(job)
+    }
+    fn mix_inputs(&self) -> Result<Vec<mix::Input>, CommandError> {
+        self.arrangement
+            .tracks
+            .iter()
+            .flat_map(|track| &track.clips)
+            .map(|clip| {
+                self.clip_audio(&clip.id)
+                    .map(|(clip, audio, range)| mix::Input { clip, audio, range })
+            })
+            .collect()
+    }
+    pub(super) fn export_mix(
+        &mut self,
+        params: crate::exports::MixExportParams,
+    ) -> Result<CommandResult, CommandError> {
+        if params.revision_id != self.arrangement.revision_id {
+            return Err(CommandError::new(
+                ErrorCode::StaleRevision,
+                "Arrangement changed",
+            ));
+        }
+        if params.start_frame >= params.end_frame
+            || params.end_frame > crate::arrangement::MAX_TIMELINE_FRAME
+        {
+            return Err(invalid_range());
+        }
+        let rate = params
+            .format
+            .output_rate(self.arrangement.sample_rate, params.sample_rate)?;
+        let output_frames = audio::resample::frame_count(
+            params.end_frame - params.start_frame,
+            self.arrangement.sample_rate,
+            rate,
+        );
+        if output_frames > 128 * 1024 * 1024 / 2 {
+            return Err(CommandError::new(
+                ErrorCode::ResourceLimit,
+                "Mix output exceeds the current 512 MiB PCM limit; export a shorter range",
+            ));
+        }
+        let prepared = self.prepared_mix();
+        let inputs = if prepared.is_some() {
+            Vec::new()
+        } else {
+            self.mix_inputs()?
+        };
+        let extra = inputs
+            .iter()
+            .filter(|input| input.audio.rate != self.arrangement.sample_rate)
+            .map(|input| {
+                input
+                    .clip
+                    .frames
+                    .saturating_mul(input.audio.channels as u64)
+                    .saturating_mul(4)
+            })
+            .sum::<u64>();
+        if self
+            .retained_bytes()
+            .saturating_add(extra)
+            .saturating_add(output_frames * 8)
+            > 2 * 1024 * 1024 * 1024
+        {
+            return Err(CommandError::new(
+                ErrorCode::ResourceLimit,
+                "Mix export would exceed the retained audio limit",
+            ));
+        }
+        let arrangement = self.arrangement.clone();
+        let previous = self.mix.clone();
+        let overwrite = params.overwrite;
+        let path = params.path.clone();
+        let identity = super::saving::OutputIdentity {
+            document_id: arrangement.id.clone(),
+            base_revision: arrangement.revision_id.clone(),
+            save: false,
+            allow_stale: true,
+        };
+        let range = FrameRange {
+            start: params.start_frame,
+            end: params.end_frame,
+        };
+        let request = crate::exports::OutputRequest {
+            path: params.path,
+            revision_id: params.revision_id,
+            format: params.format,
+            rate,
+            overwrite,
+            overload: params.overload,
+            protected_source: None,
+            protected_sources: self.documents.iter().map(|doc| doc.path.clone()).collect(),
+        };
+        self.launch_output(
+            identity,
+            path,
+            "Export mix",
+            overwrite,
+            move |cancel, progress| {
+                let graph = match prepared {
+                    Some(graph) => graph,
+                    None => Arc::new(mix::prepare(
+                        &arrangement,
+                        inputs,
+                        previous,
+                        cancel,
+                        |value| progress(value / 5),
+                    )?),
+                };
+                crate::exports::prepare_mix(&graph, range, request, cancel, |value| {
+                    progress(20 + (value as u16 * 3 / 4) as u8)
+                })
+            },
+        )
     }
     pub(super) fn finish_mix(&mut self, id: String, result: Result<mix::Graph, CommandError>) {
         if self

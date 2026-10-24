@@ -7,9 +7,16 @@ pub(super) struct PendingOutput {
     document_id: String,
     base_revision: String,
     save: bool,
+    allow_stale: bool,
     pub committing: bool,
     error: Option<CommandError>,
     pub worker: Option<std::thread::JoinHandle<()>>,
+}
+pub(super) struct OutputIdentity {
+    pub document_id: String,
+    pub base_revision: String,
+    pub save: bool,
+    pub allow_stale: bool,
 }
 impl Editor {
     pub(super) fn export_audio(
@@ -64,7 +71,47 @@ impl Editor {
         }
         let range = params.target.range(audio.frames())?;
         let rate = params.format.output_rate(audio.rate, params.sample_rate)?;
-        if params.path.trim().is_empty() {
+        let identity = OutputIdentity {
+            document_id: document.id,
+            base_revision: document.revision_id.clone(),
+            save,
+            allow_stale: false,
+        };
+        let path = params.path.clone();
+        let overwrite = params.overwrite;
+        let request = OutputRequest {
+            path: params.path,
+            revision_id: document.revision_id,
+            format: params.format,
+            rate,
+            overwrite,
+            overload: params.overload,
+            protected_source: (!save).then_some(document.path),
+            protected_sources: if save {
+                Vec::new()
+            } else {
+                self.documents.iter().map(|doc| doc.path.clone()).collect()
+            },
+        };
+        self.launch_output(
+            identity,
+            path,
+            if save { "Save" } else { "Export" },
+            overwrite,
+            move |cancel, progress| exports::prepare(&audio, range, request, cancel, progress),
+        )
+    }
+    pub(super) fn launch_output(
+        &mut self,
+        identity: OutputIdentity,
+        path: String,
+        label: &str,
+        overwrite: bool,
+        prepare: impl FnOnce(&AtomicBool, &dyn Fn(u8)) -> Result<exports::PreparedOutput, CommandError>
+        + Send
+        + 'static,
+    ) -> Result<CommandResult, CommandError> {
+        if path.trim().is_empty() {
             return Err(CommandError::new(
                 ErrorCode::InvalidParams,
                 "Choose an output path",
@@ -76,10 +123,9 @@ impl Editor {
             .filter(|(job, _)| job.status == JobStatus::Running)
             .count()
             >= 2
-            || self
-                .pending_outputs
-                .values()
-                .any(|pending| pending.document_id == document.id && pending.save && save)
+            || self.pending_outputs.values().any(|pending| {
+                pending.document_id == identity.document_id && pending.save && identity.save
+            })
         {
             return Err(CommandError::new(
                 ErrorCode::Busy,
@@ -90,8 +136,8 @@ impl Editor {
         let cancel = Arc::new(AtomicBool::new(false));
         let job = JobInfo {
             id: id.clone(),
-            kind: if save { "Save" } else { "Export" }.into(),
-            path: params.path.clone(),
+            kind: label.into(),
+            path,
             status: JobStatus::Running,
             progress: 0,
             result: None,
@@ -101,24 +147,16 @@ impl Editor {
         self.pending_outputs.insert(
             id.clone(),
             PendingOutput {
-                document_id: document.id,
-                base_revision: document.revision_id.clone(),
-                save,
+                document_id: identity.document_id,
+                base_revision: identity.base_revision,
+                save: identity.save,
+                allow_stale: identity.allow_stale,
                 committing: false,
                 error: None,
                 worker: None,
             },
         );
         self.jobs.insert(id.clone(), (job.clone(), cancel.clone()));
-        let request = OutputRequest {
-            path: params.path,
-            revision_id: document.revision_id,
-            format: params.format,
-            rate,
-            overwrite: params.overwrite,
-            overload: params.overload,
-            protected_source: (!save).then_some(document.path),
-        };
         let sender = self.sender.clone();
         let wake = self.wake.clone();
         let worker_id = id.clone();
@@ -129,7 +167,7 @@ impl Editor {
                     wake();
                 }
             };
-            let result = exports::prepare(&audio, range, request, &cancel, |progress| {
+            let result = prepare(&cancel, &|progress| {
                 if last.replace(progress) != progress {
                     let _ = sender.send(Event::Progress(id.clone(), progress));
                     notify();
@@ -149,7 +187,7 @@ impl Editor {
                         "Output publication was cancelled or became stale",
                     ));
                 }
-                prepared.publish(params.overwrite)
+                prepared.publish(overwrite)
             });
             let _ = sender.send(Event::OutputFinished(id, result));
             notify();
@@ -175,9 +213,10 @@ impl Editor {
                 ErrorCode::Cancelled,
                 "Output cancelled before publication",
             ))
-        } else if !self
-            .document(&pending.document_id)
-            .is_ok_and(|document| document.revision_id == pending.base_revision)
+        } else if !pending.allow_stale
+            && !self
+                .document(&pending.document_id)
+                .is_ok_and(|document| document.revision_id == pending.base_revision)
         {
             Err(CommandError::new(
                 ErrorCode::StaleRevision,

@@ -183,7 +183,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 56);
+        assert_eq!(tools.len(), 57);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -326,7 +326,7 @@ async fn target_guards_and_invalid_envelopes_leave_the_session_usable() {
 }
 
 #[tokio::test]
-async fn mp3_import_effects_and_output_match_direct_headless_and_mcp_adapters() {
+async fn mp3_edit_and_mix_output_match_direct_headless_and_mcp_adapters() {
     use std::io::{BufRead, BufReader, Write};
     use std::process::Stdio;
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -367,11 +367,37 @@ async fn mp3_import_effects_and_output_match_direct_headless_and_mcp_adapters() 
         json!({"document_id":doc["id"],"start_frame":500,"frames":4096}),
     )["result"]["channels"]
         .clone();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_wavebob-headless"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
+    fn clip_params(doc: &Value, track: &Value, position: u64) -> Value {
+        json!({"track_id":track,"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":500,"source_end":4596,"position":position})
+    }
+    fn mix_params(revision: &Value, path: &std::path::Path) -> Value {
+        json!({"revision_id":revision,"start_frame":0,"end_frame":7200,"path":path,"format":{"kind":"wav","encoding":"float32"}})
+    }
+    fn arrange_output(
+        call: &mut impl FnMut(&str, Value) -> Value,
+        doc: &Value,
+        path: &std::path::Path,
+    ) {
+        let arr = call("tracks.add", json!({"name":"Adapter mix"}));
+        let track = &arr["result"]["tracks"][0]["id"];
+        let mut revision = Value::Null;
+        for position in [0, 2200] {
+            let arr = call("clips.insert", clip_params(doc, track, position));
+            assert_eq!(arr["status"], "ok", "{arr}");
+            revision = arr["result"]["revision_id"].clone();
+        }
+        let started = call("mix.export", mix_params(&revision, path));
+        finish_sync_output(call, started);
+    }
+    arrange_output(&mut direct, &edited, &outputs.path().join("direct-mix.wav"));
+    let mut process = Command::new(env!("CARGO_BIN_EXE_wavebob-headless"));
+    process.stdin(Stdio::piped()).stdout(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        process.creation_flags(0x08000000);
+    }
+    let mut child = process.spawn().unwrap();
     let mut input = child.stdin.take().unwrap();
     let mut output = BufReader::new(child.stdout.take().unwrap());
     let mut wire = |name: &str, params: Value| {
@@ -417,6 +443,11 @@ async fn mp3_import_effects_and_output_match_direct_headless_and_mcp_adapters() 
             json!({"document_id":doc["id"],"start_frame":500,"frames":4096}),
         )["result"]["channels"],
         &expected,
+    );
+    arrange_output(&mut wire, &edited, &outputs.path().join("headless-mix.wav"));
+    assert_eq!(
+        std::fs::read(outputs.path().join("direct-mix.wav")).unwrap(),
+        std::fs::read(outputs.path().join("headless-mix.wav")).unwrap()
     );
     drop(wire);
     drop(input);
@@ -465,6 +496,41 @@ async fn mp3_import_effects_and_output_match_direct_headless_and_mcp_adapters() 
             .await,
         )["result"]["channels"],
         &expected,
+    );
+    let arr = response(
+        &call(
+            &client,
+            "tracks.add",
+            json!({"params":{"name":"Adapter mix"}}),
+        )
+        .await,
+    );
+    let track = &arr["result"]["tracks"][0]["id"];
+    let mut revision = Value::Null;
+    for position in [0, 2200] {
+        let arr = response(
+            &call(
+                &client,
+                "clips.insert",
+                json!({"params":clip_params(&edited,track,position)}),
+            )
+            .await,
+        );
+        assert_eq!(arr["status"], "ok", "{arr}");
+        revision = arr["result"]["revision_id"].clone();
+    }
+    let started = response(
+        &call(
+            &client,
+            "mix.export",
+            json!({"params":mix_params(&revision,&outputs.path().join("mcp-mix.wav"))}),
+        )
+        .await,
+    );
+    finish_mcp_output(&client, started).await;
+    assert_eq!(
+        std::fs::read(outputs.path().join("direct-mix.wav")).unwrap(),
+        std::fs::read(outputs.path().join("mcp-mix.wav")).unwrap()
     );
     client.cancel().await.unwrap();
 }
@@ -563,6 +629,159 @@ mod live {
             ],
         )
         .await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn wav_and_mp3_mix_export_reimport_and_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "mix-output-check");
+        let client = named_client(runtime.path(), "mix-output-check").await;
+        let path = runtime.path().join("Ambience.wav");
+        let mut writer = hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: 24000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for frame in 0..24000 {
+            writer
+                .write_sample(
+                    ((frame as f64 / 24000.0 * 220.0 * std::f64::consts::TAU).sin() * 5000.0)
+                        as i16,
+                )
+                .unwrap();
+        }
+        writer.finalize().unwrap();
+        let opened =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let wav = finish_mcp_job(&client, opened).await;
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3");
+        let opened =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let mp3 = finish_mcp_job(&client, opened).await;
+        let arr = response(
+            &call(
+                &client,
+                "tracks.add",
+                json!({"params":{"name":"Texture mix"}}),
+            )
+            .await,
+        );
+        let track = arr["result"]["tracks"][0]["id"].clone();
+        for (doc, position) in [(&wav, 0), (&mp3, 9600)] {
+            assert_eq!(response(&call(&client,"clips.insert",json!({"params":{"track_id":track,"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":0,"source_end":doc["frames"],"position":position}})).await)["status"],"ok");
+        }
+        let arr = response(&call(&client, "arrangement.get", json!({})).await)["result"].clone();
+        let clip = &arr["tracks"][0]["clips"][1];
+        let edited=response(&call(&client,"clips.effects.apply",json!({"params":{"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"reverb","room_size":0.4,"decay_seconds":0.7,"wet":0.2}}})).await);
+        finish_mcp_output(&client, edited).await;
+        response(
+            &call(
+                &client,
+                "tracks.update",
+                json!({"params":{"track_id":track,"gain_db":-3.0,"pan":0.25}}),
+            )
+            .await,
+        );
+        let arr = response(&call(&client, "arrangement.get", json!({})).await)["result"].clone();
+        let prepared = response(
+            &call(
+                &client,
+                "mix.prepare",
+                json!({"params":{"revision_id":arr["revision_id"]}}),
+            )
+            .await,
+        );
+        finish_mcp_output(&client, prepared).await;
+        let raw_path = runtime.path().join("Rendered mix.wav");
+        let mp3_path = runtime.path().join("Rendered mix.mp3");
+        let mut summaries = Vec::new();
+        for (path, format, rate) in [
+            (&raw_path, json!({"kind":"wav","encoding":"float32"}), 48000),
+            (&mp3_path, json!({"kind":"mp3","bitrate_kbps":192}), 44100),
+        ] {
+            let started=response(&call(&client,"mix.export",json!({"params":{"revision_id":arr["revision_id"],"start_frame":4800,"end_frame":33600,"path":path,"format":format,"sample_rate":rate}})).await);
+            summaries.push(finish_mcp_output(&client, started).await);
+        }
+        let oracle=response(&call(&client,"mix.samples",json!({"params":{"revision_id":arr["revision_id"],"start_frame":4800,"frames":128}})).await)["result"]["channels"].clone();
+        let decoded = hound::WavReader::open(raw_path)
+            .unwrap()
+            .samples::<f32>()
+            .take(256)
+            .map(|value| value.unwrap() as f64)
+            .collect::<Vec<_>>();
+        for frame in 0..128 {
+            for channel in 0..2 {
+                assert_eq!(
+                    decoded[frame * 2 + channel],
+                    oracle[channel][frame].as_f64().unwrap()
+                );
+            }
+        }
+        let opened = response(
+            &call(
+                &client,
+                "documents.open",
+                json!({"params":{"path":mp3_path}}),
+            )
+            .await,
+        );
+        let reimported = finish_mcp_job(&client, opened).await;
+        assert_eq!(reimported["frames"], 26460);
+        assert_eq!(reimported["sample_rate"], 44100);
+        assert_eq!(reimported["channels"], 2);
+        assert_eq!(
+            response(&call(&client, "arrangement.get", json!({})).await)["result"]["dirty"],
+            true
+        );
+        response(
+            &call(
+                &client,
+                "presentation.set_mode",
+                json!({"params":{"mode":"waveform"}}),
+            )
+            .await,
+        );
+        response(&call(&client,"documents.selection.set",json!({"params":{"document_id":reimported["id"],"start_frame":2646,"end_frame":13230}})).await);
+        let captured = call(
+            &client,
+            "capture.png",
+            json!({"params":{"path":runtime.path().join("mix-reimport.png")}}),
+        )
+        .await;
+        let metadata = response(&captured);
+        assert_eq!(metadata["status"], "ok");
+        let image = captured
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("mix-reimport.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                Path::new(&directory).join("mix-reimport.json"),
+                serde_json::to_vec_pretty(
+                    &json!({"exports":summaries,"reimported":reimported,"capture":metadata}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
     }
 
     #[tokio::test]
@@ -2613,7 +2832,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 73);
+        assert_eq!(tools.len(), 74);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

@@ -1,0 +1,92 @@
+[
+  {
+    "bitrate_kbps": 128,
+    "correlation": 0.9999999957673472,
+    "frames": 64000,
+    "max_error": 0.005091845989227295,
+    "rmse": 0.002219671503000996,
+    "sample_rate": 32000,
+    "summary": {
+      "bytes": 33408,
+      "channels": 2,
+      "clipped_samples": 0,
+      "encoder_delay": 576,
+      "encoder_padding": 1088,
+      "format": {
+        "bitrate_kbps": 128,
+        "kind": "mp3"
+      },
+      "frames": 64000,
+      "lossy": true,
+      "overloaded_samples": 0,
+      "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpcuVcjB\\Mix 32000.mp3",
+      "resampled": true,
+      "sample_rate": 32000,
+      "source_end_frame": 120000,
+      "source_frames": 96000,
+      "source_rate": 48000,
+      "source_revision_id": "3356a47b-26ff-4c91-97b6-614bccaa0ced",
+      "source_start_frame": 24000
+    }
+  },
+  {
+    "bitrate_kbps": 192,
+    "correlation": 0.9999999954149982,
+    "frames": 88200,
+    "max_error": 0.0030630603432655334,
+    "rmse": 0.00133407855053846,
+    "sample_rate": 44100,
+    "summary": {
+      "bytes": 49527,
+      "channels": 2,
+      "clipped_samples": 0,
+      "encoder_delay": 576,
+      "encoder_padding": 1080,
+      "format": {
+        "bitrate_kbps": 192,
+        "kind": "mp3"
+      },
+      "frames": 88200,
+      "lossy": true,
+      "overloaded_samples": 0,
+      "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpcuVcjB\\Mix 44100.mp3",
+      "resampled": true,
+      "sample_rate": 44100,
+      "source_end_frame": 120000,
+      "source_frames": 96000,
+      "source_rate": 48000,
+      "source_revision_id": "3356a47b-26ff-4c91-97b6-614bccaa0ced",
+      "source_start_frame": 24000
+    }
+  },
+  {
+    "bitrate_kbps": 320,
+    "correlation": 0.9999999940456746,
+    "frames": 96000,
+    "max_error": 0.00002109025081153959,
+    "rmse": 5.169191218765727e-6,
+    "sample_rate": 48000,
+    "summary": {
+      "bytes": 82560,
+      "channels": 2,
+      "clipped_samples": 0,
+      "encoder_delay": 576,
+      "encoder_padding": 1344,
+      "format": {
+        "bitrate_kbps": 320,
+        "kind": "mp3"
+      },
+      "frames": 96000,
+      "lossy": true,
+      "overloaded_samples": 0,
+      "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpcuVcjB\\Mix 48000.mp3",
+      "resampled": false,
+      "sample_rate": 48000,
+      "source_end_frame": 120000,
+      "source_frames": 96000,
+      "source_rate": 48000,
+      "source_revision_id": "3356a47b-26ff-4c91-97b6-614bccaa0ced",
+      "source_start_frame": 24000
+    }
+  }
+]

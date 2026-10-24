@@ -20,6 +20,7 @@ pub(super) struct CloseFlow {
     save_authorized: bool,
 }
 pub(super) struct OutputDialog {
+    mix: bool,
     document: DocumentInfo,
     save: bool,
     selection: bool,
@@ -30,8 +31,69 @@ pub(super) struct OutputDialog {
     overload: OverloadPolicy,
     close_after: bool,
 }
+impl OutputDialog {
+    fn range(&self) -> FrameRange {
+        if self.selection {
+            self.document.selection.clone().unwrap()
+        } else {
+            FrameRange {
+                start: 0,
+                end: self.document.frames,
+            }
+        }
+    }
+}
 
 impl WaveBob {
+    pub(super) fn begin_mix_export(&mut self) {
+        if self.host.frozen() {
+            return;
+        }
+        let arrangement = self.host.snapshot().arrangement;
+        if arrangement.frames() == 0 && arrangement.selection.is_none() {
+            self.error =
+                Some("Arrange audio or select a nonempty timeline interval before export.".into());
+            return;
+        }
+        self.error = None;
+        let path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("Arrangement.wav")
+            .to_string_lossy()
+            .into_owned();
+        let frames = arrangement.frames();
+        let document = DocumentInfo {
+            id: arrangement.id,
+            revision_id: arrangement.revision_id,
+            path: path.clone(),
+            name: "Arrangement".into(),
+            sample_rate: arrangement.sample_rate,
+            channels: 2,
+            frames,
+            encoding: "float32".into(),
+            source_details: Default::default(),
+            dirty: arrangement.dirty,
+            cursor: arrangement.cursor,
+            selection: arrangement.selection,
+            peak_level: 0.0,
+            overloaded_samples: 0,
+            saved_revision_id: None,
+            save_format: None,
+            save_sample_rate: None,
+        };
+        self.output_dialog = Some(OutputDialog {
+            mix: true,
+            selection: document.selection.is_some(),
+            document,
+            save: false,
+            path,
+            format: ExportFormat::default(),
+            rate: None,
+            overwrite: false,
+            overload: OverloadPolicy::Reject,
+            close_after: false,
+        });
+    }
     pub(super) fn file_action(&mut self, action: FileAction, id: &str, close_after: bool) {
         if self.host.frozen() {
             return;
@@ -101,6 +163,7 @@ impl WaveBob {
             None
         };
         self.output_dialog = Some(OutputDialog {
+            mix: false,
             selection: !save && document.selection.is_some(),
             document,
             save,
@@ -234,8 +297,8 @@ impl WaveBob {
         let mut dismiss = false;
         let mut submit = false;
         let modal=egui::Modal::new(egui::Id::unique("audio-output-dialog")).show(ctx,|ui|{
-            ui.set_max_width(480.0);ui.heading(if dialog.save{"Save audio"}else{"Export audio"});ui.label(&dialog.document.name);
-            if !dialog.save&&dialog.document.selection.is_some(){let response=ui.checkbox(&mut dialog.selection,"Export selection only");help.observe(&response,"Export the selected interval; turn off to export the whole sample.");}
+            ui.set_max_width(480.0);ui.heading(if dialog.mix{"Export arrangement"}else if dialog.save{"Save audio"}else{"Export audio"});ui.label(&dialog.document.name);
+            if !dialog.save&&dialog.document.selection.is_some(){let response=ui.checkbox(&mut dialog.selection,"Export selection only");help.observe(&response,if dialog.mix{"Export the timeline selection; turn off for the complete arrangement."}else{"Export the selected interval; turn off to export the whole sample."});}
             let response=ui.add(egui::TextEdit::singleline(&mut dialog.path).desired_width(430.0).hint_text("Output path"));help.observe(&response,"Output path. The extension must match the selected format.");
             let response=ui.button("Browse…");help.observe(&response,"Choose a filename using the native save dialog.");if response.clicked(){self.choose_output_path(ctx,&dialog);}
             let old_format=dialog.format.clone();
@@ -246,7 +309,8 @@ impl WaveBob {
             if old_format.extension()!=dialog.format.extension(){let mut path=std::path::PathBuf::from(&dialog.path);path.set_extension(dialog.format.extension());dialog.path=path.to_string_lossy().into_owned();}
             if let ExportFormat::Mp3{bitrate_kbps}=&mut dialog.format{ui.horizontal(|ui|{ui.label("CBR bitrate");let response=egui::ComboBox::from_id_salt("mp3-bitrate").selected_text(format!("{bitrate_kbps} kbit/s")).show_ui(ui,|ui|{for bitrate in [128,192,256,320]{let response=ui.selectable_value(bitrate_kbps,bitrate,format!("{bitrate} kbit/s"));help.observe(&response,"Choose the MP3 CBR bitrate in kilobits per second.");}});help.observe(&response.response,"MP3 CBR bitrate. The working audio revision remains lossless.");});ui.label(RichText::new("MP3 uses lossy encoding. Working audio is retained.").small().color(Color32::from_rgb(226,178,89)));}
             ui.horizontal(|ui|{ui.label("Sample rate");let response=egui::ComboBox::from_id_salt("output-rate").selected_text(dialog.rate.map_or("Automatic".into(),|rate|format!("{rate} Hz"))).show_ui(ui,|ui|{let response=ui.selectable_value(&mut dialog.rate,None,"Automatic");help.observe(&response,"Preserve a supported source rate; MP3 otherwise uses 44.1 kHz.");for rate in [32000,44100,48000]{let response=ui.selectable_value(&mut dialog.rate,Some(rate),format!("{rate} Hz"));help.observe(&response,"Convert the output to this sample rate using the shared resampler.");}});help.observe(&response.response,"Automatic preserves supported source rates; MP3 otherwise defaults to 44.1 kHz. Conversion uses the shared resampler.");});
-            let range=if dialog.selection{dialog.document.selection.clone().unwrap()}else{FrameRange{start:0,end:dialog.document.frames}};
+            let range=dialog.range();
+            if dialog.mix {ui.label(format!("Project frames {}–{} · {:.6}–{:.6} s",range.start,range.end,range.start as f64/dialog.document.sample_rate as f64,range.end as f64/dialog.document.sample_rate as f64));ui.label(RichText::new("Exact range · no tail beyond clip/range boundaries").small().color(MUTED));}
             if let Ok(rate)=dialog.format.output_rate(dialog.document.sample_rate,dialog.rate){let frames=wavebob::exports::converted_frames(range.end-range.start,dialog.document.sample_rate,rate).unwrap_or(0);ui.label(format!("{} frames · {} Hz · {}{}",frames,rate,if dialog.document.channels==1{"Mono"}else{"Stereo"},if rate!=dialog.document.sample_rate{" · resampled"}else{""}));}
             let response=ui.checkbox(&mut dialog.overwrite,"Allow replacing an existing file");help.observe(&response,"Existing output is replaced atomically only with this explicit intent.");
             let mut clip=dialog.overload==OverloadPolicy::Clip;let response=ui.checkbox(&mut clip,"Clip overloads for integer WAV / MP3");help.observe(&response,"Off rejects overloads. Float WAV preserves finite headroom. Clipped sample counts are reported in the job result.");dialog.overload=if clip{OverloadPolicy::Clip}else{OverloadPolicy::Reject};
@@ -257,7 +321,19 @@ impl WaveBob {
             dismiss = true;
         }
         if submit && !self.host.frozen() {
-            let command = if dialog.save {
+            let command = if dialog.mix {
+                let range = dialog.range();
+                Command::ExportMix(wavebob::exports::MixExportParams {
+                    revision_id: dialog.document.revision_id.clone(),
+                    start_frame: range.start,
+                    end_frame: range.end,
+                    path: dialog.path.clone(),
+                    format: dialog.format.clone(),
+                    sample_rate: dialog.rate,
+                    overwrite: dialog.overwrite,
+                    overload: dialog.overload,
+                })
+            } else if dialog.save {
                 Command::SaveDocument(SaveParams {
                     document_id: dialog.document.id.clone(),
                     revision_id: dialog.document.revision_id.clone(),
