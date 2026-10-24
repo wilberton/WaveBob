@@ -60,3 +60,14 @@ a main-window screenshot is insufficient for a separate window.
 
 No effect DSP is enabled by the state foundation. Passing its state tests does not
 establish algorithm fidelity, real-time safety or native editor acceptance.
+
+## Native reference arithmetic
+
+The Delay verification adds `wavebob-effect-reference` as a dev-only local crate
+under `tools/effect-reference/reference-lib`. It compiles unchanged pinned source
+and a minimal test trait, without an engine/plugin SDK. Native comparison avoids
+mistaking platform sinf ulps for a different modulated fractional-tap algorithm.
+The source hash is asserted and rustfmt skips the pinned module. Production
+builds never depend on this crate. Source-complete kits include it for test
+reproduction; capture generators and per-effect manifests remain separate from
+application dependencies.

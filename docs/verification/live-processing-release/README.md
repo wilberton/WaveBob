@@ -190,7 +190,7 @@ retain the local red/green result. Native recapture will verify the final result
 [Release run 40125142114](https://github.com/wilberton/WaveBob/actions/runs/40125142114)
 and [Rust run 40125120331](https://github.com/wilberton/WaveBob/actions/runs/40125120331)
 pass all three native targets. All eight shipped GUI executions pass (default
-and 1.25× on Windows/macOS and both Linux backends), alongside direct/headless/MCP
+and 1.25Ã— on Windows/macOS and both Linux backends), alongside direct/headless/MCP
 WAV/MP3 parity, portable reopen and clean quit. Actual default/raised-scale
 captures were inspected: the late OS-light-theme event no longer changes the
 approved dark palette; white text, controls, selection handles, crossfade and

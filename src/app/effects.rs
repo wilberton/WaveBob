@@ -1,7 +1,13 @@
 use super::*;
 use wavebob::processing::{self, Action, Owner, ParameterValue};
 fn default_geometry(kind: processing::EffectKind) -> WindowGeometry {
-    if kind == processing::EffectKind::ParametricEq {
+    if kind == processing::EffectKind::Delay {
+        WindowGeometry {
+            width: 1450.0,
+            height: 730.0,
+            ..Default::default()
+        }
+    } else if kind == processing::EffectKind::ParametricEq {
         WindowGeometry {
             width: 1120.0,
             height: 700.0,
@@ -402,6 +408,10 @@ impl WaveBob {
             self.soft_clipper_controls(ui, window, instance, native);
             return;
         }
+        if instance.kind == processing::EffectKind::Delay {
+            self.delay_controls(ui, window, instance, native);
+            return;
+        }
         if instance.kind == processing::EffectKind::Reverb {
             self.reverb_controls(ui, window, instance, native);
             return;
@@ -738,4 +748,43 @@ pub(super) fn stack_rows(
         *drag = None;
     }
     events
+}
+
+impl WaveBob {
+    pub(super) fn effect_tempo_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        native: &mut NativeEditor,
+        sync: bool,
+    ) {
+        if sync {
+            let bpm = self.host.snapshot().arrangement.effect_tempo;
+            ui.horizontal(|ui| {
+                ui.label("Project effect tempo");
+                let text = native.tempo_text.get_or_insert_with(|| bpm.to_string());
+                let response = ui.add(egui::TextEdit::singleline(text).desired_width(64.0));
+                ui.label("BPM");
+                let apply = ui.button("Set tempo");
+                if apply.clicked()
+                    || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                {
+                    if let Ok(bpm) = text.parse::<f64>() {
+                        self.dispatch(Command::SetEffectTempo(wavebob::processing::TempoParams {
+                            bpm,
+                        }));
+                    } else {
+                        self.error = Some("Effect tempo must be 20..400 BPM".into());
+                    }
+                    native.tempo_text = None;
+                }
+                ui.label(
+                    RichText::new(format!("Current: {bpm} BPM · shared by all synced effects"))
+                        .small()
+                        .color(MUTED),
+                );
+            });
+        } else {
+            native.tempo_text = None;
+        }
+    }
 }

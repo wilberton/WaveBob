@@ -146,6 +146,7 @@ pub fn catalogue() -> Vec<EffectInfo> {
     EffectKind::ALL
         .into_iter()
         .map(|kind| match kind {
+            EffectKind::Delay => crate::dsp::delay::info(),
             EffectKind::FastDistortion => crate::dsp::fast_distortion::info(),
             EffectKind::ParametricEq => crate::dsp::parametric_eq::info(),
             EffectKind::SoftClipper => crate::dsp::soft_clipper::info(),

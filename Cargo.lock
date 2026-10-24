@@ -3162,7 +3162,12 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "wavebob-effect-reference",
 ]
+
+[[package]]
+name = "wavebob-effect-reference"
+version = "0.0.0"
 
 [[package]]
 name = "wayland-backend"

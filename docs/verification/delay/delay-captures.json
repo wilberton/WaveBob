@@ -1,0 +1,48 @@
+{
+  "default": {
+    "image": "delay-default.png",
+    "metadata": {
+      "editor_id": "5225a6385e010dc5a21cc656b3f2178a287bca6424f33c6e2f5a43aeebe234ee",
+      "frame_number": 7,
+      "height": 730,
+      "instance_id": "9f410658-d9f8-498c-bda3-3d9e708c10b8",
+      "mode": "waveform",
+      "owner": {
+        "id": "d724dec6-aa6e-4685-b81c-d15a47d0bfa7",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "preview_id": null,
+      "processing_identity": "d03723db6a85c349e3072d734acb1934db67f5fcbd6cf8b688e428240b059e6c",
+      "processing_revision": "6c18389d-8926-4843-affc-b5b52f8d4149",
+      "rendered_revision": 2,
+      "scale": 1.0,
+      "session_id": "406d76cf-74bb-4470-9f04-91ec15a6c460",
+      "width": 1450
+    }
+  },
+  "ping_pong": {
+    "image": "delay-ping-pong.png",
+    "metadata": {
+      "editor_id": "5225a6385e010dc5a21cc656b3f2178a287bca6424f33c6e2f5a43aeebe234ee",
+      "frame_number": 59,
+      "height": 730,
+      "instance_id": "9f410658-d9f8-498c-bda3-3d9e708c10b8",
+      "mode": "waveform",
+      "owner": {
+        "id": "d724dec6-aa6e-4685-b81c-d15a47d0bfa7",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 11,
+      "preview_id": null,
+      "processing_identity": "138ac76ef7fb3b823cfe15888ea6b29ce58a086d6395eaa7e264e92d1e962e39",
+      "processing_revision": "5048b085-ae6e-417c-9fae-299d02456e81",
+      "rendered_revision": 3,
+      "scale": 1.0,
+      "session_id": "406d76cf-74bb-4470-9f04-91ec15a6c460",
+      "width": 1450
+    }
+  }
+}

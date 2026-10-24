@@ -87,14 +87,14 @@ No macOS/Linux GUI success, subjective listening, physical gesture or clean-mach
 result is claimed before execution. Earlier no-push/no-CI notes above describe
 historical checks and are superseded by this active execution note.
 
-## Completed native automated acceptance — 24 October 2026
+## Completed native automated acceptance â€” 24 October 2026
 
 The user approved automated acceptance with physical listening/device checks
 explicitly unverified. [Release run 40125142114](https://github.com/wilberton/WaveBob/actions/runs/40125142114)
 and [Rust run 40125120331](https://github.com/wilberton/WaveBob/actions/runs/40125120331)
 both pass Windows x86-64, macOS ARM64 and Linux x86-64 at source `04132f9`.
 Shipped direct/headless/MCP/GUI WAV/MP3, portable project reopen, Unicode paths,
-attachment/captures/clean quit pass. GUI captures at default and explicit 1.25×
+attachment/captures/clean quit pass. GUI captures at default and explicit 1.25Ã—
 scale cover Windows, macOS, Linux X11 and Wayland; visual inspection confirms the
 fixed dark palette and usable transport/selection/clip controls. Shared native
 Rust suites exercise scripted gestures, shortcuts and audio output comparisons.

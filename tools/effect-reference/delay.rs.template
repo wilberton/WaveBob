@@ -1,0 +1,11 @@
+pub trait Effect { fn process(&mut self,_samples:&mut[f32]);fn reset(&mut self){}fn set_tempo(&mut self,_bpm:f64){} }
+#[path="@ROOT@/crates/os-engine/src/effects/delay.rs"] mod delay;
+fn main(){
+    let args:Vec<_>=std::env::args().collect();let input=std::fs::read(&args[1]).unwrap();
+    let v:Vec<i32>=args[5].split(',').map(|v|v.parse().unwrap()).collect();
+    let settings=delay::Settings {v:v.try_into().unwrap()};
+    let mut effect=delay::Delay::with_settings(args[3].parse().unwrap(),&settings,args[4].parse().unwrap());effect.start();
+    let mut output=Vec::with_capacity(input.len());
+    for bytes in input.chunks_exact(8){let (l,r)=effect.frame(f32::from_le_bytes(bytes[..4].try_into().unwrap()),f32::from_le_bytes(bytes[4..].try_into().unwrap()));output.extend_from_slice(&l.to_le_bytes());output.extend_from_slice(&r.to_le_bytes());}
+    std::fs::write(&args[2],output).unwrap();
+}

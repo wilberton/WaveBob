@@ -3,6 +3,7 @@ use crate::{
     CommandError, ErrorCode,
     processing::{EffectKind, Instance},
 };
+pub mod delay;
 pub mod fast_distortion;
 pub mod parametric_eq;
 pub mod reverb;
@@ -13,6 +14,7 @@ pub(crate) fn prepare(
     tempo: f64,
 ) -> Result<Box<dyn crate::rendering::Processor>, CommandError> {
     match instance.kind {
+        EffectKind::Delay => Ok(Box::new(delay::Delay::new(instance, rate, tempo)?)),
         EffectKind::FastDistortion => Ok(Box::new(fast_distortion::FastDistortion::new(
             instance, rate,
         )?)),

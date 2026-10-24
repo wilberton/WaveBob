@@ -3276,3 +3276,97 @@ fn losing_window_focus_cancels_an_unfinished_envelope_gesture() {
     );
     assert_eq!(h.app.host.history().undo_count, 0);
 }
+
+#[test]
+fn synced_delay_exposes_shared_project_bpm_and_commits_exact_entry_once() {
+    use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
+    let (mut h, _directory) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::Delay,
+        },
+    );
+    let id = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .effects[0]
+        .id
+        .clone();
+    h.app.processing_action(
+        &owner,
+        Action::SetParameter {
+            effect_id: id.clone(),
+            parameter_id: "tempo_sync".into(),
+            value: ParameterValue::Boolean(true),
+        },
+    );
+    let window = EditorWindow {
+        id: "tempo-input-test".into(),
+        owner: owner.clone(),
+        instance_id: id,
+        focus_generation: 1,
+    };
+    let mut native = effects::NativeEditor::default();
+    native.tempo_text = Some("90".into());
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    let mut render = |app: &mut WaveBob, events| {
+        time += 0.05;
+        let instance = app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects[0]
+            .clone();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1450.0, 730.0))),
+                events,
+                time: Some(time),
+                ..Default::default()
+            },
+            |ui| app.native_parameters(ui, &window, &instance, &mut native),
+        );
+        output.textures_delta.clear();
+        output
+    };
+    let output = render(&mut h.app, vec![]);
+    let button = text_shapes(&output)
+        .into_iter()
+        .find(|(_, s)| s == "Set tempo")
+        .unwrap()
+        .0
+        .center();
+    let history = h.app.host.history().undo_count;
+    render(
+        &mut h.app,
+        vec![
+            egui::Event::PointerMoved(button),
+            egui::Event::PointerButton {
+                pos: button,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerButton {
+            pos: button,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(h.app.host.snapshot().arrangement.effect_tempo, 90.0);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert_eq!(h.app.host.snapshot().arrangement.effect_tempo, 120.0);
+}
