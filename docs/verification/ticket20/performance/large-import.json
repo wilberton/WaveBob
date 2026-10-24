@@ -1,0 +1,60 @@
+{
+  "background": [
+    {
+      "navigation_ms": [
+        259.7604
+      ],
+      "phase": "effect",
+      "progress": [
+        100
+      ],
+      "total_ms": 774.6623999999999
+    },
+    {
+      "navigation_ms": [
+        263.8746,
+        237.5207
+      ],
+      "phase": "export",
+      "progress": [
+        89,
+        100
+      ],
+      "total_ms": 1293.0399000000002
+    }
+  ],
+  "before": {
+    "peak_working_set_bytes": 98775040,
+    "private_bytes": 120557568,
+    "working_set_bytes": 94773248
+  },
+  "cancellation": "cancelled",
+  "channels": 2,
+  "decoded_bytes": 230400000,
+  "edited": {
+    "peak_working_set_bytes": 800174080,
+    "private_bytes": 591892480,
+    "working_set_bytes": 567853056
+  },
+  "frames": 28800000,
+  "import_ms": 1586.1608,
+  "loaded": {
+    "peak_working_set_bytes": 559788032,
+    "private_bytes": 353886208,
+    "working_set_bytes": 331051008
+  },
+  "max_navigation_ms": 262.2971,
+  "navigation_ms": [
+    262.2971,
+    237.7791,
+    237.59179999999998
+  ],
+  "progress_observed": [
+    48,
+    96,
+    100
+  ],
+  "sample_rate": 48000,
+  "source_bytes": 115200044,
+  "waveform_query_ms": 319.9386
+}

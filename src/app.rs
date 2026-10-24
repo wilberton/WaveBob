@@ -2,13 +2,21 @@ use eframe::egui::{self, Align, Color32, Pos2, Rect, RichText, Sense, Stroke, Ve
 use std::{collections::HashSet, sync::mpsc};
 use wavebob::{Command, EmptyParams, Outcome, Request, desktop::DesktopHost, presentation::*};
 use wavebob::{CommandResult, documents::*};
+#[path = "app/arranging.rs"]
 mod arranging;
+#[path = "app/browser.rs"]
 mod browser;
+#[path = "app/editing.rs"]
 mod editing;
+#[path = "app/effects.rs"]
 mod effects;
+#[path = "app/projecting.rs"]
 mod projecting;
+#[path = "app/saving.rs"]
 mod saving;
+#[path = "app/visuals.rs"]
 mod visuals;
+#[path = "app/waveform.rs"]
 mod waveform;
 use visuals::{Icon, icon_button};
 
@@ -1093,6 +1101,8 @@ fn theme(ctx: &egui::Context) {
     visuals.override_text_color = Some(Color32::from_rgb(209, 220, 235));
     visuals.selection.bg_fill = BLUE;
     visuals.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    visuals.slider_trailing_fill = true;
+    visuals.handle_shape = egui::style::HandleShape::Circle;
     visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(28, 36, 45);
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, BORDER);
     ctx.set_visuals(visuals);
@@ -1114,4 +1124,5 @@ fn theme(ctx: &egui::Context) {
 }
 
 #[cfg(test)]
+#[path = "app/tests.rs"]
 mod tests;

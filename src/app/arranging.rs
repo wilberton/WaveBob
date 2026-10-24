@@ -228,6 +228,13 @@ impl WaveBob {
                 if blank.drag_started()&&!frozen&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {self.arrangement_gesture=Some(Gesture::Select{anchor:frame_at(pos,lane,&view),revision:snapshot.revision});}
                 if blank.clicked()&&!frozen&&let Some(pos)=blank.interact_pointer_pos(){self.navigate_arrangement(frame_at(pos,lane,&view),None,Vec::new());}
                 let color=[visuals::TEAL,visuals::WAVE,visuals::GOLD][index%3];
+                if track.clips.is_empty() {
+                    let empty=lane.shrink2(Vec2::new(8.0,8.0));
+                    for (start,end) in [(empty.left_top(),empty.right_top()),(empty.right_top(),empty.right_bottom()),(empty.right_bottom(),empty.left_bottom()),(empty.left_bottom(),empty.left_top())] {
+                        painter.extend(egui::Shape::dashed_line(&[start,end],Stroke::new(1.0,BORDER),5.0,4.0));
+                    }
+                    painter.text(empty.center(),egui::Align2::CENTER_CENTER,"Drag audio here",egui::FontId::proportional(11.0),MUTED);
+                }
                 for clip in &track.clips {
                     let rect=clip_rect(clip,lane,&view);let visible=rect.intersect(lane).intersect(ui.clip_rect());
                     if !visible.is_positive(){continue;}
@@ -243,7 +250,13 @@ impl WaveBob {
                         } else {ui.ctx().request_repaint();}
                     }
                     if let Some(wave)=self.clip_waves.get(&clip.id)&&let Some(peaks)=wave.channels.first(){visuals::peaks(&painter,Rect::from_min_max(rect.min+Vec2::new(2.0,23.0),rect.max-Vec2::splat(3.0)),peaks,color);}
-                    painter.text(rect.min+Vec2::new(8.0,6.0),egui::Align2::LEFT_TOP,&clip.name,egui::FontId::proportional(11.0),Color32::WHITE);
+                    let next_start=track.clips.iter().filter(|other|other.position>clip.position).map(|other|lane.left()+(other.position as f64-view.start as f64) as f32/(view.end-view.start) as f32*lane.width()).fold(rect.right(),f32::min);
+                    let title_right=rect.right().min(next_start).min(lane.right());
+                    let title_width=(title_right-rect.left()-12.0).max(0.0);
+                    let mut title=egui::text::LayoutJob::simple_singleline(clip.name.clone(),egui::FontId::proportional(11.0),Color32::WHITE);
+                    title.wrap=egui::text::TextWrapping::truncate_at_width(title_width);
+                    let title=ui.fonts_mut(|fonts|fonts.layout_job(title));
+                    painter.with_clip_rect(rect.intersect(lane)).galley(rect.min+Vec2::new(8.0,6.0),title,Color32::WHITE);
                     let response=ui.interact(visible,ui.scope_id().with(&clip.id),Sense::click_and_drag());
                     response.context_menu(|ui| {
                         if ui.button("Remove clip").clicked()&&!frozen {self.dispatch(Command::RemoveClip(ClipParams{clip_id:clip.id.clone()}));ui.close();}

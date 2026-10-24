@@ -9,6 +9,9 @@ use rmcp::service::{RoleClient, RunningService};
 use rmcp::{ServiceExt, transport::TokioChildProcess};
 use serde_json::{Value, json};
 use wavebob::{Command as EditorCommand, EmptyParams, LoopParams, Request, Session, protocol};
+#[cfg(feature = "gui")]
+#[path = "../examples/support/workflow.rs"]
+mod workflow;
 
 async fn connect(
     version: ProtocolVersion,
@@ -601,6 +604,10 @@ mod live {
                 .arg(preferences)
                 .args(["--window-size", size])
                 .args(["--ui-scale", scale])
+                .env(
+                    "WAVEBOB_REVIEW_INPUT_FILE",
+                    runtime.join("review-input.json"),
+                )
                 .stdout(Stdio::null())
                 .stderr(fs::File::create(runtime.join(format!("{name}.log"))).unwrap());
             #[cfg(windows)]
@@ -635,6 +642,126 @@ mod live {
             ],
         )
         .await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer and WAVEBOB_GUI_TEST_BIN pointing to the gui-review example"]
+    async fn native_status_hover_and_keyboard_focus_capture() {
+        assert!(
+            std::env::var_os("WAVEBOB_GUI_TEST_BIN").is_some_and(|path| Path::new(&path)
+                .file_stem()
+                .is_some_and(|stem| stem == "gui-review")),
+            "Point WAVEBOB_GUI_TEST_BIN to the QA-only gui-review example"
+        );
+        let runtime = tempfile::tempdir().unwrap();
+        let gui = Gui::start(runtime.path(), "status-help-check");
+        let client = named_client(runtime.path(), "status-help-check").await;
+        let binary = std::env::var("WAVEBOB_MCP_TEST_BIN")
+            .unwrap_or(env!("CARGO_BIN_EXE_wavebob-mcp").into());
+        let id = response(&call(&client, "session.get", json!({})).await)["session_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        client.cancel().await.unwrap();
+        let mut adapter =
+            workflow::Adapter::connect("mcp", Some(&binary), Some(&id), runtime.path().to_str())
+                .await;
+        fs::write(
+            runtime.path().join("review-input.json"),
+            r#"{"hover":[115,18]}"#,
+        )
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let hover = runtime.path().join("status-hover.png");
+        adapter.capture(&hover).await;
+        fs::write(
+            runtime.path().join("review-input.json"),
+            r#"{"focus_tab":true}"#,
+        )
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let focus = runtime.path().join("status-focus.png");
+        adapter.capture(&focus).await;
+        for path in [&hover, &focus] {
+            let mut reader = png::Decoder::new(std::io::Cursor::new(fs::read(path).unwrap()))
+                .read_info()
+                .unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let info = reader.next_frame(&mut pixels).unwrap();
+            let count = pixels[..info.buffer_size()]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .enumerate()
+                .filter(|(index, pixel)| {
+                    index / (info.width as usize) >= (info.height - 30) as usize
+                        && index % (info.width as usize) > 300
+                        && pixel[0] > 100
+                        && pixel[1] > 110
+                        && pixel[2] > 120
+                })
+                .count();
+            assert!(
+                count > 100,
+                "Status help text must be present at the bottom of {}",
+                path.display()
+            );
+        }
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::copy(&hover, Path::new(&directory).join("status-hover.png")).unwrap();
+            fs::copy(&focus, Path::new(&directory).join("status-focus.png")).unwrap();
+        }
+        adapter.shutdown().await;
+        drop(gui);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn complete_editing_workflow_and_visual_review_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let size = std::env::var("WAVEBOB_WORKFLOW_SIZE").unwrap_or("1440x900".into());
+        let scale = std::env::var("WAVEBOB_WORKFLOW_SCALE").unwrap_or("1.0".into());
+        let _gui = Gui::with_scale(
+            runtime.path(),
+            "complete-workflow",
+            &runtime.path().join("preferences.json"),
+            &size,
+            &scale,
+        );
+        let client = named_client(runtime.path(), "complete-workflow").await;
+        let id = response(&call(&client, "session.get", json!({})).await)["session_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        client.cancel().await.unwrap();
+        let binary = std::env::var("WAVEBOB_MCP_TEST_BIN")
+            .unwrap_or(env!("CARGO_BIN_EXE_wavebob-mcp").into());
+        let mut adapter =
+            workflow::Adapter::connect("mcp", Some(&binary), Some(&id), runtime.path().to_str())
+                .await;
+        let summary = workflow::run(&mut adapter, &runtime.path().join("workflow"), true).await;
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            for name in [
+                "waveform.png",
+                "waveform-hidden.png",
+                "multitrack.png",
+                "multitrack-hidden.png",
+                "workflow.json",
+                "Mix.wav",
+                "Mix.mp3",
+                "Sample selection.mp3",
+            ] {
+                fs::copy(
+                    runtime.path().join("workflow").join(name),
+                    Path::new(&directory).join(name),
+                )
+                .unwrap();
+            }
+        }
+        assert_eq!(summary["project_reopen_without_sources"], true);
+        adapter.shutdown().await;
     }
 
     #[tokio::test]
@@ -2924,7 +3051,54 @@ mod live {
         assert_eq!(cancelled["result"]["status"], "cancelled", "{cancelled}");
         let state = response(&call(&client, "session.get", json!({})).await);
         assert_eq!(state["result"]["documents"].as_array().unwrap().len(), 1);
-        let record = json!({"frames":frames,"channels":2,"sample_rate":48000,"source_bytes":fs::metadata(path).unwrap().len(),"decoded_bytes":frames*2*4,"import_ms":import_ms,"navigation_ms":latency,"max_navigation_ms":max_ms,"progress_observed":progress,"waveform_query_ms":waveform_ms,"before":before,"loaded":loaded,"cancellation":cancelled["result"]["status"]});
+        let mut doc = job["result"]["result"].clone();
+        let mut background = Vec::new();
+        for phase in ["effect", "export"] {
+            let began = Instant::now();
+            let started = if phase == "effect" {
+                response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"effect":{"kind":"gain","db":-6.0}}})).await)
+            } else {
+                response(&call(&client,"audio.export",json!({"params":{"target":{"scope":"whole","document_id":doc["id"],"revision_id":doc["revision_id"]},"path":runtime.path().join("ten-minute-output.wav"),"format":{"kind":"wav","encoding":"pcm16"}}})).await)
+            };
+            assert_eq!(started["status"], "ok", "{started}");
+            let deadline = Instant::now() + Duration::from_secs(120);
+            let mut requests = Vec::new();
+            let mut progress = Vec::new();
+            let finished = loop {
+                let request_start = Instant::now();
+                assert_eq!(response(&call(&client,"presentation.set_mode",json!({"params":{"mode":if requests.len().is_multiple_of(2){"waveform"}else{"multitrack"}}})).await)["status"],"ok");
+                requests.push(request_start.elapsed().as_secs_f64() * 1000.0);
+                let job = response(
+                    &call(
+                        &client,
+                        "jobs.get",
+                        json!({"params":{"job_id":started["result"]["id"]}}),
+                    )
+                    .await,
+                )["result"]
+                    .clone();
+                progress.push(job["progress"].clone());
+                if job["status"] != "running" {
+                    break job;
+                }
+                assert!(Instant::now() < deadline);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            };
+            assert_eq!(finished["status"], "succeeded", "{finished}");
+            assert!(
+                requests.iter().all(|ms| *ms < 3000.0),
+                "{phase} navigation stalled: {requests:?}"
+            );
+            if phase == "effect" {
+                doc = finished["result"].clone();
+            }
+            background.push(json!({"phase":phase,"total_ms":began.elapsed().as_secs_f64()*1000.0,"navigation_ms":requests,"progress":progress}));
+        }
+        #[cfg(windows)]
+        let edited = process_memory(gui.0.id());
+        #[cfg(not(windows))]
+        let edited = Value::Null;
+        let record = json!({"frames":frames,"channels":2,"sample_rate":48000,"source_bytes":fs::metadata(path).unwrap().len(),"decoded_bytes":frames*2*4,"import_ms":import_ms,"navigation_ms":latency,"max_navigation_ms":max_ms,"progress_observed":progress,"waveform_query_ms":waveform_ms,"before":before,"loaded":loaded,"edited":edited,"background":background,"cancellation":cancelled["result"]["status"]});
         eprintln!("{}", serde_json::to_string_pretty(&record).unwrap());
         if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
             fs::create_dir_all(&directory).unwrap();

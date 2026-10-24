@@ -1,0 +1,18 @@
+{
+  "decoder": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+  "mix": {
+    "frames": 576000,
+    "rate": 48000,
+    "channels": 2,
+    "rmse": 0.004434479537333838,
+    "max_error": 0.014129683375358582,
+    "correlation": 0.9999999115410924,
+    "excluded_edge_frames": 1024,
+    "alignment_offset_frames": 0
+  },
+  "sample": {
+    "frames": 176400,
+    "rate": 44100,
+    "channels": 2
+  }
+}

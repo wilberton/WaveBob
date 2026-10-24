@@ -1,6 +1,6 @@
 # Shared commands and headless execution
 
-Tickets 01–18 and 22 implement shared session commands, audio import/output, selection, editing/history, arrangement/clip processing and mixing/crossfades/export, playback, browsing, GUI attachment, presentation
+Tickets 01–19 and 22 implement shared session commands, portable projects, audio import/output, selection, editing/history, arrangement/clip processing and mixing/crossfades/export, playback, browsing, GUI attachment, presentation
 commands, actual framebuffer PNG capture and a [stdio MCP adapter](mcp.md).
 See [editing and history](editing.md) and [playback commands](transport.md). All adapters share command
 definitions and core behavior. Snapshots are owned read models; views cannot

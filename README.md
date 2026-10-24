@@ -1,7 +1,7 @@
 # WaveBob
 
 A native Rust + egui audio editor for Windows, macOS and Linux.
-The first seven implementation milestones provide shared session commands, a
+The editor provides shared session commands, a
 GUI-free JSON runner, attachment to named GUI instances, revision-fenced PNG
 screenshots, stdio MCP support, persistent panel layout and status-bar help.
 WAV and MP3 files open as background jobs and display real mono/stereo waveforms.
@@ -99,12 +99,15 @@ waveform and arrangement captures at wide, compact, narrow and 150% scale.
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
-current execution status. Tickets 01–19 and 22 are complete; derive subsequent
+current execution status. Tickets 01–20 and 22 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 
 Version 1 includes WAV and MP3 import and export, the shared command interface,
 headless/MCP access, command-driven GUI screenshots, and both editing modes.
+The [complete editing workflow](docs/automation.md) can be run against the library,
+headless runner or MCP. Its [verification record](docs/verification/ticket20/README.md)
+includes final visual checks, independent MP3 decoding and large-file measurements.
 
 ## Visual reference
 
