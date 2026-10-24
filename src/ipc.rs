@@ -126,11 +126,15 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
             return Err(io::ErrorKind::TimedOut.into());
         }
         #[cfg(unix)]
-        stream.set_recv_timeout(Some(
-            deadline
-                .saturating_duration_since(Instant::now())
-                .max(Duration::from_micros(1)),
-        ))?;
+        stream
+            .set_recv_timeout(Some(
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .max(Duration::from_micros(1)),
+            ))
+            .map_err(|error| {
+                io::Error::new(error.kind(), format!("set receive timeout: {error}"))
+            })?;
         match stream.read(&mut chunk) {
             // Empty nonblocking Windows pipes can map ERROR_NO_DATA to Ok(0),
             // which is not distinguishable from EOF at this interface.
@@ -150,7 +154,12 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
                 thread::sleep(Duration::from_millis(2))
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error),
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("read reply after {} bytes: {error}", frame.len()),
+                ));
+            }
         }
     }
 }
@@ -478,12 +487,15 @@ mod tests {
             Server::start(directory.path(), &id, "large-reply".into(), || {}).unwrap();
         let client = Client::attach(directory.path(), &id).unwrap();
         let worker = thread::spawn(move || {
-            let incoming = incoming.recv_timeout(Duration::from_secs(2)).unwrap();
-            assert!(incoming.deadline > Instant::now());
-            let response =
-                crate::protocol::dispatch_line(&mut crate::Session::default(), &incoming.line);
-            assert!(serde_json::to_vec(&response).unwrap().len() > 64 * 1024);
-            incoming.reply.send(response).unwrap();
+            for _ in 0..2 {
+                let incoming = incoming.recv_timeout(Duration::from_secs(2)).unwrap();
+                assert!(incoming.deadline > Instant::now());
+                let mut response =
+                    crate::protocol::dispatch_line(&mut crate::Session::default(), &incoming.line);
+                response.session_id = id.clone();
+                assert!(serde_json::to_vec(&response).unwrap().len() > 64 * 1024);
+                incoming.reply.send(response).unwrap();
+            }
         });
         let response = exchange(
             &client.record,
@@ -495,6 +507,9 @@ mod tests {
             "Large response failed: {:?}",
             response.err()
         );
+        client
+            .call(r#"{"id":"mcp-startup","command":"session.capabilities"}"#)
+            .expect("The public MCP startup deadline must also accept the full schema");
         worker.join().unwrap();
     }
 }
