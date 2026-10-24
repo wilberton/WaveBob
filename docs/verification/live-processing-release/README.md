@@ -96,3 +96,23 @@ through the [MSYS2 setup action](https://github.com/msys2/setup-msys2).
 The extraction records renderer DLL hashes; package ZIP contents remain as built.
 Mesa's [documented software-renderer settings](https://docs.mesa3d.org/envvars.html#gallium-driver)
 select llvmpipe. Native macOS workflow diagnostics remain in progress.
+
+### Confirmed Windows hosted GUI result
+
+The [Windows native release job](https://github.com/wilberton/WaveBob/actions/runs/40117429327/job/120941531066)
+passed the shipped GUI/headless/MCP WAV/MP3 workflow using the installed Mesa
+llvmpipe runtime. The source-complete Windows kit was uploaded in that run.
+The native evidence artifact has SHA-256
+`0a623015b443933b056cf3275a66bf47ea0af82783b4ca60e2b7860222b09ce7`;
+source commit `b4af502d4f2daa15eef9f4a029883f46d4fcb43d`.
+[Workflow results](windows-ci-smoke.json), [waveform](windows-ci-waveform.png)
+and [arrangement](windows-ci-multitrack.png) are retained here. Both actual
+captures were inspected. No physical audio or device interaction is claimed.
+The full Windows/macOS/Linux Rust run at this commit also passed.
+
+The macOS shipped headless/MCP workflows pass; native GUI attachment still fails
+before MCP initialization. The contextual run at `ccc4a36` identifies
+`MCP GUI attachment: GUI IPC receive: Invalid argument (os error 22)`.
+Connection and send succeeded. Deadline-setup versus read diagnostics and the
+public 12-second schema deadline regression are being checked next. The GUI-free
+500 ms schema and stalled-peer deadline tests already pass on native macOS.

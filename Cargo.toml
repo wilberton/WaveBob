@@ -51,6 +51,7 @@ mp3lame-sys = {version="=0.1.11",default-features=false}
 sha2 = "=0.10.9"
 
 [dev-dependencies]
+flate2 = "=1.1.10"
 tempfile = "3"
 rmcp = { version = "=3.7.0", default-features = false, features = ["client", "transport-child-process"] }
 
