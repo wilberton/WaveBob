@@ -102,6 +102,12 @@ fn write_frame(stream: &mut Stream, bytes: &[u8], deadline: Instant) -> io::Resu
         // Unix sockets support bulk partial writes; tiny writes there exhaust
         // macOS socket buffers through per-write overhead and stall large schemas.
         let chunk = if cfg!(windows) { 512 } else { 64 * 1024 };
+        #[cfg(unix)]
+        stream.set_send_timeout(Some(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .max(Duration::from_micros(1)),
+        ))?;
         match stream.write(&remaining[..remaining.len().min(chunk)]) {
             // Windows byte-mode pipes may report a successful zero-byte write
             // when their nonblocking buffer is full. Retry under the deadline.
@@ -127,6 +133,12 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
             eprintln!("[DEBUG-ipc21] read timeout received={}", frame.len());
             return Err(io::ErrorKind::TimedOut.into());
         }
+        #[cfg(unix)]
+        stream.set_recv_timeout(Some(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .max(Duration::from_micros(1)),
+        ))?;
         match stream.read(&mut chunk) {
             // Empty nonblocking Windows pipes can map ERROR_NO_DATA to Ok(0),
             // which is not distinguishable from EOF at this interface.
@@ -154,7 +166,9 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
 fn exchange(record: &Record, request: Option<String>, timeout: Duration) -> io::Result<Reply> {
     let deadline = Instant::now() + timeout;
     let mut stream = Stream::connect(socket_name(&record.endpoint, record.namespaced)?)?;
-    stream.set_nonblocking(true)?;
+    // Unix sockets can wait for readiness under a kernel-enforced deadline.
+    // Windows named pipes retain the bounded nonblocking compatibility path.
+    stream.set_nonblocking(cfg!(windows))?;
     let mut bytes = serde_json::to_vec(&Packet {
         session_id: record.info.session_id.clone(),
         token: record.token.clone(),
@@ -382,7 +396,9 @@ fn serve(
     sender: &mpsc::SyncSender<Incoming>,
     wake: &dyn Fn(),
 ) -> io::Result<()> {
-    stream.set_nonblocking(true)?;
+    // Unix sockets can wait for readiness under a kernel-enforced deadline.
+    // Windows named pipes retain the bounded nonblocking compatibility path.
+    stream.set_nonblocking(cfg!(windows))?;
     let packet: Packet = serde_json::from_slice(&read_frame(
         &mut stream,
         Instant::now() + Duration::from_secs(2),
@@ -490,5 +506,29 @@ mod tests {
             response.err()
         );
         worker.join().unwrap();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod unix_deadline_tests {
+    use super::*;
+    #[test]
+    fn stalled_unix_peer_cannot_block_frame_reads_or_writes_indefinitely() {
+        let (stream, _unread_peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut stream = Stream::from(interprocess::os::unix::local_socket::Stream::from(stream));
+        stream.set_nonblocking(false).unwrap();
+        let start = Instant::now();
+        let error = read_frame(&mut stream, start + Duration::from_millis(40)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        let start = Instant::now();
+        let error = write_frame(
+            &mut stream,
+            &vec![b'a'; MAX_FRAME],
+            start + Duration::from_millis(40),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(1));
     }
 }
