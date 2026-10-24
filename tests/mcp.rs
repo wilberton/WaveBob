@@ -147,7 +147,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 29);
+        assert_eq!(tools.len(), 35);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -870,6 +870,117 @@ mod live {
                     &json!({"document":edited,"history":history,"capture":metadata}),
                 )
                 .unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn structural_edits_empty_view_and_cross_rate_paste_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let samples = runtime.path().join("Samples");
+        fs::create_dir(&samples).unwrap();
+        for (name, rate, channels, frames) in [
+            ("Source.wav", 48000, 2, 96000),
+            ("Destination.wav", 44100, 1, 4410),
+        ] {
+            let mut writer = hound::WavWriter::create(
+                samples.join(name),
+                hound::WavSpec {
+                    channels,
+                    sample_rate: rate,
+                    bits_per_sample: 16,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            for frame in 0..frames {
+                for channel in 0..channels {
+                    let t = frame as f64 / rate as f64;
+                    let value = if name == "Source.wav" {
+                        (t * (220.0 + 110.0 * channel as f64) * std::f64::consts::TAU).sin()
+                            * (0.4 + 0.2 * (t * 5.0).sin())
+                    } else {
+                        0.0
+                    };
+                    writer.write_sample((value * 32767.0) as i16).unwrap();
+                }
+            }
+            writer.finalize().unwrap();
+        }
+        let _gui = Gui::start(runtime.path(), "structural-check");
+        let client = named_client(runtime.path(), "structural-check").await;
+        let started = response(
+            &call(
+                &client,
+                "documents.open",
+                json!({"params":{"path":samples.join("Source.wav")}}),
+            )
+            .await,
+        );
+        let source = finish_mcp_job(&client, started).await;
+        response(&call(&client,"edit.copy",json!({"params":{"target":{"scope":"range","document_id":source["id"],"revision_id":source["revision_id"],"start_frame":24000,"end_frame":72000}}})).await);
+        let started = response(
+            &call(
+                &client,
+                "documents.open",
+                json!({"params":{"path":samples.join("Destination.wav")}}),
+            )
+            .await,
+        );
+        let destination = finish_mcp_job(&client, started).await;
+        let started=response(&call(&client,"edit.delete",json!({"params":{"target":{"scope":"whole","document_id":destination["id"],"revision_id":destination["revision_id"]}}})).await);
+        let empty = finish_mcp_job(&client, started).await;
+        assert_eq!(empty["frames"], 0);
+        response(
+            &call(
+                &client,
+                "browser.navigate",
+                json!({"params":{"path":samples}}),
+            )
+            .await,
+        );
+        let mut records = Vec::new();
+        for label in ["empty-sample", "cross-rate-paste"] {
+            if label == "cross-rate-paste" {
+                let started=response(&call(&client,"edit.paste",json!({"params":{"document_id":destination["id"],"revision_id":empty["revision_id"],"start_frame":0,"end_frame":0}})).await);
+                let pasted = finish_mcp_job(&client, started).await;
+                assert_eq!(pasted["frames"], 44100);
+                assert_eq!(pasted["channels"], 1);
+                records.push(json!({"pasted":pasted}));
+            }
+            let captured = call(
+                &client,
+                "capture.png",
+                json!({"params":{"path":runtime.path().join(format!("{label}.png"))}}),
+            )
+            .await;
+            let metadata = response(&captured);
+            assert_eq!(metadata["status"], "ok");
+            let image = captured
+                .content
+                .iter()
+                .find_map(|block| match block {
+                    ContentBlock::Image(image) => Some(image),
+                    _ => None,
+                })
+                .unwrap();
+            if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+                fs::create_dir_all(&directory).unwrap();
+                fs::write(
+                    Path::new(&directory).join(format!("{label}.png")),
+                    BASE64_STANDARD.decode(&image.data).unwrap(),
+                )
+                .unwrap();
+            }
+            records.push(json!({"file":format!("{label}.png"),"capture":metadata}));
+        }
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::write(
+                Path::new(&directory).join("structural.json"),
+                serde_json::to_vec_pretty(&records).unwrap(),
             )
             .unwrap();
         }
@@ -1654,7 +1765,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 41);
+        assert_eq!(tools.len(), 47);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

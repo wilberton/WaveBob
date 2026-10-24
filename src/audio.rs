@@ -11,6 +11,7 @@ use std::sync::{
 const BLOCK: usize = 256;
 const MAX_VALUES: usize = 128 * 1024 * 1024;
 mod mp3;
+pub(crate) mod resample;
 
 #[derive(Debug)]
 pub(crate) struct Audio {

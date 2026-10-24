@@ -33,6 +33,12 @@ impl PresentationSnapshot {
         if document.frames == 0 {
             return crate::documents::FrameRange { start: 0, end: 0 };
         }
+        if view.start == view.end {
+            return crate::documents::FrameRange {
+                start: 0,
+                end: document.frames,
+            };
+        }
         let end = view.end.min(document.frames).max(1);
         crate::documents::FrameRange {
             start: view.start.min(end - 1),

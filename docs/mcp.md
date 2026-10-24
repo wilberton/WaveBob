@@ -58,15 +58,15 @@ session identity, revision, result or error. Schema references remain resolvable
 after nesting. No separate editing implementation or handwritten command list
 exists in the adapter.
 
-An independent session advertises twenty-nine tools: session/loop commands, document
+An independent session advertises thirty-five tools: session/loop commands, document
 open/get/activate/close, cursor/selection, exact samples/waveforms, jobs and
 device-free transport inspection/seek/rewind, filesystem browsing and preview
-stop/volume controls, effects and undo/redo/history queries.
+stop/volume controls, effects, structural edits/clipboard and undo/redo/history queries.
 See [browser and audition commands](browser.md) and [editing](editing.md).
 An attached GUI also advertises
 `presentation.get`, `presentation.set_mode`, `presentation.viewport.set`, `presentation.layout.set`,
 `presentation.panels.toggle`, `presentation.barrier` and `capture.png`, plus four
-device playback commands and audition start (forty-one tools in total). Command descriptors explicitly
+device playback commands and audition start (forty-seven tools in total). Command descriptors explicitly
 report `requires_audio_output`. See [playback](transport.md) and
 [panel commands and preferences](layout.md).
 Use `tools/list` for tool discovery or call `session.capabilities` for the full

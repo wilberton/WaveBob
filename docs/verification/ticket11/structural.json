@@ -1,0 +1,78 @@
+[
+  {
+    "capture": {
+      "id": "9",
+      "protocol_version": 1,
+      "result": {
+        "metadata": {
+          "frame_number": 13,
+          "height": 900,
+          "mode": "waveform",
+          "pending_resources": [],
+          "presentation_revision": 0,
+          "rendered_revision": 5,
+          "scale": 1.0,
+          "session_id": "7a955c41-765c-42fb-ac81-d5680e622a20",
+          "width": 1440
+        },
+        "mime_type": "image/png",
+        "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpEzgE6P\\empty-sample.png"
+      },
+      "revision": 5,
+      "session_id": "7a955c41-765c-42fb-ac81-d5680e622a20",
+      "status": "ok"
+    },
+    "file": "empty-sample.png"
+  },
+  {
+    "pasted": {
+      "channels": 1,
+      "cursor": 44100,
+      "dirty": true,
+      "encoding": "wav_pcm16",
+      "frames": 44100,
+      "id": "4b86215c-2ff0-479b-9a18-be27cf5a3d62",
+      "name": "Destination.wav",
+      "overloaded_samples": 0,
+      "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpEzgE6P\\Samples\\Destination.wav",
+      "peak_level": 0.5595386028289795,
+      "revision_id": "57a880f7-4826-4f29-8bff-3b528d603500",
+      "sample_rate": 44100,
+      "selection": {
+        "end": 44100,
+        "start": 0
+      },
+      "source_details": {
+        "bitrate_kbps": null,
+        "bitrate_mode": null,
+        "encoder_delay": null,
+        "encoder_padding": null
+      }
+    }
+  },
+  {
+    "capture": {
+      "id": "12",
+      "protocol_version": 1,
+      "result": {
+        "metadata": {
+          "frame_number": 17,
+          "height": 900,
+          "mode": "waveform",
+          "pending_resources": [],
+          "presentation_revision": 0,
+          "rendered_revision": 6,
+          "scale": 1.0,
+          "session_id": "7a955c41-765c-42fb-ac81-d5680e622a20",
+          "width": 1440
+        },
+        "mime_type": "image/png",
+        "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpEzgE6P\\cross-rate-paste.png"
+      },
+      "revision": 6,
+      "session_id": "7a955c41-765c-42fb-ac81-d5680e622a20",
+      "status": "ok"
+    },
+    "file": "cross-rate-paste.png"
+  }
+]

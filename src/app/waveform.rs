@@ -375,11 +375,23 @@ impl WaveBob {
         );
         zoom_ui.spacing_mut().item_spacing.x = 4.0;
         zoom_ui.horizontal(|ui| {for (icon,label,factor) in [(Icon::Minus,"Zoom out",0.5),(Icon::Plus,"Zoom in",2.0),(Icon::Fit,"Fit sample",0.0)] {
-            let response=icon_button(ui,icon,label,false,true);
+            let response=icon_button(ui,icon,label,false,document.frames>0);
             help.observe(&response,if factor==0.0 {"Show the whole sample without changing the selection."} else {"Zoom around the visible center. Ctrl/Cmd + scroll or pinch zooms around the pointer."});
             if response.clicked() {self.set_viewport(&document.id,if factor==0.0 {FrameRange{start:0,end:document.frames}} else {zoom(&view,factor,0.5,document.frames)});}
         }});
         ui.add_space(4.0);
+        if document.frames == 0 {
+            self.gesture = None;
+            self.host.set_transient_resources(Vec::new());
+            ui.centered_and_justified(|ui| {
+                ui.label(
+                    RichText::new("Empty sample — paste audio or undo the deletion")
+                        .size(18.0)
+                        .color(MUTED),
+                );
+            });
+            return;
+        }
         let preview = self.display_document().unwrap();
         if let Some(wave) = &self.waveform {
             let response = ui

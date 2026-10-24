@@ -42,3 +42,6 @@ needed for undo and redo. Navigation and playback are outside edit history.
 
 **Overload**: A floating-point audio value whose absolute amplitude exceeds
 unity. It is retained during editing and reported before output conversion.
+
+**Audio clipboard**: The session's retained copy of an audio interval, independent
+of the operating system's text clipboard and the source document's lifetime.

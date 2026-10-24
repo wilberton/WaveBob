@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::mpsc};
 use wavebob::{Command, EmptyParams, Outcome, Request, desktop::DesktopHost, presentation::*};
 use wavebob::{CommandResult, documents::*};
 mod browser;
+mod editing;
 mod effects;
 mod visuals;
 mod waveform;
@@ -301,6 +302,37 @@ impl WaveBob {
                 });
             }
         }
+        let edit_key = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Copy => Some(editing::Action::Copy),
+                egui::Event::Cut => Some(editing::Action::Cut),
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                    ..
+                } if (modifiers.command || modifiers.ctrl || modifiers.mac_cmd)
+                    && !modifiers.alt
+                    && !modifiers.shift =>
+                {
+                    match key {
+                        egui::Key::C => Some(editing::Action::Copy),
+                        egui::Key::X => Some(editing::Action::Cut),
+                        egui::Key::V => Some(editing::Action::Paste),
+                        egui::Key::T => Some(editing::Action::Trim),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+        });
+        if let Some(action) = edit_key {
+            self.edit_action(action);
+        }
+        if pressed(egui::Key::Delete) || pressed(egui::Key::Backspace) {
+            self.edit_action(editing::Action::Delete);
+        }
         if self.host.presentation().mode == ViewMode::Waveform
             && let Some(document) = self.active_document()
         {
@@ -403,6 +435,8 @@ impl WaveBob {
                                 ui.close();
                             }
                         }
+                        ui.separator();
+                        self.edit_menu(ui, &mut help);
                         ui.separator();
                         let document = self.active_document();
                         let enabled = mode == ViewMode::Waveform && document.is_some();
@@ -530,7 +564,7 @@ impl WaveBob {
         egui::Panel::bottom("transport").exact_size(48.0).frame(panel_frame()).show(ui,|ui| {
             let output=self.host.transport();
             let document=self.active_document();
-            let target=mode==ViewMode::Waveform && document.is_some();
+            let target=mode==ViewMode::Waveform && document.as_ref().is_some_and(|doc|doc.frames>0);
             let ready=output.output.status==wavebob::transport::OutputStatus::Ready;
             let playing=output.requested.playing;
             let area=ui.max_rect();
@@ -895,6 +929,9 @@ impl WaveBob {
 }
 
 impl eframe::App for WaveBob {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        self.text_clipboard_input(ctx, input);
+    }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.draw(ui);
         self.start_dialog(ui.ctx());

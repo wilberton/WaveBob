@@ -161,6 +161,7 @@ pub(crate) struct Editor {
     wake: Option<Wake>,
     pending_edits: BTreeMap<String, editing::PendingEdit>,
     history: editing::History,
+    clipboard: Option<editing::Clipboard>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -175,6 +176,7 @@ impl Default for Editor {
             wake: None,
             pending_edits: BTreeMap::new(),
             history: editing::History::default(),
+            clipboard: None,
         }
     }
 }
@@ -240,16 +242,12 @@ impl Editor {
                     }
                 }
                 Event::Finished(id, result) => {
+                    let allocated = self.retained_bytes();
                     if let Some((job, _)) = self.jobs.get_mut(&id)
                         && job.status == JobStatus::Running
                     {
                         match result {
                             Ok(audio) => {
-                                let allocated = self
-                                    .revisions
-                                    .values()
-                                    .map(|revision| revision.samples.len() as u64 * 4)
-                                    .sum::<u64>();
                                 if allocated + audio.samples.len() as u64 * 4
                                     > 2 * 1024 * 1024 * 1024
                                 {
@@ -321,6 +319,12 @@ impl Editor {
             Command::GetHistory(_) => Ok(CommandResult::History(self.history.snapshot())),
             Command::Undo(_) => self.restore_history(false, revision),
             Command::Redo(_) => self.restore_history(true, revision),
+            Command::GetClipboard(_) => Ok(CommandResult::Clipboard(self.clipboard_info())),
+            Command::CopyAudio(params) => self.copy_audio(params, revision),
+            Command::CutAudio(params) => self.structural_edit(params, "Cut"),
+            Command::DeleteAudio(params) => self.structural_edit(params, "Delete"),
+            Command::TrimAudio(params) => self.structural_edit(params, "Trim"),
+            Command::PasteAudio(params) => self.paste_audio(params),
             Command::OpenDocument(params) => self.open(params),
             Command::GetDocument(params) => Ok(CommandResult::Document(
                 self.document(&params.document_id)?.clone().into(),

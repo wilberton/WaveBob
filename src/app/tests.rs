@@ -606,6 +606,130 @@ fn effect_choice_apply_and_history_buttons_use_the_current_selection() {
     );
 }
 
+#[test]
+fn audio_clipboard_shortcuts_delete_all_paste_and_undo_without_os_text() {
+    let (mut h, _d) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    h.app.dispatch(Command::SetSelection(SelectionParams {
+        document_id: doc.id.clone(),
+        start_frame: 1000,
+        end_frame: 2000,
+    }));
+    let tap = |h: &mut Harness, key, modifiers| {
+        for pressed in [true, false] {
+            h.frame(vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers,
+            }]);
+        }
+    };
+    tap(&mut h, egui::Key::C, egui::Modifiers::CTRL);
+    assert_eq!(h.app.host.clipboard().frames, 1000);
+    assert!(!h.app.host.history().can_undo);
+    h.app.dispatch(Command::SetViewport(SetViewportParams {
+        document_id: doc.id.clone(),
+        start_frame: 1000,
+        end_frame: 3000,
+        expected_presentation_revision: None,
+    }));
+    h.app.dispatch(Command::SelectAll(DocumentParams {
+        document_id: doc.id.clone(),
+    }));
+    tap(&mut h, egui::Key::Delete, egui::Modifiers::NONE);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.active_document().unwrap().frames != 0 {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    assert!(
+        text_shapes(&h.frame(vec![]))
+            .iter()
+            .any(|(_, text)| text.starts_with("Empty sample"))
+    );
+    tap(&mut h, egui::Key::V, egui::Modifiers::CTRL);
+    while h.app.active_document().unwrap().frames == 0 {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    assert_eq!(h.app.active_document().unwrap().frames, 1000);
+    assert_eq!(h.app.host.history().undo_count, 2);
+    tap(&mut h, egui::Key::Z, egui::Modifiers::CTRL);
+    assert_eq!(h.app.active_document().unwrap().frames, 0);
+    tap(&mut h, egui::Key::Z, egui::Modifiers::CTRL);
+    assert_eq!(h.app.active_document().unwrap().frames, doc.frames);
+    assert_eq!(
+        h.app
+            .host
+            .presentation()
+            .visible_interval(&h.app.active_document().unwrap()),
+        FrameRange {
+            start: 0,
+            end: doc.frames
+        }
+    );
+}
+
+#[test]
+fn text_clipboard_keys_delegate_to_the_platform_while_audio_keys_stay_raw() {
+    let mut h = Harness::new();
+    let event = |key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::CTRL,
+    };
+    let mut raw = egui::RawInput {
+        events: vec![event(egui::Key::V)],
+        ..Default::default()
+    };
+    h.app.text_clipboard_input(&h.ctx, &mut raw);
+    assert!(matches!(
+        raw.events[0],
+        egui::Event::Key {
+            key: egui::Key::V,
+            ..
+        }
+    ));
+    let mut text = String::from("folder");
+    let id = egui::Id::unique("clipboard-path");
+    for _ in 0..2 {
+        let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.add(egui::TextEdit::singleline(&mut text).id(id))
+                .request_focus();
+        });
+        output.textures_delta.clear();
+    }
+    assert!(h.ctx.text_edit_focused());
+    let mut raw = egui::RawInput {
+        events: vec![
+            event(egui::Key::C),
+            event(egui::Key::X),
+            event(egui::Key::V),
+        ],
+        ..Default::default()
+    };
+    h.app.text_clipboard_input(&h.ctx, &mut raw);
+    assert_eq!(raw.events.len(), 2);
+    assert!(matches!(raw.events[0], egui::Event::Copy));
+    assert!(matches!(raw.events[1], egui::Event::Cut));
+    let mut output = h.ctx.run_ui(raw, |ui| {
+        ui.add(egui::TextEdit::singleline(&mut text).id(id));
+    });
+    assert!(output.viewport_output.values().any(|viewport| {
+        viewport
+            .commands
+            .iter()
+            .any(|command| matches!(command, egui::ViewportCommand::RequestPaste))
+    }));
+    output.textures_delta.clear();
+}
+
 fn canvas_rects(h: &mut Harness) -> [Rect; 2] {
     fn collect(shape: &egui::Shape, out: &mut Vec<Rect>) {
         match shape {

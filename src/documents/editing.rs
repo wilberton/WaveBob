@@ -6,6 +6,61 @@ pub(super) struct PendingEdit {
     document_id: String,
     base_revision: String,
     label: String,
+    navigation: Navigation,
+    clipboard: Option<Clipboard>,
+}
+#[derive(Clone)]
+pub(super) struct Clipboard {
+    audio: Arc<audio::Audio>,
+    range: FrameRange,
+    revision_id: String,
+}
+enum Navigation {
+    Keep,
+    Delete(FrameRange),
+    Trim(FrameRange),
+    Paste { start: u64, frames: u64 },
+}
+impl Navigation {
+    fn apply(&self, doc: &mut DocumentInfo) {
+        match self {
+            Self::Keep => {}
+            Self::Delete(range) => {
+                let map = |frame: u64| {
+                    if frame < range.start {
+                        frame
+                    } else if frame >= range.end {
+                        frame - (range.end - range.start)
+                    } else {
+                        range.start
+                    }
+                };
+                doc.cursor = map(doc.cursor);
+                doc.selection = doc.selection.as_ref().and_then(|selection| {
+                    let start = map(selection.start);
+                    let end = map(selection.end);
+                    (start < end).then_some(FrameRange { start, end })
+                });
+            }
+            Self::Trim(range) => {
+                let map = |frame: u64| frame.clamp(range.start, range.end) - range.start;
+                doc.cursor = map(doc.cursor);
+                doc.selection = doc.selection.as_ref().and_then(|selection| {
+                    let start = map(selection.start);
+                    let end = map(selection.end);
+                    (start < end).then_some(FrameRange { start, end })
+                });
+            }
+            Self::Paste { start, frames } => {
+                doc.cursor = start + frames;
+                doc.selection = Some(FrameRange {
+                    start: *start,
+                    end: start + frames,
+                });
+            }
+        }
+        doc.cursor = doc.cursor.min(doc.frames);
+    }
 }
 #[derive(Clone)]
 struct Change {
@@ -35,6 +90,15 @@ impl History {
     }
 }
 impl Editor {
+    pub(super) fn retained_bytes(&self) -> u64 {
+        let mut seen = std::collections::BTreeSet::new();
+        self.revisions
+            .values()
+            .chain(self.clipboard.iter().map(|clipboard| &clipboard.audio))
+            .filter(|audio| seen.insert(Arc::as_ptr(audio)))
+            .map(|audio| audio.samples.len() as u64 * 4)
+            .sum()
+    }
     pub fn history_snapshot(&self) -> HistoryInfo {
         self.history.snapshot()
     }
@@ -55,8 +119,41 @@ impl Editor {
     ) -> Result<CommandResult, CommandError> {
         params.effect.validate()?;
         let (id, base) = params.target.ids();
-        let (document, audio) = self.audio(id, Some(base))?;
+        let (document, audio) = self.playback_audio(id)?;
+        if document.revision_id != base {
+            return Err(CommandError::new(
+                ErrorCode::StaleRevision,
+                "Audio revision changed",
+            ));
+        }
         let range = params.target.range(audio.frames())?;
+        let label = params.effect.label().to_string();
+        self.start_edit(
+            document,
+            audio,
+            label,
+            Navigation::Keep,
+            None,
+            move |audio, cancel, progress| {
+                effects::process(audio, range, &params.effect, cancel, progress)
+            },
+        )
+    }
+    fn start_edit(
+        &mut self,
+        document: DocumentInfo,
+        audio: Arc<audio::Audio>,
+        label: String,
+        navigation: Navigation,
+        clipboard: Option<Clipboard>,
+        process: impl FnOnce(
+            &audio::Audio,
+            &AtomicBool,
+            &dyn Fn(u8),
+        ) -> Result<audio::Audio, CommandError>
+        + Send
+        + 'static,
+    ) -> Result<CommandResult, CommandError> {
         if self
             .jobs
             .values()
@@ -69,22 +166,17 @@ impl Editor {
                 "Two audio jobs are already running; wait or cancel one",
             ));
         }
-        let allocated = self
-            .revisions
-            .values()
-            .map(|audio| audio.samples.len() as u64 * 4)
-            .sum::<u64>();
+        let allocated = self.retained_bytes();
         if allocated + audio.samples.len() as u64 * 4 > 2 * 1024 * 1024 * 1024 {
             return Err(CommandError::new(
                 ErrorCode::ResourceLimit,
                 "Edit would exceed the current 2 GiB retained audio limit",
             ));
         }
-        let audio = self.revisions[&document.revision_id].clone();
         let id = uuid::Uuid::new_v4().to_string();
         let job = JobInfo {
             id: id.clone(),
-            kind: params.effect.label().into(),
+            kind: label.clone(),
             path: document.path.clone(),
             status: JobStatus::Running,
             progress: 0,
@@ -92,9 +184,11 @@ impl Editor {
             error: None,
         };
         let pending = PendingEdit {
-            document_id: document.id.clone(),
-            base_revision: document.revision_id.clone(),
-            label: params.effect.label().into(),
+            document_id: document.id,
+            base_revision: document.revision_id,
+            label,
+            navigation,
+            clipboard,
         };
         let cancel = Arc::new(AtomicBool::new(false));
         self.pending_edits.insert(id.clone(), pending);
@@ -103,7 +197,7 @@ impl Editor {
         let wake = self.wake.clone();
         std::thread::spawn(move || {
             let last = std::cell::Cell::new(255);
-            let result = effects::process(&audio, range, &params.effect, &cancel, |progress| {
+            let result = process(&audio, &cancel, &|progress| {
                 if last.replace(progress) != progress {
                     let _ = sender.send(Event::Progress(id.clone(), progress));
                     if let Some(wake) = &wake {
@@ -124,6 +218,169 @@ impl Editor {
             }
         });
         Ok(CommandResult::Job(job.into()))
+    }
+    pub fn clipboard_info(&self) -> crate::edits::ClipboardInfo {
+        self.clipboard
+            .as_ref()
+            .map_or_else(Default::default, |clipboard| crate::edits::ClipboardInfo {
+                frames: clipboard.range.end - clipboard.range.start,
+                sample_rate: Some(clipboard.audio.rate),
+                channels: Some(clipboard.audio.channels),
+                source_revision_id: Some(clipboard.revision_id.clone()),
+            })
+    }
+    pub(super) fn copy_audio(
+        &mut self,
+        params: crate::edits::EditParams,
+        revision: &mut u64,
+    ) -> Result<CommandResult, CommandError> {
+        let (id, base) = params.target.ids();
+        let (document, audio) = self.playback_audio(id)?;
+        if document.revision_id != base {
+            return Err(CommandError::new(
+                ErrorCode::StaleRevision,
+                "Audio revision changed",
+            ));
+        }
+        let range = params.target.range(audio.frames())?;
+        if self
+            .clipboard
+            .as_ref()
+            .is_none_or(|old| old.revision_id != base || old.range != range)
+        {
+            advance(revision)?;
+            self.clipboard = Some(Clipboard {
+                audio,
+                range,
+                revision_id: base.into(),
+            });
+        }
+        Ok(CommandResult::Clipboard(self.clipboard_info()))
+    }
+    pub(super) fn structural_edit(
+        &mut self,
+        params: crate::edits::EditParams,
+        label: &'static str,
+    ) -> Result<CommandResult, CommandError> {
+        let (id, base) = params.target.ids();
+        let (document, audio) = self.playback_audio(id)?;
+        if document.revision_id != base {
+            return Err(CommandError::new(
+                ErrorCode::StaleRevision,
+                "Audio revision changed",
+            ));
+        }
+        let range = params.target.range(audio.frames())?;
+        let clipboard = (label == "Cut").then(|| Clipboard {
+            audio: audio.clone(),
+            range: range.clone(),
+            revision_id: base.into(),
+        });
+        let navigation = if label == "Trim" {
+            Navigation::Trim(range.clone())
+        } else {
+            Navigation::Delete(range.clone())
+        };
+        self.start_edit(
+            document,
+            audio,
+            label.into(),
+            navigation,
+            clipboard,
+            move |audio, cancel, progress| {
+                let channels = audio.channels as usize;
+                let mut samples = Vec::new();
+                let intervals = if label == "Trim" {
+                    [
+                        range.start as usize * channels..range.end as usize * channels,
+                        0..0,
+                    ]
+                } else {
+                    [
+                        0..range.start as usize * channels,
+                        range.end as usize * channels..audio.samples.len(),
+                    ]
+                };
+                let length = intervals.iter().map(|range| range.len()).sum();
+                reserve(&mut samples, length)?;
+                for range in intervals {
+                    append(&mut samples, &audio.samples[range], cancel)?;
+                }
+                audio::prepare(
+                    audio.rate,
+                    audio.channels,
+                    audio.encoding.clone(),
+                    audio.source.clone(),
+                    samples,
+                    cancel,
+                    progress,
+                )
+            },
+        )
+    }
+    pub(super) fn paste_audio(
+        &mut self,
+        params: crate::edits::PasteParams,
+    ) -> Result<CommandResult, CommandError> {
+        let (document, audio) = self.playback_audio(&params.document_id)?;
+        if document.revision_id != params.revision_id {
+            return Err(CommandError::new(
+                ErrorCode::StaleRevision,
+                "Audio revision changed",
+            ));
+        }
+        if params.start_frame > params.end_frame || params.end_frame > audio.frames() {
+            return Err(invalid_range());
+        }
+        let clipboard = self.clipboard.clone().ok_or_else(|| {
+            CommandError::new(
+                ErrorCode::InvalidParams,
+                "The internal audio clipboard is empty",
+            )
+        })?;
+        let frames = audio::resample::frame_count(
+            clipboard.range.end - clipboard.range.start,
+            clipboard.audio.rate,
+            audio.rate,
+        );
+        self.start_edit(
+            document,
+            audio,
+            "Paste".into(),
+            Navigation::Paste {
+                start: params.start_frame,
+                frames,
+            },
+            None,
+            move |audio, cancel, progress| {
+                let converted = audio::resample::convert(
+                    &clipboard.audio,
+                    &clipboard.range,
+                    audio.rate,
+                    audio.channels,
+                    cancel,
+                    progress,
+                )?;
+                let channels = audio.channels as usize;
+                let start = params.start_frame as usize * channels;
+                let end = params.end_frame as usize * channels;
+                let length = audio.samples.len() - (end - start) + converted.len();
+                let mut samples = Vec::new();
+                reserve(&mut samples, length)?;
+                append(&mut samples, &audio.samples[..start], cancel)?;
+                append(&mut samples, &converted, cancel)?;
+                append(&mut samples, &audio.samples[end..], cancel)?;
+                audio::prepare(
+                    audio.rate,
+                    audio.channels,
+                    audio.encoding.clone(),
+                    audio.source.clone(),
+                    samples,
+                    cancel,
+                    progress,
+                )
+            },
+        )
     }
     pub(super) fn finish_edit(
         &mut self,
@@ -150,13 +407,19 @@ impl Editor {
                 ));
             }
             let Some(audio) = result? else {
-                return Ok(before);
+                let mut after = before.clone();
+                pending.navigation.apply(&mut after);
+                if after != before {
+                    advance(revision)?;
+                    *self
+                        .documents
+                        .iter_mut()
+                        .find(|doc| doc.id == after.id)
+                        .unwrap() = after.clone();
+                }
+                return Ok(after);
             };
-            let allocated = self
-                .revisions
-                .values()
-                .map(|audio| audio.samples.len() as u64 * 4)
-                .sum::<u64>();
+            let allocated = self.retained_bytes();
             if allocated + audio.samples.len() as u64 * 4 > 2 * 1024 * 1024 * 1024 {
                 return Err(CommandError::new(
                     ErrorCode::ResourceLimit,
@@ -169,6 +432,7 @@ impl Editor {
             after.frames = audio.frames();
             after.peak_level = audio.peak_level;
             after.overloaded_samples = audio.overloaded_samples;
+            pending.navigation.apply(&mut after);
             advance(revision)?;
             self.revisions
                 .insert(after.revision_id.clone(), Arc::new(audio));
@@ -183,6 +447,9 @@ impl Editor {
                 label: pending.label,
             });
             self.history.redo.clear();
+            if let Some(clipboard) = pending.clipboard {
+                self.clipboard = Some(clipboard);
+            }
             self.collect_revisions();
             Ok(after)
         })();
@@ -242,4 +509,25 @@ impl Editor {
         }
         Ok(CommandResult::History(self.history.snapshot()))
     }
+}
+
+fn reserve(samples: &mut Vec<f32>, length: usize) -> Result<(), CommandError> {
+    if length > 128 * 1024 * 1024 {
+        return Err(CommandError::new(
+            ErrorCode::ResourceLimit,
+            "Edited audio exceeds the current 512 MiB PCM limit",
+        ));
+    }
+    samples
+        .try_reserve_exact(length)
+        .map_err(|_| CommandError::new(ErrorCode::ResourceLimit, "Unable to allocate edited audio"))
+}
+fn append(output: &mut Vec<f32>, source: &[f32], cancel: &AtomicBool) -> Result<(), CommandError> {
+    for chunk in source.chunks(16384) {
+        if cancel.load(Ordering::Acquire) {
+            return Err(CommandError::new(ErrorCode::Cancelled, "Edit cancelled"));
+        }
+        output.extend_from_slice(chunk);
+    }
+    Ok(())
 }

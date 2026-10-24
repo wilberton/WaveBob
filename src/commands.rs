@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::browser::{AuditionVolumeParams, BrowserSnapshot, PathParams};
 use crate::documents::*;
+use crate::edits::{ClipboardInfo, EditParams, PasteParams};
 use crate::effects::{ApplyEffectParams, HistoryInfo};
 use crate::presentation::{
     CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, RenderMetadata,
@@ -125,6 +126,12 @@ command_registry! {
     GetHistory(EmptyParams) => ("history.get", "Inspect chronological session undo and redo availability.", false, false, false, HistoryInfo),
     Undo(EmptyParams) => ("history.undo", "Undo the latest committed audio edit.", true, false, false, HistoryInfo),
     Redo(EmptyParams) => ("history.redo", "Redo the latest undone audio edit.", true, false, false, HistoryInfo),
+    GetClipboard(EmptyParams) => ("edit.clipboard.get", "Inspect the internal audio clipboard without accessing an OS clipboard.", false, false, false, ClipboardInfo),
+    CopyAudio(EditParams) => ("edit.copy", "Copy an explicit nonempty audio interval without changing the document or history.", true, false, false, ClipboardInfo),
+    CutAudio(EditParams) => ("edit.cut", "Copy and delete an explicit interval as one atomic undoable edit.", true, false, false, JobInfo),
+    DeleteAudio(EditParams) => ("edit.delete", "Delete an explicit interval as one undoable edit.", true, false, false, JobInfo),
+    TrimAudio(EditParams) => ("edit.trim", "Keep only an explicit nonempty interval as one undoable edit.", true, false, false, JobInfo),
+    PasteAudio(PasteParams) => ("edit.paste", "Paste the internal audio clipboard, inserting at an empty interval or replacing a nonempty interval, with rate/channel conversion.", true, false, false, JobInfo),
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, false, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, false, PresentationSnapshot),
     SetViewport(SetViewportParams) => ("presentation.viewport.set", "Set a document's visible frame interval without changing its selection or audio.", true, true, false, PresentationSnapshot),
@@ -146,6 +153,7 @@ pub(crate) fn capabilities(gui: bool, device: bool) -> Capabilities {
         "browser".into(),
         "effects".into(),
         "history".into(),
+        "edit".into(),
     ];
     if device {
         capabilities.push("audio.output".into());

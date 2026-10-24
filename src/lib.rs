@@ -6,6 +6,7 @@ mod commands;
 #[cfg(feature = "gui")]
 pub mod desktop;
 pub mod documents;
+pub mod edits;
 pub mod effects;
 pub mod ipc;
 pub mod mcp;
@@ -72,6 +73,7 @@ pub enum CommandResult {
     Transport(Box<transport::TransportSnapshot>),
     Browser(Box<browser::BrowserSnapshot>),
     History(effects::HistoryInfo),
+    Clipboard(edits::ClipboardInfo),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -233,6 +235,9 @@ impl Session {
     }
     pub fn history_snapshot(&self) -> effects::HistoryInfo {
         self.editor.history_snapshot()
+    }
+    pub fn clipboard_snapshot(&self) -> edits::ClipboardInfo {
+        self.editor.clipboard_info()
     }
     #[cfg(feature = "gui")]
     pub(crate) fn initialize_browser(&mut self, path: String) {
