@@ -136,3 +136,38 @@ slices plus an absolute deadline retain bounded waits for intermittent/stalled
 peers. Windows keeps its existing named-pipe handling. Local handshake and
 500 ms/public startup schema tests pass; the native red regression and shipped
 macOS workflow are being rerun for final confirmation.
+
+### Confirmed cross-platform native release result
+
+The [native release run](https://github.com/wilberton/WaveBob/actions/runs/40121932636)
+now passes **Windows x86-64, macOS ARM64 and Linux x86-64**, with Linux X11 and
+Wayland shipped GUI workflows. All three source-complete kit artifacts are
+uploaded, including GUI/headless/MCP/workflow executables, locked dependency
+sources, notices and rebuild instructions. Source commit is
+`02e4b850dcbcd9bafd2e9f6127d067de66f3ec03` (Reverb complete; EQ remains newer work).
+
+The exact minimal macOS shutdown regression is green after configuring receive
+readiness before request transmission. The causal diagnosis is confirmed by the
+native shipped workflow passing after the fix; no timeout increase or skipped
+acceptance check was used. The source pointer above documents Darwin's shutdown
+socket-option rule. Temporary byte/timing probes remain removed.
+
+Actual [macOS waveform](macos-waveform.png) and
+[macOS arrangement](macos-multitrack.png) captures were inspected at 1024×642.
+[macOS workflow evidence](macos-smoke.json) records direct/headless/MCP WAV/MP3
+byte parity, source-free project reopen, GUI attachment/captures and clean quit.
+Native evidence artifact SHA-256:
+`2ffafdda21fe4b3eca5b0d82fd4017af2474f5c3ec937824548ffecada1671eb`.
+The source-complete macOS kit artifact is
+[available in the successful run](https://github.com/wilberton/WaveBob/actions/runs/40121932636/artifacts/12571512919).
+Its inner ZIP SHA-256 is `9adab8777bddd1219addd4ec1e47d414276fc49098cf0c9dd1178476df491c8e`.
+The Linux source-complete kit artifact is
+[also available](https://github.com/wilberton/WaveBob/actions/runs/40121932636/artifacts/12571837215);
+inner ZIP SHA-256 `ec07713c856d44ada808184c0f846cc4d05805432cd29bc5a86fa0b2874441ee`.
+
+A further explicit 1.25× native GUI scale pass is now part of every platform's
+smoke harness (and both Linux backends). It is already verified locally on the
+preserved Windows kit from a fresh Unicode extraction. This complements shared
+automated DPI/gesture/shortcut tests; physical device/listening checks stay
+unverified under the user's accepted automated acceptance. The next native run
+will retain both default- and raised-scale captures.

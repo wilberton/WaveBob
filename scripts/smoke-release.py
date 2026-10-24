@@ -15,6 +15,7 @@ parser.add_argument("archive", type=pathlib.Path)
 parser.add_argument("--out", required=True, type=pathlib.Path)
 parser.add_argument("--gui", action="store_true")
 parser.add_argument("--audition", action="store_true")
+parser.add_argument("--ui-scale",type=float,default=1.0,help="Exercise native GUI rendering at this UI scale")
 parser.add_argument("--gl-runtime", type=pathlib.Path, help="Use an installed Windows Mesa runtime for CI GUI checks")
 args = parser.parse_args()
 assert not args.out.exists(), "Use a fresh smoke-test directory"
@@ -98,6 +99,7 @@ if args.gui:
     runtime.mkdir()
     native_log = (args.out / "gui-native.log").open("wb")
     gui = subprocess.Popen([executable("wavebob"), "--hidden", "--name", "Release smoke",
+                            "--ui-scale",str(args.ui_scale),
                             "--runtime-dir", str(runtime), "--preferences", str(args.out / "layout.json")],
                            stdout=subprocess.DEVNULL, stderr=native_log, creationflags=creationflags)
     try:
@@ -115,6 +117,8 @@ if args.gui:
         if args.audition:
             items.append("--audition")
         results["gui"] = json.loads(command(*items).stdout)
+        for capture in results["gui"]["captures"]:
+            assert capture["metadata"]["scale"] >= args.ui_scale * 0.99
         request = json.dumps({"id": "smoke-quit", "command": "presentation.quit", "params": {}}) + "\n"
         closed = json.loads(command(executable("wavebob-headless"), "--attach", session,
                                     "--runtime-dir", str(runtime), input=request).stdout)
@@ -128,7 +132,7 @@ if args.gui:
         if gui.returncode:
             print((args.out / "gui-native.log").read_text(encoding="utf-8", errors="replace")[-16000:])
 record = {"archive": str(args.archive.resolve()), "archive_sha256": archive_hash,
-          "build_commit": manifest["commit"], "host": manifest["host"], "graphics_runtime": graphics_runtime, "results": results}
+          "build_commit": manifest["commit"], "host": manifest["host"], "ui_scale":args.ui_scale, "graphics_runtime": graphics_runtime, "results": results}
 (args.out / "smoke-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 print(json.dumps({"host": manifest["host"], "gui_checked": args.gui,
                   "result": str(args.out / "smoke-result.json")}, indent=2))

@@ -35,17 +35,24 @@ jobs:
         if: runner.os == 'Windows'
         env:
           MESA_RUNTIME: ${{ steps.mesa.outputs.msys2-location }}\mingw64\bin
-        run: python scripts/smoke-release.py (Get-ChildItem dist/*.zip).FullName --out .tools/release-smoke --gui --gl-runtime "$env:MESA_RUNTIME"
+        run: |
+          python scripts/smoke-release.py (Get-ChildItem dist/*.zip).FullName --out .tools/release-smoke --gui --gl-runtime "$env:MESA_RUNTIME"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/smoke-release.py (Get-ChildItem dist/*.zip).FullName --out .tools/release-dpi --gui --ui-scale 1.25 --gl-runtime "$env:MESA_RUNTIME"
       - name: Smoke-check shipped GUI, headless and MCP binaries on macOS
         if: runner.os == 'macOS'
         shell: bash
-        run: python scripts/smoke-release.py dist/*.zip --out .tools/release-smoke --gui
+        run: |
+          python scripts/smoke-release.py dist/*.zip --out .tools/release-smoke --gui
+          python scripts/smoke-release.py dist/*.zip --out .tools/release-dpi --gui --ui-scale 1.25
       - name: Smoke-check shipped binaries on Linux X11
         if: runner.os == 'Linux'
         shell: bash
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
-        run: xvfb-run -a -s '-screen 0 1920x1080x24' python scripts/smoke-release.py dist/*.zip --out .tools/release-x11 --gui
+        run: |
+          xvfb-run -a -s '-screen 0 1920x1080x24' python scripts/smoke-release.py dist/*.zip --out .tools/release-x11 --gui
+          xvfb-run -a -s '-screen 0 1920x1080x24' python scripts/smoke-release.py dist/*.zip --out .tools/release-x11-dpi --gui --ui-scale 1.25
       - name: Smoke-check shipped GUI on Linux Wayland
         if: always() && runner.os == 'Linux' && steps.kit.outcome == 'success'
         shell: bash
@@ -65,6 +72,7 @@ jobs:
           test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
           unset DISPLAY
           python scripts/smoke-release.py dist/*.zip --out .tools/release-wayland --gui
+          python scripts/smoke-release.py dist/*.zip --out .tools/release-wayland-dpi --gui --ui-scale 1.25
       - name: Retain native capture and workflow evidence
         if: always()
         uses: actions/upload-artifact@v4
