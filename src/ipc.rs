@@ -157,10 +157,16 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
 
 fn exchange(record: &Record, request: Option<String>, timeout: Duration) -> io::Result<Reply> {
     let deadline = Instant::now() + timeout;
-    let mut stream = Stream::connect(socket_name(&record.endpoint, record.namespaced)?)?;
+    let context = |step: &str, error: io::Error| {
+        io::Error::new(error.kind(), format!("GUI IPC {step}: {error}"))
+    };
+    let mut stream = Stream::connect(socket_name(&record.endpoint, record.namespaced)?)
+        .map_err(|error| context("connect", error))?;
     // Unix sockets can wait for readiness under a kernel-enforced deadline.
     // Windows named pipes retain the bounded nonblocking compatibility path.
-    stream.set_nonblocking(cfg!(windows))?;
+    stream
+        .set_nonblocking(cfg!(windows))
+        .map_err(|error| context("blocking mode", error))?;
     let mut bytes = serde_json::to_vec(&Packet {
         session_id: record.info.session_id.clone(),
         token: record.token.clone(),
@@ -168,8 +174,10 @@ fn exchange(record: &Record, request: Option<String>, timeout: Duration) -> io::
         timeout_ms: timeout.as_millis() as u64,
     })?;
     bytes.push(b'\n');
-    write_frame(&mut stream, &bytes, deadline)?;
-    Ok(serde_json::from_slice(&read_frame(&mut stream, deadline)?)?)
+    write_frame(&mut stream, &bytes, deadline).map_err(|error| context("send", error))?;
+    Ok(serde_json::from_slice(
+        &read_frame(&mut stream, deadline).map_err(|error| context("receive", error))?,
+    )?)
 }
 
 /// List only live, authenticated endpoints. Never chooses a session for callers.
