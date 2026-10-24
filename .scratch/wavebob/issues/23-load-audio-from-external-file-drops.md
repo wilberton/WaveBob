@@ -6,15 +6,21 @@ affordance and handle batches, unsupported paths and import failures.
 
 **Blocked by:** 06 — WAV and MP3 import with scalable waveform jobs.
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] Native file drops load WAV/MP3 in either mode through documents.open, with
+- [x] Native file drops load WAV/MP3 in either mode through documents.open, with
   background progress and actionable errors. Batch drops respect worker limits.
-- [ ] Hover feedback uses the existing visual language and persistent status help.
+- [x] Hover feedback uses the existing visual language and persistent status help.
   Imports do not accidentally select audio or create arrangement clips.
-- [ ] Input tests cover multi-file/mixed-format batches, unsupported/missing files,
+- [x] Input tests cover multi-file/mixed-format batches, unsupported/missing files,
   one-shot event consumption, modal/capture deferral and cancellation/close safety.
-- [ ] Verify the native input path and inspect actual MCP screenshots.
+- [x] Verify the native input path and inspect actual MCP screenshots.
+
+## Verification
+
+Implementation `783f6cc`. Five focused file-event tests pass, including real IPC
+capture deferral. Native renderer/MCP batch tests pass at 100% and 150% scale.
+See the [captures and test scope](../../../docs/verification/tickets23-24/README.md).
 
 ## Specification
 

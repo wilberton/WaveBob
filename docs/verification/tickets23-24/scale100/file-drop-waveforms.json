@@ -1,0 +1,390 @@
+{
+  "captures": [
+    {
+      "capture": {
+        "id": "1",
+        "protocol_version": 1,
+        "result": {
+          "metadata": {
+            "frame_number": 7,
+            "height": 900,
+            "mode": "waveform",
+            "pending_resources": [
+              "external-file-hover"
+            ],
+            "presentation_revision": 0,
+            "rendered_revision": 0,
+            "scale": 1.0,
+            "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a",
+            "width": 1440
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\file-drop-hover.png"
+        },
+        "revision": 0,
+        "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a",
+        "status": "ok"
+      },
+      "file": "file-drop-hover.png"
+    },
+    {
+      "capture": {
+        "id": "9",
+        "protocol_version": 1,
+        "result": {
+          "metadata": {
+            "frame_number": 102,
+            "height": 900,
+            "mode": "waveform",
+            "pending_resources": [],
+            "presentation_revision": 3,
+            "rendered_revision": 5,
+            "scale": 1.0,
+            "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a",
+            "width": 1440
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\waveform-whole.png"
+        },
+        "revision": 5,
+        "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a",
+        "status": "ok"
+      },
+      "file": "waveform-whole.png"
+    },
+    {
+      "capture": {
+        "id": "11",
+        "protocol_version": 1,
+        "result": {
+          "metadata": {
+            "frame_number": 151,
+            "height": 900,
+            "mode": "waveform",
+            "pending_resources": [],
+            "presentation_revision": 4,
+            "rendered_revision": 5,
+            "scale": 1.0,
+            "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a",
+            "width": 1440
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\waveform-intermediate.png"
+        },
+        "revision": 5,
+        "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a",
+        "status": "ok"
+      },
+      "file": "waveform-intermediate.png"
+    },
+    {
+      "capture": {
+        "id": "13",
+        "protocol_version": 1,
+        "result": {
+          "metadata": {
+            "frame_number": 192,
+            "height": 900,
+            "mode": "waveform",
+            "pending_resources": [],
+            "presentation_revision": 5,
+            "rendered_revision": 5,
+            "scale": 1.0,
+            "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a",
+            "width": 1440
+          },
+          "mime_type": "image/png",
+          "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\waveform-samples.png"
+        },
+        "revision": 5,
+        "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a",
+        "status": "ok"
+      },
+      "file": "waveform-samples.png"
+    }
+  ],
+  "loaded": {
+    "id": "6",
+    "protocol_version": 1,
+    "result": {
+      "active_document_id": "cea1183a-f9ca-4ac5-968c-742303566e44",
+      "arrangement": {
+        "cursor": 0,
+        "dirty": false,
+        "id": "6bbcef75-bea9-4752-ad01-5ee1a4bd433a",
+        "master_gain_db": 0.0,
+        "next_clip_order": 0,
+        "revision_id": "15531f63-092e-4bb5-ab8a-3b23bb10092e",
+        "sample_rate": 48000,
+        "saved_revision_id": "15531f63-092e-4bb5-ab8a-3b23bb10092e",
+        "selected_clip_ids": [],
+        "selection": null,
+        "tracks": []
+      },
+      "documents": [
+        {
+          "channels": 2,
+          "cursor": 0,
+          "dirty": false,
+          "encoding": "wav_pcm16",
+          "frames": 48000,
+          "id": "a4157ed5-83a4-4060-9ea0-490143d35fe5",
+          "name": "Second.WAV",
+          "overloaded_samples": 0,
+          "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\Second.WAV",
+          "peak_level": 0.49951171875,
+          "revision_id": "492c5009-e433-44f3-9ed0-3f1dd9488fa2",
+          "sample_rate": 48000,
+          "save_format": {
+            "encoding": "pcm16",
+            "kind": "wav"
+          },
+          "save_sample_rate": 48000,
+          "saved_revision_id": "492c5009-e433-44f3-9ed0-3f1dd9488fa2",
+          "selection": null,
+          "source_details": {
+            "bitrate_kbps": null,
+            "bitrate_mode": null,
+            "encoder_delay": null,
+            "encoder_padding": null
+          }
+        },
+        {
+          "channels": 2,
+          "cursor": 0,
+          "dirty": false,
+          "encoding": "wav_pcm16",
+          "frames": 48000,
+          "id": "c3206b24-b1b0-47ae-8ff5-41a8689ca0b5",
+          "name": "Stereo texture.wav",
+          "overloaded_samples": 0,
+          "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\Stereo texture.wav",
+          "peak_level": 0.49951171875,
+          "revision_id": "5a4e2fb5-f4ff-40f4-80a3-8c776de37339",
+          "sample_rate": 48000,
+          "save_format": {
+            "encoding": "pcm16",
+            "kind": "wav"
+          },
+          "save_sample_rate": 48000,
+          "saved_revision_id": "5a4e2fb5-f4ff-40f4-80a3-8c776de37339",
+          "selection": null,
+          "source_details": {
+            "bitrate_kbps": null,
+            "bitrate_mode": null,
+            "encoder_delay": null,
+            "encoder_padding": null
+          }
+        },
+        {
+          "channels": 2,
+          "cursor": 0,
+          "dirty": false,
+          "encoding": "mp3",
+          "frames": 8192,
+          "id": "8b6910b7-e7c2-4adc-a19a-e644eb304706",
+          "name": "Fourth.MP3",
+          "overloaded_samples": 0,
+          "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\Fourth.MP3",
+          "peak_level": 0.36637410521507263,
+          "revision_id": "e2ec0f9b-8876-4f1c-895e-a5e85af0edb7",
+          "sample_rate": 44100,
+          "save_format": null,
+          "save_sample_rate": null,
+          "saved_revision_id": "e2ec0f9b-8876-4f1c-895e-a5e85af0edb7",
+          "selection": null,
+          "source_details": {
+            "bitrate_kbps": null,
+            "bitrate_mode": "vbr",
+            "encoder_delay": 1105,
+            "encoder_padding": 1071
+          }
+        },
+        {
+          "channels": 2,
+          "cursor": 0,
+          "dirty": false,
+          "encoding": "wav_pcm16",
+          "frames": 48000,
+          "id": "cea1183a-f9ca-4ac5-968c-742303566e44",
+          "name": "音色 third.wav",
+          "overloaded_samples": 0,
+          "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\音色 third.wav",
+          "peak_level": 0.49951171875,
+          "revision_id": "45b7f7b6-1c4e-4b6c-a27c-55a9f8dc1b8c",
+          "sample_rate": 48000,
+          "save_format": {
+            "encoding": "pcm16",
+            "kind": "wav"
+          },
+          "save_sample_rate": 48000,
+          "saved_revision_id": "45b7f7b6-1c4e-4b6c-a27c-55a9f8dc1b8c",
+          "selection": null,
+          "source_details": {
+            "bitrate_kbps": null,
+            "bitrate_mode": null,
+            "encoder_delay": null,
+            "encoder_padding": null
+          }
+        }
+      ],
+      "jobs": [
+        {
+          "error": null,
+          "id": "1f0ec3ab-2eb8-4735-a6af-9b1b2f5102cb",
+          "kind": "import",
+          "output": null,
+          "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\音色 third.wav",
+          "progress": 100,
+          "result": {
+            "channels": 2,
+            "cursor": 0,
+            "dirty": false,
+            "encoding": "wav_pcm16",
+            "frames": 48000,
+            "id": "cea1183a-f9ca-4ac5-968c-742303566e44",
+            "name": "音色 third.wav",
+            "overloaded_samples": 0,
+            "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\音色 third.wav",
+            "peak_level": 0.49951171875,
+            "revision_id": "45b7f7b6-1c4e-4b6c-a27c-55a9f8dc1b8c",
+            "sample_rate": 48000,
+            "save_format": {
+              "encoding": "pcm16",
+              "kind": "wav"
+            },
+            "save_sample_rate": 48000,
+            "saved_revision_id": "45b7f7b6-1c4e-4b6c-a27c-55a9f8dc1b8c",
+            "selection": null,
+            "source_details": {
+              "bitrate_kbps": null,
+              "bitrate_mode": null,
+              "encoder_delay": null,
+              "encoder_padding": null
+            }
+          },
+          "status": "succeeded"
+        },
+        {
+          "error": null,
+          "id": "69f7f021-7da3-4a3c-90e2-6dae457b0935",
+          "kind": "import",
+          "output": null,
+          "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\Second.WAV",
+          "progress": 100,
+          "result": {
+            "channels": 2,
+            "cursor": 0,
+            "dirty": false,
+            "encoding": "wav_pcm16",
+            "frames": 48000,
+            "id": "a4157ed5-83a4-4060-9ea0-490143d35fe5",
+            "name": "Second.WAV",
+            "overloaded_samples": 0,
+            "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\Second.WAV",
+            "peak_level": 0.49951171875,
+            "revision_id": "492c5009-e433-44f3-9ed0-3f1dd9488fa2",
+            "sample_rate": 48000,
+            "save_format": {
+              "encoding": "pcm16",
+              "kind": "wav"
+            },
+            "save_sample_rate": 48000,
+            "saved_revision_id": "492c5009-e433-44f3-9ed0-3f1dd9488fa2",
+            "selection": null,
+            "source_details": {
+              "bitrate_kbps": null,
+              "bitrate_mode": null,
+              "encoder_delay": null,
+              "encoder_padding": null
+            }
+          },
+          "status": "succeeded"
+        },
+        {
+          "error": null,
+          "id": "ea583663-4169-4e78-8d38-9dba01842f34",
+          "kind": "import",
+          "output": null,
+          "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\Stereo texture.wav",
+          "progress": 100,
+          "result": {
+            "channels": 2,
+            "cursor": 0,
+            "dirty": false,
+            "encoding": "wav_pcm16",
+            "frames": 48000,
+            "id": "c3206b24-b1b0-47ae-8ff5-41a8689ca0b5",
+            "name": "Stereo texture.wav",
+            "overloaded_samples": 0,
+            "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\Stereo texture.wav",
+            "peak_level": 0.49951171875,
+            "revision_id": "5a4e2fb5-f4ff-40f4-80a3-8c776de37339",
+            "sample_rate": 48000,
+            "save_format": {
+              "encoding": "pcm16",
+              "kind": "wav"
+            },
+            "save_sample_rate": 48000,
+            "saved_revision_id": "5a4e2fb5-f4ff-40f4-80a3-8c776de37339",
+            "selection": null,
+            "source_details": {
+              "bitrate_kbps": null,
+              "bitrate_mode": null,
+              "encoder_delay": null,
+              "encoder_padding": null
+            }
+          },
+          "status": "succeeded"
+        },
+        {
+          "error": null,
+          "id": "ec34bb7c-6535-4db6-ace8-2eb77e634f49",
+          "kind": "import",
+          "output": null,
+          "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\Fourth.MP3",
+          "progress": 100,
+          "result": {
+            "channels": 2,
+            "cursor": 0,
+            "dirty": false,
+            "encoding": "mp3",
+            "frames": 8192,
+            "id": "8b6910b7-e7c2-4adc-a19a-e644eb304706",
+            "name": "Fourth.MP3",
+            "overloaded_samples": 0,
+            "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpU3NDra\\Fourth.MP3",
+            "peak_level": 0.36637410521507263,
+            "revision_id": "e2ec0f9b-8876-4f1c-895e-a5e85af0edb7",
+            "sample_rate": 44100,
+            "save_format": null,
+            "save_sample_rate": null,
+            "saved_revision_id": "e2ec0f9b-8876-4f1c-895e-a5e85af0edb7",
+            "selection": null,
+            "source_details": {
+              "bitrate_kbps": null,
+              "bitrate_mode": "vbr",
+              "encoder_delay": 1105,
+              "encoder_padding": 1071
+            }
+          },
+          "status": "succeeded"
+        }
+      ],
+      "loop_enabled": false,
+      "project": {
+        "dirty": false,
+        "path": null,
+        "revision_id": "46cb6e92605e180299d04825873e9b3483b19a919e9806749698e88d29240efa",
+        "saved_document_revisions": {},
+        "saved_revision_id": null
+      },
+      "revision": 4,
+      "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a"
+    },
+    "revision": 4,
+    "session_id": "9f3dbc10-8edb-4b3c-9184-856b52dde51a",
+    "status": "ok"
+  },
+  "scale": "1.0"
+}
