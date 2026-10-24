@@ -1,0 +1,79 @@
+{
+  "capture": {
+    "id": "30",
+    "protocol_version": 1,
+    "result": {
+      "metadata": {
+        "frame_number": 40,
+        "height": 900,
+        "mode": "multitrack",
+        "pending_resources": [],
+        "presentation_revision": 2,
+        "rendered_revision": 13,
+        "scale": 1.0,
+        "session_id": "3374b6b4-b1fd-410f-a702-9cbcf452996b",
+        "width": 1440
+      },
+      "mime_type": "image/png",
+      "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpukhPy7\\crossfade.png"
+    },
+    "revision": 13,
+    "session_id": "3374b6b4-b1fd-410f-a702-9cbcf452996b",
+    "status": "ok"
+  },
+  "crossfades": {
+    "id": "18",
+    "protocol_version": 1,
+    "result": {
+      "regions": [
+        {
+          "contained_clip_id": null,
+          "end": 240000,
+          "first_clip_id": "af4d55a3-6293-4663-9a77-c2f90d09cc77",
+          "kind": "staggered",
+          "second_clip_id": "81a6a892-2759-4cb6-b05f-dab2701b4f42",
+          "start": 144000,
+          "track_id": "b4f574db-689f-4619-b458-84973cd430ba"
+        }
+      ],
+      "revision_id": "7ee28fa2-5a8b-40f1-b1e3-01413e94ccc0"
+    },
+    "revision": 12,
+    "session_id": "3374b6b4-b1fd-410f-a702-9cbcf452996b",
+    "status": "ok"
+  },
+  "mixed": {
+    "id": "25",
+    "protocol_version": 1,
+    "result": {
+      "channels": [
+        [
+          0.05066117271780968
+        ],
+        [
+          0.01825479231774807
+        ]
+      ],
+      "frames": 1,
+      "overloaded_samples": 0,
+      "peak_level": 0.05066117271780968,
+      "revision_id": "7ee28fa2-5a8b-40f1-b1e3-01413e94ccc0",
+      "sample_rate": 48000,
+      "start_frame": 156345
+    },
+    "revision": 12,
+    "session_id": "3374b6b4-b1fd-410f-a702-9cbcf452996b",
+    "status": "ok"
+  },
+  "third_overlap": {
+    "error": {
+      "code": "invalid_params",
+      "message": "A track supports at most two simultaneous clips. Move this clip or use another track."
+    },
+    "id": "19",
+    "protocol_version": 1,
+    "revision": 12,
+    "session_id": "3374b6b4-b1fd-410f-a702-9cbcf452996b",
+    "status": "error"
+  }
+}

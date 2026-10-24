@@ -25,3 +25,8 @@ source-bound extension, unchanged neighboring clip, derived overlap end,
 one history entry, undo/redo and Escape cancellation. Formatting and
 `git diff --check` pass. The separate mixer integration test build was blocked
 by Windows denying replacement of an existing locked `wavebob-headless.exe`.
+
+The combined build check subsequently passed all seven mixer integration tests,
+all 39 GUI tests and Clippy. The fresh production executable also passed native
+MCP crossfade/audio/overlay and waveform/selection captures; see the
+[combined build record](../../../docs/verification/combined-build/README.md).
