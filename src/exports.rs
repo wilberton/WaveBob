@@ -457,8 +457,12 @@ pub(crate) fn write_wav(
         WavEncoding::Pcm24 => 24,
         WavEncoding::Pcm32 | WavEncoding::Float32 => 32,
     };
+    // Hound writes individual sample values. Buffer those writes so large WAV
+    // exports and managed assets do not issue a system call per sample. Keep the
+    // buffer borrowed so its final flush error is checked before publication.
+    let mut buffer = std::io::BufWriter::with_capacity(256 * 1024, file);
     let mut writer = hound::WavWriter::new(
-        file,
+        &mut buffer,
         hound::WavSpec {
             channels,
             sample_rate: rate,
@@ -487,7 +491,8 @@ pub(crate) fn write_wav(
     }
     writer
         .finalize()
-        .map_err(|error| encode_error(error.to_string()))
+        .map_err(|error| encode_error(error.to_string()))?;
+    buffer.flush().map_err(io_error)
 }
 fn invalid(message: &str) -> CommandError {
     CommandError::new(ErrorCode::InvalidParams, message)
