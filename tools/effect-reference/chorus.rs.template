@@ -1,0 +1,12 @@
+pub trait Effect { fn process(&mut self,_samples:&mut[f32]);fn reset(&mut self){}fn set_tempo(&mut self,_bpm:f64){} }
+fn field(bytes:&[u8],i:usize)->Option<i32> {bytes.get(i*4..i*4+4).map(|b|i32::from_le_bytes(b.try_into().unwrap()))}
+fn ints<const N:usize>(bytes:&[u8],i:usize)->Option<[i32;N]> {let mut v=[0;N];for (k,x) in v.iter_mut().enumerate(){*x=field(bytes,i+k)?;}Some(v)}
+fn state_of(v:&[i32])->Vec<u8> {v.iter().flat_map(|x|x.to_le_bytes()).collect()}
+#[path="@ROOT@/crates/os-engine/src/effects/chorus.rs"] mod chorus;
+fn main(){
+    let args:Vec<_>=std::env::args().collect();let bytes=std::fs::read(&args[1]).unwrap();
+    let v:Vec<i32>=args[4].split(',').map(|v|v.parse().unwrap()).collect();let settings=chorus::Settings {v:v.try_into().unwrap()};
+    let mut effect=chorus::Chorus::with_settings(args[3].parse().unwrap(),&settings);
+    let mut samples:Vec<_>=bytes.chunks_exact(4).map(|b|f32::from_le_bytes(b.try_into().unwrap())).collect();for chunk in samples.chunks_mut(128){Effect::process(&mut effect,chunk);}
+    let out:Vec<_>=samples.into_iter().flat_map(|v|v.to_le_bytes()).collect();std::fs::write(&args[2],out).unwrap();
+}

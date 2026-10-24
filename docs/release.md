@@ -117,7 +117,7 @@ replace them.
 ## Current live-processing build
 
 The source now includes owner-scoped streaming processing, verified Soft Clipper,
-Reverb, Parametric EQ, Fast Distortion and Delay processors, separate native
+Reverb, Parametric EQ, Fast Distortion, Delay and Chorus processors, separate native
 effect editors and document/clip gain/fade controls. The catalogue exposes
 other effect kinds as unavailable until their implementations are delivered.
 These builds retain the baseline WAV/MP3 workflows. Live document processing

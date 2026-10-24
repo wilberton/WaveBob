@@ -1205,3 +1205,147 @@ fn native_delay_editor_capture_and_stable_window_lifecycle() {
         json!({"discard_changes":true}),
     ));
 }
+
+#[test]
+#[ignore = "requires native effect viewports; run explicitly on the desktop"]
+fn native_chorus_editor_capture_and_stable_window_lifecycle() {
+    let runtime = tempfile::tempdir().unwrap();
+    let mut gui = Gui::start(runtime.path(), "chorus-native");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let instance = loop {
+        let instances = ipc::discover(runtime.path()).unwrap();
+        if let Some(instance) = instances
+            .into_iter()
+            .find(|instance| instance.name == "chorus-native")
+        {
+            break instance;
+        }
+        if let Some(status) = gui.0.try_wait().unwrap() {
+            panic!(
+                "GUI exited {status}: {}",
+                fs::read_to_string(runtime.path().join("chorus-native.log")).unwrap()
+            );
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let client = Client::attach(runtime.path(), &instance.session_id).unwrap();
+    let source = runtime.path().join("Native Chorus.wav");
+    let mut writer = hound::WavWriter::create(
+        &source,
+        hound::WavSpec {
+            channels: 2,
+            sample_rate: 48000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        },
+    )
+    .unwrap();
+    for frame in 0..48000 {
+        let value = (frame as f32 * 997.0 * std::f32::consts::TAU / 48000.0).sin() * 1.5;
+        writer.write_sample(value).unwrap();
+        writer.write_sample(value * 0.731).unwrap();
+    }
+    writer.finalize().unwrap();
+    let job = success(request(&client, "documents.open", json!({"path":source})));
+    let document = loop {
+        let state = success(request(&client, "jobs.get", json!({"job_id":job["id"]})));
+        if state["status"] != "running" {
+            assert_eq!(state["status"], "succeeded", "{state}");
+            break state["result"].clone();
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let owner = json!({"kind":"document","id":document["id"]});
+    let state = success(request(&client, "processing.get", json!({"owner":owner})));
+    let state = success(request(
+        &client,
+        "processing.edit",
+        json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"],"change":{"action":"add","kind":"chorus"}}),
+    ));
+    let effect = state["committed"]["effects"][0]["id"].clone();
+    let opened = success(request(
+        &client,
+        "effects.editor.open",
+        json!({"owner":owner,"instance_id":effect}),
+    ));
+    let editor = opened["editor_windows"][0]["id"].clone();
+    let first_response = request(
+        &client,
+        "capture.png",
+        json!({"editor_id":editor,"timeout_ms":5000}),
+    );
+    if first_response["status"] != "ok" {
+        retain(
+            &runtime.path().join("chorus-native.log"),
+            "native-capture-failure.log",
+        );
+    }
+    let first = success(first_response);
+    assert_eq!(first["metadata"]["owner"], owner);
+    assert_eq!(first["metadata"]["instance_id"], effect);
+    assert_eq!(first["metadata"]["editor_id"], editor);
+    assert!(first["metadata"]["processing_identity"].is_string());
+    let (width, height, before) = pixels(Path::new(first["path"].as_str().unwrap()));
+    assert!(width >= 320 && height >= 240);
+    retain(
+        Path::new(first["path"].as_str().unwrap()),
+        "chorus-default.png",
+    );
+    let state = success(request(&client, "processing.get", json!({"owner":owner})));
+    success(request(
+        &client,
+        "processing.edit",
+        json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"],"change":{"action":"set_parameter","effect_id":effect,"parameter_id":"wave1","value":1024}}),
+    ));
+    let second = success(request(
+        &client,
+        "capture.png",
+        json!({"editor_id":editor,"timeout_ms":5000}),
+    ));
+    let (_, _, after) = pixels(Path::new(second["path"].as_str().unwrap()));
+    assert_ne!(
+        before, after,
+        "The real editor must redraw committed controls and transfer curve"
+    );
+    assert_ne!(
+        first["metadata"]["processing_identity"],
+        second["metadata"]["processing_identity"]
+    );
+    retain(
+        Path::new(second["path"].as_str().unwrap()),
+        "chorus-sharp-sines.png",
+    );
+    if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+        fs::write(Path::new(&directory).join("chorus-captures.json"),serde_json::to_vec_pretty(&json!({"default":{"image":"chorus-default.png","metadata":first["metadata"]},"sharp_sines":{"image":"chorus-sharp-sines.png","metadata":second["metadata"]}})).unwrap()).unwrap();
+    }
+    let opened = success(request(
+        &client,
+        "effects.editor.open",
+        json!({"owner":owner,"instance_id":effect}),
+    ));
+    assert_eq!(opened["editor_windows"].as_array().unwrap().len(), 1);
+    assert_eq!(opened["editor_windows"][0]["id"], editor);
+    success(request(
+        &client,
+        "effects.editor.close",
+        json!({"owner":owner,"instance_id":effect}),
+    ));
+    assert_eq!(
+        success(request(&client, "processing.get", json!({"owner":owner})))["committed"]["effects"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        request(&client, "capture.png", json!({"editor_id":editor}))["error"]["code"],
+        "not_found"
+    );
+    success(request(
+        &client,
+        "presentation.quit",
+        json!({"discard_changes":true}),
+    ));
+}

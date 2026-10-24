@@ -1,0 +1,48 @@
+{
+  "default": {
+    "image": "chorus-default.png",
+    "metadata": {
+      "editor_id": "99d4c13eca607872954dd0f308f177f0d8a8abb51b30b9bc56649c97c5b874d8",
+      "frame_number": 7,
+      "height": 630,
+      "instance_id": "11745223-0e2d-4f36-bc0d-2070a193259a",
+      "mode": "waveform",
+      "owner": {
+        "id": "1048815d-ab67-452f-8337-fd5794862b68",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "preview_id": null,
+      "processing_identity": "9a432e2f21f508a019912307050e376b7b602410ce52dcaa52537c518d69343b",
+      "processing_revision": "6a929b43-53e0-4e62-b74b-c8486c87b83f",
+      "rendered_revision": 2,
+      "scale": 1.0,
+      "session_id": "bf2af3cd-bc2e-4400-93a7-efec652b0679",
+      "width": 920
+    }
+  },
+  "sharp_sines": {
+    "image": "chorus-sharp-sines.png",
+    "metadata": {
+      "editor_id": "99d4c13eca607872954dd0f308f177f0d8a8abb51b30b9bc56649c97c5b874d8",
+      "frame_number": 39,
+      "height": 630,
+      "instance_id": "11745223-0e2d-4f36-bc0d-2070a193259a",
+      "mode": "waveform",
+      "owner": {
+        "id": "1048815d-ab67-452f-8337-fd5794862b68",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 7,
+      "preview_id": null,
+      "processing_identity": "e5f61535a4df30a2d5a6466bb93bf16cce9735d03ef13366c2b2732e9a176be4",
+      "processing_revision": "f5fbc2dd-c415-48b5-8184-cea1cbbfa8b8",
+      "rendered_revision": 3,
+      "scale": 1.0,
+      "session_id": "bf2af3cd-bc2e-4400-93a7-efec652b0679",
+      "width": 920
+    }
+  }
+}

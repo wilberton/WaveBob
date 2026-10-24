@@ -125,3 +125,8 @@ The final Delay kernel pass adds the endpoint test and passes all eight tests
 `cargo fmt --all` and the preserved original-source hash check pass. Native
 viewport acceptance was explicitly run and passed in 5.92 s. Logs are retained
 locally under `.tools/test34-*` / `.tools/clippy34-*`.
+
+Native cross-platform follow-up: [Rust run 40127933085](https://github.com/wilberton/WaveBob/actions/runs/40127933085)
+passes Windows x86-64, macOS ARM64 and Linux x86-64 at source `057c003`, including
+unchanged native original comparisons, retained captures/source hash, GUI/GUI-free
+tests and lint, and release builds. No tolerance adjustment was needed.

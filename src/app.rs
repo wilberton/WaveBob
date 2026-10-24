@@ -6,6 +6,8 @@ use wavebob::{CommandResult, documents::*};
 mod arranging;
 #[path = "app/browser.rs"]
 mod browser;
+#[path = "app/chorus.rs"]
+mod chorus;
 #[path = "app/delay.rs"]
 mod delay;
 #[path = "app/dropping.rs"]

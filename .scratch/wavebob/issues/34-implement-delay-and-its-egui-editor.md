@@ -59,3 +59,8 @@ The user approved automated acceptance; physical listening/device checks remain
 explicitly unverified. Ticket 44 owns final measured real-time load and integrated
 project/bounce/export verification. Pinned unchanged source is a dev-only reference
 dependency and is never imported by production builds.
+
+Native follow-up: [Rust run 40127933085](https://github.com/wilberton/WaveBob/actions/runs/40127933085)
+passes all three native platforms at `057c003`, including the unchanged original
+Delay comparisons, retained capture/source hash, GUI/GUI-free checks and release
+builds. The declared tolerances remain unchanged.

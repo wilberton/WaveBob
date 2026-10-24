@@ -1,7 +1,13 @@
 use super::*;
 use wavebob::processing::{self, Action, Owner, ParameterValue};
 fn default_geometry(kind: processing::EffectKind) -> WindowGeometry {
-    if kind == processing::EffectKind::Delay {
+    if kind == processing::EffectKind::Chorus {
+        WindowGeometry {
+            width: 920.0,
+            height: 630.0,
+            ..Default::default()
+        }
+    } else if kind == processing::EffectKind::Delay {
         WindowGeometry {
             width: 1450.0,
             height: 730.0,
@@ -406,6 +412,10 @@ impl WaveBob {
         }
         if instance.kind == processing::EffectKind::SoftClipper {
             self.soft_clipper_controls(ui, window, instance, native);
+            return;
+        }
+        if instance.kind == processing::EffectKind::Chorus {
+            self.chorus_controls(ui, window, instance, native);
             return;
         }
         if instance.kind == processing::EffectKind::Delay {
