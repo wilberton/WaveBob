@@ -125,16 +125,6 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
         if Instant::now() >= deadline {
             return Err(io::ErrorKind::TimedOut.into());
         }
-        #[cfg(unix)]
-        stream
-            .set_recv_timeout(Some(
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .max(Duration::from_micros(1)),
-            ))
-            .map_err(|error| {
-                io::Error::new(error.kind(), format!("set receive timeout: {error}"))
-            })?;
         match stream.read(&mut chunk) {
             // Empty nonblocking Windows pipes can map ERROR_NO_DATA to Ok(0),
             // which is not distinguishable from EOF at this interface.
@@ -164,6 +154,19 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
     }
 }
 
+#[cfg(unix)]
+fn configure_reader(stream: &Stream, deadline: Instant) -> io::Result<()> {
+    // Darwin rejects setsockopt after peer shutdown, even when a complete reply
+    // remains buffered. Configure before sending the request and never change
+    // options between reads. Short readiness waits keep the absolute frame
+    // deadline bounded even when a peer sends only intermittent partial data.
+    stream.set_recv_timeout(Some(
+        deadline
+            .saturating_duration_since(Instant::now())
+            .clamp(Duration::from_micros(1), Duration::from_millis(100)),
+    ))
+}
+
 fn exchange(record: &Record, request: Option<String>, timeout: Duration) -> io::Result<Reply> {
     let deadline = Instant::now() + timeout;
     let context = |step: &str, error: io::Error| {
@@ -176,6 +179,8 @@ fn exchange(record: &Record, request: Option<String>, timeout: Duration) -> io::
     stream
         .set_nonblocking(cfg!(windows))
         .map_err(|error| context("blocking mode", error))?;
+    #[cfg(unix)]
+    configure_reader(&stream, deadline).map_err(|error| context("receive configuration", error))?;
     let mut bytes = serde_json::to_vec(&Packet {
         session_id: record.info.session_id.clone(),
         token: record.token.clone(),
@@ -408,6 +413,8 @@ fn serve(
     // Unix sockets can wait for readiness under a kernel-enforced deadline.
     // Windows named pipes retain the bounded nonblocking compatibility path.
     stream.set_nonblocking(cfg!(windows))?;
+    #[cfg(unix)]
+    configure_reader(&stream, Instant::now() + Duration::from_secs(2))?;
     let packet: Packet = serde_json::from_slice(&read_frame(
         &mut stream,
         Instant::now() + Duration::from_secs(2),
@@ -541,6 +548,7 @@ mod unix_deadline_tests {
         ));
         stream.set_nonblocking(false).unwrap();
         let start = Instant::now();
+        configure_reader(&stream, start + Duration::from_millis(40)).unwrap();
         let error = read_frame(&mut stream, start + Duration::from_millis(40)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert!(start.elapsed() < Duration::from_secs(1));

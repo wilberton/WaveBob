@@ -116,3 +116,23 @@ before MCP initialization. The contextual run at `ccc4a36` identifies
 Connection and send succeeded. Deadline-setup versus read diagnostics and the
 public 12-second schema deadline regression are being checked next. The GUI-free
 500 ms schema and stalled-peer deadline tests already pass on native macOS.
+
+### macOS buffered-reply shutdown regression
+
+The minimal Unix socket-pair regression at `0e91bd9` fails on
+[native macOS](https://github.com/wilberton/WaveBob/actions/runs/40121574262/job/120954085279)
+with the exact shipped-workflow error: `set receive timeout: Invalid argument
+(os error 22)`. The writer buffers a complete newline-terminated reply and shuts
+down before readback. No renderer, MCP or large schema is needed to reproduce it.
+The original 16 KiB fixture could block before readback on a small platform send
+buffer; reducing it to 1 KiB makes the test independent of that capacity.
+
+[Apple's socket implementation](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/uipc_socket.c)
+rejects socket-option changes after shutdown in `sosetoptlock`. The frame reader
+previously reset SO_RCVTIMEO before every read, racing the server's completed
+reply and close. The candidate configures a receive timeout before sending the
+request, then reads without further option changes. At most 100 ms readiness
+slices plus an absolute deadline retain bounded waits for intermittent/stalled
+peers. Windows keeps its existing named-pipe handling. Local handshake and
+500 ms/public startup schema tests pass; the native red regression and shipped
+macOS workflow are being rerun for final confirmation.
