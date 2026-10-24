@@ -18,7 +18,7 @@ MSVC C++ build tools and Windows SDK on Windows, Xcode command line tools on mac
 or the following packages on Debian/Ubuntu:
 
 ```sh
-sudo apt-get install build-essential pkg-config libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libasound2-dev
+sudo apt-get install build-essential pkg-config libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev libasound2-dev
 ```
 
 ```sh
