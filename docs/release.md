@@ -18,8 +18,8 @@ macOS builds need the system window/audio frameworks and an OpenGL-capable deskt
 Linux GUI builds use X11 or Wayland, OpenGL and ALSA. The Debian/Ubuntu native build
 packages are in the root README. Prepared release CI uses Windows x86-64,
 macOS ARM64 and Linux x86-64 native runners; host identity is recorded by rustc.
-No macOS/Linux binary or X11/Wayland execution is claimed locally. Those checks
-and CI execution remain deferred until a remote exists, as requested by the user.
+No macOS/Linux binary or X11/Wayland execution is claimed locally. Cross-platform
+CI and native desktop verification remain pending.
 
 ## Build and package
 
@@ -43,7 +43,17 @@ a SHA-256 sidecar covers the complete ZIP. Vendoring may fetch missing pinned
 registry packages and Rust notices are downloaded from the compiler's exact commit.
 The packaged toolchain file pins the recorded compiler version. Archive timestamps,
 native compiler differences and linker output are not promised to be byte-reproducible.
-The local workspace's ignored Rust environment remains documented in the README.
+If using this workspace's ignored local Rust installation, initialize it in
+PowerShell before running Cargo:
+
+```powershell
+$env:RUSTUP_HOME = Join-Path $PWD '.tools\rustup'
+$env:CARGO_HOME = Join-Path $PWD '.tools\cargo'
+$env:PATH = "$(Join-Path $PWD '.tools\cargo\bin');$env:PATH"
+```
+
+Other checkouts can use a normal rustup installation.
+
 Packaging requires a clean committed tree and rejects source/commit changes while
 building. Registry timestamps predating ZIP's 1980 epoch are clamped for archival.
 The complete ZIP is staged and published exclusively on the same local volume.
@@ -65,9 +75,9 @@ example from an extracted Windows kit:
 .\bin\wavebob-workflow.exe --adapter mcp --binary .\bin\wavebob-mcp.exe --out review
 ```
 
-The prepared GitHub Actions release workflow runs this packaging on all three
-native hosts when manually dispatched, and uploads the ZIP plus checksum. It is
-configuration only until a remote/Actions run exists. Signing, notarization,
+The GitHub Actions release workflow runs this packaging on all three native
+hosts when manually dispatched, and uploads the ZIP plus checksum. A successful
+workflow run has not yet been verified. Signing, notarization,
 installers, auto-updates and public publishing are deferred.
 
 ## Offline rebuilding and encoder relinking
@@ -98,9 +108,9 @@ prevents rebuilding. Restore the original lock/source tree to reproduce the
 unmodified build. Full source is provided instead of relying on stripped objects.
 See [the encoder notices](mp3-encoder.md) and the kit's third-party inventory.
 
-Application licensing for public redistribution has not been selected. This is a
-local development/review kit. The bundled third-party source/license texts retain
-their own terms; this document does not replace them.
+The application is licensed under [GNU GPL v3](../LICENSE). The bundled
+third-party source/license texts retain their own terms; this document does not
+replace them.
 
 ## Known limits
 
