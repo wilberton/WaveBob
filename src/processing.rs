@@ -147,6 +147,7 @@ pub fn catalogue() -> Vec<EffectInfo> {
         .into_iter()
         .map(|kind| match kind {
             EffectKind::SoftClipper => crate::dsp::soft_clipper::info(),
+            EffectKind::Reverb => crate::dsp::reverb::info(),
             _ => EffectInfo {
                 kind,
                 available: false,

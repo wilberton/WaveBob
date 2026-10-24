@@ -1,5 +1,16 @@
 use super::*;
 use wavebob::processing::{self, Action, Owner, ParameterValue};
+fn default_geometry(kind: processing::EffectKind) -> WindowGeometry {
+    if kind == processing::EffectKind::Reverb {
+        WindowGeometry {
+            width: 1050.0,
+            height: 610.0,
+            ..Default::default()
+        }
+    } else {
+        WindowGeometry::default()
+    }
+}
 #[derive(Default)]
 pub(super) struct NativeEditor {
     focus: u64,
@@ -175,7 +186,7 @@ impl WaveBob {
                 .editor_geometry
                 .get(&window.id)
                 .cloned()
-                .unwrap_or_default();
+                .unwrap_or_else(|| default_geometry(instance.kind));
             let title = format!(
                 "{} · {} · {}",
                 instance.kind.label(),
@@ -244,7 +255,7 @@ impl WaveBob {
             .editor_geometry
             .get(id)
             .cloned()
-            .unwrap_or_default();
+            .unwrap_or_else(|| default_geometry(instance.kind));
         let mut native = self.native_editors.remove(id).unwrap_or_default();
         if native.focus != window.focus_generation {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -362,6 +373,10 @@ impl WaveBob {
         }
         if instance.kind == processing::EffectKind::SoftClipper {
             self.soft_clipper_controls(ui, window, instance, native);
+            return;
+        }
+        if instance.kind == processing::EffectKind::Reverb {
+            self.reverb_controls(ui, window, instance, native);
             return;
         }
         let Some(info) = processing::catalogue()

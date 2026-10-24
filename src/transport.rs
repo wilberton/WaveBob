@@ -1170,6 +1170,8 @@ mod processing_tests {
                 id: uuid::Uuid::new_v4().to_string(),
                 kind: crate::processing::EffectKind::Reverb,
                 bypassed: false,
+                // Deliberately incomplete parameters: invalid graphs must not
+                // replace the previous audible graph, even for available DSP.
                 parameters: Default::default(),
             });
         for _ in 0..100 {
@@ -1191,7 +1193,7 @@ mod processing_tests {
                 .as_ref()
                 .unwrap()
                 .code,
-            ErrorCode::MissingCapability
+            ErrorCode::InvalidParams
         );
         output.render_into(&mut frames);
         playback.poll();

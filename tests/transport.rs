@@ -949,3 +949,100 @@ fn soft_clipper_live_parameter_cancel_and_commit_are_callback_safe() {
     ));
     assert_eq!(source["revision_id"], original_source);
 }
+
+#[test]
+fn reverb_room_and_continuous_changes_preserve_callback_safety_and_preview_history() {
+    let (mut session, mut output, _directory, id) = fixture(48000, 1, &[16384; 8192]);
+    let owner = json!({"kind":"document","id":id});
+    let state_before = ok(send(&mut session, "processing.get", json!({"owner":owner})));
+    let added = ok(send(
+        &mut session,
+        "processing.edit",
+        json!({"owner":owner,"expected_edit_revision":state_before["committed"]["edit_revision_id"],"change":{"action":"add","kind":"reverb"}}),
+    ));
+    let effect = added["committed"]["effects"][0]["id"].clone();
+    ok(send(
+        &mut session,
+        "transport.loop.set",
+        json!({"enabled":true}),
+    ));
+    ok(send(
+        &mut session,
+        "transport.play",
+        json!({"document_id":id}),
+    ));
+    let pump = |session: &mut Session, output: &mut ManualOutput| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let mut frames = [[0.0; 2]; 64];
+            ALLOCS.set(0);
+            FREES.set(0);
+            CHECK.set(true);
+            output.render_into(&mut frames);
+            CHECK.set(false);
+            assert_eq!((ALLOCS.get(), FREES.get()), (0, 0));
+            assert!(frames.iter().flatten().all(|v| v.is_finite()));
+            let transport = state(session);
+            assert!(
+                transport["processing"]["preparation_error"].is_null(),
+                "{transport}"
+            );
+            if transport["processing"]["requested_generation"]
+                == transport["processing"]["applied_generation"]
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    };
+    pump(&mut session, &mut output);
+    let history = ok(send(&mut session, "history.get", json!({})))["undo_count"]
+        .as_u64()
+        .unwrap();
+    for commit in [false, true] {
+        let current = ok(send(&mut session, "processing.get", json!({"owner":owner})));
+        let preview = ok(send(
+            &mut session,
+            "processing.preview.begin",
+            json!({"owner":owner,"expected_edit_revision":current["committed"]["edit_revision_id"]}),
+        ));
+        for (key, value) in [
+            ("wet", 0),
+            ("wet", 160),
+            ("damping", 5),
+            ("mod_depth", 2048),
+            ("size", 1),
+            ("size", 100),
+            ("predelay", 384),
+        ] {
+            ok(send(
+                &mut session,
+                "processing.preview.update",
+                json!({"preview_id":preview["preview_id"],"change":{"action":"set_parameter","effect_id":effect,"parameter_id":key,"value":value}}),
+            ));
+            pump(&mut session, &mut output);
+        }
+        ok(send(
+            &mut session,
+            if commit {
+                "processing.preview.commit"
+            } else {
+                "processing.preview.cancel"
+            },
+            json!({"preview_id":preview["preview_id"]}),
+        ));
+        pump(&mut session, &mut output);
+        assert_eq!(
+            ok(send(&mut session, "history.get", json!({})))["undo_count"]
+                .as_u64()
+                .unwrap(),
+            history + u64::from(commit)
+        );
+    }
+    ok(send(&mut session, "history.undo", json!({})));
+    assert_eq!(
+        ok(send(&mut session, "processing.get", json!({"owner":owner})))["committed"]["effects"],
+        added["committed"]["effects"]
+    );
+}

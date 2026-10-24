@@ -3146,6 +3146,7 @@ dependencies = [
  "cpal",
  "directories",
  "eframe",
+ "flate2",
  "hound",
  "interprocess",
  "mp3lame-sys",

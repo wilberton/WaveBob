@@ -1,0 +1,48 @@
+{
+  "default": {
+    "image": "reverb-default.png",
+    "metadata": {
+      "editor_id": "6e1b190c6ae378bda751fefed10fa5813c22a0d6cf57ec3a34d0676343e9cbc2",
+      "frame_number": 7,
+      "height": 610,
+      "instance_id": "5c74f4de-8b92-494b-877a-0fbc6732ba41",
+      "mode": "waveform",
+      "owner": {
+        "id": "4f6b230c-4947-41f9-a66a-ba6fc2239933",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 1,
+      "preview_id": null,
+      "processing_identity": "80e0bfa62c97e7c2940252c3c4ff2eac2c74ba84304f3ed7a38c76ee7460471b",
+      "processing_revision": "fd34aa17-d5c1-407c-a47f-a195b989539d",
+      "rendered_revision": 2,
+      "scale": 1.0,
+      "session_id": "5fcf8fe4-07a0-4241-a67b-5ea4ca030f93",
+      "width": 1050
+    }
+  },
+  "size_100": {
+    "image": "reverb-size-100.png",
+    "metadata": {
+      "editor_id": "6e1b190c6ae378bda751fefed10fa5813c22a0d6cf57ec3a34d0676343e9cbc2",
+      "frame_number": 38,
+      "height": 610,
+      "instance_id": "5c74f4de-8b92-494b-877a-0fbc6732ba41",
+      "mode": "waveform",
+      "owner": {
+        "id": "4f6b230c-4947-41f9-a66a-ba6fc2239933",
+        "kind": "document"
+      },
+      "pending_resources": [],
+      "presentation_revision": 14,
+      "preview_id": null,
+      "processing_identity": "8f14df577d55ce283a74fe02720f35a62578ea18065ff2f739f7e50911389ac5",
+      "processing_revision": "593d4b82-6370-430e-abaf-606a2880994e",
+      "rendered_revision": 3,
+      "scale": 1.0,
+      "session_id": "5fcf8fe4-07a0-4241-a67b-5ea4ca030f93",
+      "width": 1050
+    }
+  }
+}

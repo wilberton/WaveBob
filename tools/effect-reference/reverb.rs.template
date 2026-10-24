@@ -1,0 +1,26 @@
+// Copyright (C) 2026 ItsAlphaNeon (included reference DSP)
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Isolated adapter. Original pinned source is compiled unchanged.
+#![allow(dead_code)]
+mod engine {
+    pub trait Effect {
+        fn process(&mut self, samples:&mut [f32]);
+        fn reset(&mut self);
+        fn set_tempo(&mut self, bpm:f64);
+    }
+    #[path="@ROOT@/crates/os-engine/src/effects/reverb.rs"]
+    pub mod reverb;
+}
+fn main() {
+    let args:Vec<_>=std::env::args().collect();
+    let rate=args[3].parse().unwrap();
+    let tempo=args[4].parse().unwrap();
+    let knobs:Vec<i32>=args[7].split(',').map(|value|value.parse().unwrap()).collect();
+    let settings=engine::reverb::Settings {knobs:knobs.try_into().unwrap(),tempo_sync:args[5]=="1",mid_side:args[6]=="1"};
+    let mut reverb=engine::reverb::Reverb::new(rate,settings,tempo);
+    let bytes=std::fs::read(&args[1]).unwrap();
+    let mut samples:Vec<_>=bytes.chunks_exact(4).map(|b|f32::from_le_bytes(b.try_into().unwrap())).collect();
+    for block in samples.chunks_mut(128) {engine::Effect::process(&mut reverb,block);}
+    let bytes:Vec<_>=samples.into_iter().flat_map(f32::to_le_bytes).collect();
+    std::fs::write(&args[2],bytes).unwrap();
+}

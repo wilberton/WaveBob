@@ -18,6 +18,10 @@ mod effects;
 mod envelopes;
 #[path = "app/projecting.rs"]
 mod projecting;
+#[path = "app/reverb.rs"]
+mod reverb;
+#[path = "app/reverb_room.rs"]
+mod reverb_room;
 #[path = "app/saving.rs"]
 mod saving;
 #[path = "app/soft_clipper.rs"]
