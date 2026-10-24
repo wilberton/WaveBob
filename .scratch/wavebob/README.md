@@ -41,6 +41,8 @@ criteria and blockers; only start a ticket when all its blockers are `done`.
 | 19 | [Save and reopen portable editing projects](issues/19-save-and-reopen-portable-editing-projects.md) | 13, 15, 17 |
 | 20 | [Verify a complete AI editing and visual-review workflow](issues/20-verify-a-complete-ai-editing-and-visual-review-workflow.md) | 03, 09, 18, 19 |
 | 21 | [Deliver launchable desktop and automation builds](issues/21-deliver-launchable-desktop-and-automation-builds.md) | 20 |
+| 23 | [Load audio from external file drops](issues/23-load-audio-from-external-file-drops.md) | 06 |
+| 24 | [Render continuous waveforms at intermediate zoom](issues/24-render-continuous-waveforms-at-intermediate-zoom.md) | 07 |
 
 ## Initial frontier
 

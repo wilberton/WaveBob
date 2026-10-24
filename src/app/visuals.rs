@@ -305,6 +305,8 @@ pub fn peaks(painter: &egui::Painter, rect: Rect, values: &[Peak], color: Color3
         }
     } else if !values.is_empty() {
         let mut mesh = egui::Mesh::default();
+        let mut upper = Vec::with_capacity(values.len() + 2);
+        let mut lower = Vec::with_capacity(values.len() + 2);
         // Join adjacent extrema into an envelope, including detail between coarse bins.
         for index in 0..values.len() + 2 {
             let peak = &values[index.saturating_sub(1).min(values.len() - 1)];
@@ -318,6 +320,8 @@ pub fn peaks(painter: &egui::Painter, rect: Rect, values: &[Peak], color: Color3
             for value in [peak.max, peak.min] {
                 mesh.colored_vertex(Pos2::new(x, y(value)), color);
             }
+            upper.push(Pos2::new(x, y(peak.max)));
+            lower.push(Pos2::new(x, y(peak.min)));
             if index > 0 {
                 let b = (index * 2) as u32;
                 mesh.add_triangle(b - 2, b - 1, b);
@@ -325,6 +329,14 @@ pub fn peaks(painter: &egui::Painter, rect: Rect, values: &[Peak], color: Color3
             }
         }
         painter.add(egui::Shape::mesh(mesh));
+        // A min/max band can be thinner than a physical pixel, or have zero
+        // area for equal samples. Antialiased outlines keep those sections
+        // connected and visible without altering the measured extrema.
+        let identical = upper == lower;
+        painter.add(egui::Shape::line(upper, Stroke::new(1.0, color)));
+        if !identical {
+            painter.add(egui::Shape::line(lower, Stroke::new(1.0, color)));
+        }
     }
     painter.hline(
         rect.x_range(),

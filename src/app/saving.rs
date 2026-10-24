@@ -211,6 +211,9 @@ impl WaveBob {
         if self.host.frozen() {
             return;
         }
+        if matches!(target, CloseTarget::Quit | CloseTarget::OpenProject(_)) {
+            self.file_imports.clear();
+        }
         let snapshot = self.host.snapshot();
         let dirty = match &target {
             CloseTarget::Quit | CloseTarget::OpenProject(_) => snapshot.project.dirty,

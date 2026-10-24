@@ -7,6 +7,17 @@ struct Review {
     app: app::WaveBob,
     input: std::path::PathBuf,
     focus_sent: bool,
+    drop_sequence: Option<u64>,
+}
+#[derive(Debug)]
+struct ReviewFile(std::path::PathBuf);
+impl egui::DroppedFile for ReviewFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        panic!("The shared background importer must read the audio file")
+    }
 }
 impl eframe::App for Review {
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
@@ -16,6 +27,31 @@ impl eframe::App for Review {
         {
             input.focused = true;
             input.events.clear();
+            input.hovered_files = value["hover_files"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|path| path.as_str())
+                .map(|path| egui::HoveredFile {
+                    path: Some(path.into()),
+                    ..Default::default()
+                })
+                .collect();
+            if let Some(sequence) = value["drop_sequence"].as_u64()
+                && self.drop_sequence != Some(sequence)
+            {
+                self.drop_sequence = Some(sequence);
+                input.dropped_files.extend(
+                    value["drop_files"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|path| path.as_str())
+                        .map(|path| {
+                            std::sync::Arc::new(ReviewFile(path.into())) as egui::DroppedFileHandle
+                        }),
+                );
+            }
             if let Some(hover) = value["hover"].as_array() {
                 input.events.push(egui::Event::PointerMoved(egui::pos2(
                     hover[0].as_f64().unwrap() as f32,
@@ -74,6 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             clipboard_shortcuts: false,
             viewport: egui::ViewportBuilder::default()
                 .with_visible(false)
+                .with_drag_and_drop(true)
                 .with_inner_size(size),
             ..Default::default()
         },
@@ -83,6 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 app: app::WaveBob::new(cc, &directory, name, preferences)?,
                 input,
                 focus_sent: false,
+                drop_sequence: None,
             }))
         }),
     )?;

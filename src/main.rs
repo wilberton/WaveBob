@@ -74,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eframe::NativeOptions {
             clipboard_shortcuts: false,
             viewport: eframe::egui::ViewportBuilder::default()
+                .with_drag_and_drop(true)
                 .with_visible(!hidden)
                 .with_inner_size(window_size)
                 .with_min_inner_size([800.0, 520.0]),

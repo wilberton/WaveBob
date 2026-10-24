@@ -645,6 +645,169 @@ mod live {
     }
 
     #[tokio::test]
+    #[ignore = "requires the native gui-review example for one-shot OS file-event injection"]
+    async fn native_file_drop_batch_and_continuous_waveform_captures() {
+        assert!(
+            std::env::var_os("WAVEBOB_GUI_TEST_BIN").is_some_and(|path| Path::new(&path)
+                .file_stem()
+                .is_some_and(|stem| stem == "gui-review"))
+        );
+        let runtime = tempfile::tempdir().unwrap();
+        let source = runtime.path().join("Stereo texture.wav");
+        let mut writer = hound::WavWriter::create(
+            &source,
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: 48000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for frame in 0..48000 {
+            let t = frame as f64 / 48000.0;
+            for channel in 0..2 {
+                let phase = t * std::f64::consts::TAU * (120.0 + channel as f64 * 37.0);
+                let value = 0.38 * phase.sin() + 0.12 * (phase * 2.7).sin();
+                writer.write_sample((value * 32767.0) as i16).unwrap();
+            }
+        }
+        writer.finalize().unwrap();
+        let mut paths = vec![source.clone()];
+        for name in ["Second.WAV", "音色 third.wav"] {
+            let path = runtime.path().join(name);
+            fs::copy(&source, &path).unwrap();
+            paths.push(path);
+        }
+        let mp3 = runtime.path().join("Fourth.MP3");
+        fs::copy("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3", &mp3).unwrap();
+        paths.push(mp3);
+        let input_path = runtime.path().join("review-input.json");
+        fs::write(
+            &input_path,
+            serde_json::to_vec(&json!({"hover_files":paths})).unwrap(),
+        )
+        .unwrap();
+        let scale = std::env::var("WAVEBOB_DROP_TEST_SCALE").unwrap_or("1.0".into());
+        let _gui = Gui::with_scale(
+            runtime.path(),
+            "file-drop-review",
+            &runtime.path().join("layout.json"),
+            "1440x900",
+            &scale,
+        );
+        let client = named_client(runtime.path(), "file-drop-review").await;
+        let mut records = Vec::new();
+        async fn capture(
+            client: &RunningService<RoleClient, ClientConfig>,
+            runtime: &Path,
+            label: &str,
+            records: &mut Vec<Value>,
+        ) {
+            let path = runtime.join(format!("{label}.png"));
+            let result = call(client, "capture.png", json!({"params":{"path":path}})).await;
+            let captured = response(&result);
+            assert_eq!(captured["status"], "ok", "{captured}");
+            let image = result
+                .content
+                .iter()
+                .find_map(|block| match block {
+                    ContentBlock::Image(image) => Some(image),
+                    _ => None,
+                })
+                .unwrap();
+            let png = BASE64_STANDARD.decode(&image.data).unwrap();
+            assert_eq!(png, fs::read(path).unwrap());
+            if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+                fs::create_dir_all(&directory).unwrap();
+                fs::write(Path::new(&directory).join(format!("{label}.png")), png).unwrap();
+            }
+            records.push(json!({"file":format!("{label}.png"),"capture":captured}));
+        }
+        capture(&client, runtime.path(), "file-drop-hover", &mut records).await;
+        let initial = response(&call(&client, "session.get", json!({})).await);
+        assert_eq!(initial["result"]["documents"], json!([]));
+        assert!(
+            records[0]["capture"]["result"]["metadata"]["pending_resources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item == "external-file-hover")
+        );
+        call(
+            &client,
+            "presentation.set_mode",
+            json!({"params":{"mode":"multitrack"}}),
+        )
+        .await;
+        fs::write(
+            &input_path,
+            serde_json::to_vec(&json!({
+                "drop_sequence":1,"drop_files":paths
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let loaded = loop {
+            let state = response(&call(&client, "session.get", json!({})).await);
+            let jobs = state["result"]["jobs"].as_array().unwrap();
+            assert!(jobs.iter().filter(|job| job["status"] == "running").count() <= 2);
+            if state["result"]["documents"].as_array().unwrap().len() == 4
+                && jobs.iter().all(|job| job["status"] == "succeeded")
+            {
+                break state;
+            }
+            assert!(Instant::now() < deadline, "{state}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        let documents = loaded["result"]["documents"].as_array().unwrap();
+        assert!(
+            documents
+                .iter()
+                .any(|document| document["encoding"] == "mp3")
+        );
+        assert_eq!(loaded["result"]["arrangement"]["tracks"], json!([]));
+        let document = documents
+            .iter()
+            .find(|doc| doc["name"] == "Stereo texture.wav")
+            .unwrap();
+        call(
+            &client,
+            "documents.activate",
+            json!({"params":{"document_id":document["id"]}}),
+        )
+        .await;
+        for (label, start, end) in [
+            ("waveform-whole", 0, 48000),
+            ("waveform-intermediate", 8000, 12096),
+            ("waveform-samples", 8000, 8064),
+        ] {
+            let view = response(&call(&client, "presentation.viewport.set",
+                json!({"params":{"document_id":document["id"],"start_frame":start,"end_frame":end}})).await);
+            assert_eq!(view["status"], "ok", "{view}");
+            capture(&client, runtime.path(), label, &mut records).await;
+        }
+        let final_state = response(&call(&client, "session.get", json!({})).await);
+        assert_eq!(
+            final_state["result"]["documents"].as_array().unwrap().len(),
+            4
+        );
+        assert_eq!(final_state["result"]["jobs"].as_array().unwrap().len(), 4);
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::write(
+                Path::new(&directory).join("file-drop-waveforms.json"),
+                serde_json::to_vec_pretty(
+                    &json!({"scale":scale,"loaded":loaded,"captures":records}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
     #[ignore = "requires native GUI renderer and WAVEBOB_GUI_TEST_BIN pointing to the gui-review example"]
     async fn native_status_hover_and_keyboard_focus_capture() {
         assert!(

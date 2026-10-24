@@ -272,7 +272,11 @@ in this specification and affected tickets.
   an external codec executable. Choose and document the backend, reproducible build
   inputs and redistribution/license requirements during implementation; dependency
   choice is not fixed by this spec. MP3 codec jobs run off the UI/audio callback.
-- Open via browser double-click or an Open action. Clicking the open-document
+- Open via browser double-click, an Open action or native file drops onto the
+  editor. Batch drops queue WAV/MP3 imports through the shared commands within
+  worker limits; rejected paths/errors remain visible without blocking other files.
+  Drop hover feedback identifies audio loading and does not place clips implicitly.
+  Clicking the open-document
   list activates its waveform mode. Show sample rate, channels, encoding, duration
   and dirty state. Closing the active document chooses a remaining document or
   an empty view. Unsaved edits require save/discard/cancel in the GUI and an
@@ -287,6 +291,8 @@ in this specification and affected tickets.
   Render appropriate detail for the visible span; zoomed views align stereo
   channels and their selections on the same time axis. At individual-frame zoom,
   display actual sample positions. The overview always spans the complete document.
+  Peak envelopes must retain a visible continuous trace for flat or subpixel-width
+  amplitude bands at intermediate zoom; do not rely on zero-area filled triangles.
 - A primary click places the cursor and clears the selection; primary drag sets
   a selection, with its start as edit cursor. Normalize reversed drags and clamp
   at sample bounds. Provide commands to set exact frames, select all and clear.

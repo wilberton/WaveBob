@@ -9,6 +9,78 @@ struct Harness {
 }
 
 #[test]
+fn waveform_envelope_keeps_a_visible_continuous_trace_for_flat_bins() {
+    assert_flat_waveform_visible(2);
+}
+#[test]
+fn waveform_individual_samples_keep_a_visible_continuous_trace() {
+    assert_flat_waveform_visible(1);
+}
+fn assert_flat_waveform_visible(frames_per_bin: u64) {
+    // At a few frames per bin, neighbouring samples can have identical values
+    // (DC, held values, or locally flat audio). Their trace must remain visible.
+    let ctx = egui::Context::default();
+    let rect = Rect::from_min_size(Pos2::new(20.0, 20.0), Vec2::new(128.0, 100.0));
+    let values: Vec<_> = (0..64)
+        .map(|i| Peak {
+            start_frame: i * frames_per_bin,
+            end_frame: (i + 1) * frames_per_bin,
+            min: 0.5,
+            max: 0.5,
+        })
+        .collect();
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(200.0, 160.0))),
+            ..Default::default()
+        },
+        |ui| {
+            visuals::peaks(ui.painter(), rect, &values, visuals::WAVE);
+        },
+    );
+    output.textures_delta.clear();
+    let primitives = ctx.tessellate(output.shapes, 1.0);
+    let y = rect.center().y - 0.5 * rect.height() * 0.45;
+    for x in 22..146 {
+        let point = Pos2::new(x as f32 + 0.5, y);
+        let covered = primitives
+            .iter()
+            .any(|primitive| match &primitive.primitive {
+                egui::epaint::Primitive::Mesh(mesh) => {
+                    mesh.indices.as_chunks::<3>().0.iter().any(|triangle| {
+                        let [a, b, c] = [
+                            mesh.vertices[triangle[0] as usize],
+                            mesh.vertices[triangle[1] as usize],
+                            mesh.vertices[triangle[2] as usize],
+                        ];
+                        if ![a, b, c].iter().any(|vertex| vertex.color == visuals::WAVE) {
+                            return false;
+                        }
+                        let cross = |a: Pos2, b: Pos2, c: Pos2| {
+                            (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+                        };
+                        let area = cross(a.pos, b.pos, c.pos);
+                        if area.abs() < 0.0001 {
+                            return false;
+                        }
+                        let edges = [
+                            cross(a.pos, b.pos, point),
+                            cross(b.pos, c.pos, point),
+                            cross(c.pos, a.pos, point),
+                        ];
+                        edges.iter().all(|v| *v >= -0.0001) || edges.iter().all(|v| *v <= 0.0001)
+                    })
+                }
+                _ => false,
+            });
+        assert!(
+            covered,
+            "Waveform trace disappears at column {x} for {frames_per_bin}-frame flat bins"
+        );
+    }
+}
+
+#[test]
 fn arrangement_library_drop_moves_once_and_invalid_or_escape_drops_cancel() {
     use wavebob::arrangement::*;
     let (mut h, _directory) = audio_harness();
@@ -291,16 +363,16 @@ impl Harness {
         harness
     }
     fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+        self.input_frame(egui::RawInput {
+            events,
+            ..Default::default()
+        })
+    }
+    fn input_frame(&mut self, mut input: egui::RawInput) -> egui::FullOutput {
         self.time += self.step;
-        let mut output = self.ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
-                time: Some(self.time),
-                events,
-                ..Default::default()
-            },
-            |ui| self.app.draw(ui),
-        );
+        input.screen_rect = Some(Rect::from_min_size(Pos2::ZERO, self.size));
+        input.time = Some(self.time);
+        let mut output = self.ctx.run_ui(input, |ui| self.app.draw(ui));
         output.textures_delta.clear();
         output
     }
@@ -806,6 +878,207 @@ fn audio_harness() -> (Harness, tempfile::TempDir) {
     }
     h.frame(Vec::new());
     (h, directory)
+}
+
+#[derive(Debug)]
+struct DroppedPath(std::path::PathBuf);
+impl egui::DroppedFile for DroppedPath {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        panic!("File contents must be read by the background core importer")
+    }
+}
+fn dropped(paths: impl IntoIterator<Item = std::path::PathBuf>) -> egui::RawInput {
+    egui::RawInput {
+        dropped_files: paths
+            .into_iter()
+            .map(|path| std::sync::Arc::new(DroppedPath(path)) as egui::DroppedFileHandle)
+            .collect(),
+        ..Default::default()
+    }
+}
+fn finish_dropped_files(h: &mut Harness) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        h.frame(vec![]);
+        assert!(
+            h.app
+                .host
+                .snapshot()
+                .jobs
+                .iter()
+                .filter(|job| job.status == JobStatus::Running)
+                .count()
+                <= 2
+        );
+        if h.app.file_imports.paths.is_empty()
+            && !h
+                .app
+                .host
+                .snapshot()
+                .jobs
+                .iter()
+                .any(|job| job.status == JobStatus::Running)
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{:?}", h.app.error);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+#[test]
+fn native_file_drop_batches_import_once_without_placing_clips() {
+    let (mut h, dir) = audio_harness();
+    let source = dir.path().join("Gestures.wav");
+    let mut paths = Vec::new();
+    for name in ["One.WAV", "Two.wav", "音色 three.wav"] {
+        let path = dir.path().join(name);
+        std::fs::copy(&source, &path).unwrap();
+        paths.push(path);
+    }
+    let mp3 = dir.path().join("Four.MP3");
+    std::fs::copy("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3", &mp3).unwrap();
+    paths.push(mp3);
+    h.app.dispatch(Command::AddTrack(
+        wavebob::arrangement::AddTrackParams::default(),
+    ));
+    h.app.set_mode(ViewMode::Multitrack);
+    h.input_frame(dropped(paths));
+    finish_dropped_files(&mut h);
+    assert_eq!(
+        h.app.host.snapshot().documents.len(),
+        5,
+        "{:?}",
+        h.app.error
+    );
+    assert_eq!(h.app.host.presentation().mode, ViewMode::Waveform);
+    assert!(h.app.host.snapshot().arrangement.tracks[0].clips.is_empty());
+    assert!(
+        h.app
+            .host
+            .snapshot()
+            .documents
+            .iter()
+            .any(|doc| doc.encoding == "mp3")
+    );
+    let jobs = h.app.host.snapshot().jobs.len();
+    for _ in 0..3 {
+        h.frame(vec![]);
+    }
+    assert_eq!(h.app.host.snapshot().jobs.len(), jobs);
+    assert!(h.app.error.is_none(), "{:?}", h.app.error);
+}
+#[test]
+fn file_drop_errors_preserve_existing_audio_and_continue_the_batch() {
+    let (mut h, dir) = audio_harness();
+    let original = h.app.active_document().unwrap();
+    h.input_frame(dropped([dir.path().join("notes.txt")]));
+    assert!(h.app.error.as_ref().unwrap().contains("WAV or MP3"));
+    assert_eq!(h.app.active_document().unwrap(), original);
+    h.input_frame(dropped([
+        dir.path().join("missing.wav"),
+        dir.path().join("Gestures.wav"),
+    ]));
+    finish_dropped_files(&mut h);
+    assert_eq!(h.app.host.snapshot().documents.len(), 2);
+    assert!(
+        h.app
+            .host
+            .snapshot()
+            .jobs
+            .iter()
+            .any(|job| job.status == JobStatus::Failed)
+    );
+    assert!(h.app.error.is_some());
+}
+#[test]
+fn file_drops_wait_for_dialogs_and_queued_imports_cancel_on_workspace_close() {
+    let (mut h, dir) = dirty_audio_harness();
+    let (_sender, receiver) = mpsc::channel();
+    h.app.dialog = Some(receiver);
+    h.input_frame(dropped([dir.path().join("Gestures.wav")]));
+    assert_eq!(h.app.file_imports.paths.len(), 1);
+    let count = h.app.host.snapshot().jobs.len();
+    h.frame(vec![]);
+    assert_eq!(h.app.host.snapshot().jobs.len(), count);
+    h.app.dialog = None;
+    finish_dropped_files(&mut h);
+    assert_eq!(h.app.host.snapshot().documents.len(), 2);
+    let (_sender, receiver) = mpsc::channel();
+    h.app.dialog = Some(receiver);
+    h.input_frame(dropped([dir.path().join("Gestures.wav")]));
+    h.app.begin_close(saving::CloseTarget::Quit);
+    assert!(h.app.file_imports.paths.is_empty());
+    assert!(h.app.close_flow.is_some());
+    h.app.close_flow = None;
+    h.app.dialog = None;
+    h.frame(vec![]);
+    assert_eq!(h.app.host.snapshot().documents.len(), 2);
+}
+#[test]
+fn file_drop_hover_is_visible_without_importing_and_clears_after_leaving() {
+    let mut h = Harness::new();
+    let initial = h.app.host.snapshot();
+    let output = h.input_frame(egui::RawInput {
+        hovered_files: vec![egui::HoveredFile {
+            path: Some("Audio.wav".into()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    assert!(
+        text_shapes(&output)
+            .iter()
+            .any(|(_, text)| text == "Drop audio to open")
+    );
+    assert_eq!(h.app.host.snapshot(), initial);
+    assert!(
+        !text_shapes(&h.frame(vec![]))
+            .iter()
+            .any(|(_, text)| text == "Drop audio to open")
+    );
+}
+
+#[test]
+fn file_drop_waits_for_in_flight_capture_without_losing_the_event() {
+    let (mut h, dir) = audio_harness();
+    let runtime = tempfile::tempdir().unwrap();
+    h.app
+        .host
+        .listen(runtime.path(), "drop-capture".into(), h.ctx.clone())
+        .unwrap();
+    let client =
+        wavebob::ipc::Client::attach(runtime.path(), &h.app.host.snapshot().session_id).unwrap();
+    let capture = std::thread::spawn(move || {
+        client
+            .call(r#"{"id":"capture","command":"capture.png","params":{"timeout_ms":750}}"#)
+            .unwrap()
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !h.app.host.frozen() {
+        h.frame(vec![]);
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let before = h.app.host.snapshot();
+    h.input_frame(dropped([dir.path().join("Gestures.wav")]));
+    assert_eq!(h.app.file_imports.paths.len(), 1);
+    assert_eq!(h.app.host.snapshot(), before);
+    // This painter harness has no framebuffer readback. Let the capture time
+    // out, then verify its deferred native event resumes through the core.
+    while h.app.host.frozen() {
+        h.frame(vec![]);
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(matches!(
+        capture.join().unwrap().outcome,
+        Outcome::Error { .. }
+    ));
+    finish_dropped_files(&mut h);
+    assert_eq!(h.app.host.snapshot().documents.len(), 2);
 }
 
 #[test]

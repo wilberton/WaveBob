@@ -5,6 +5,8 @@ The editor provides shared session commands, a
 GUI-free JSON runner, attachment to named GUI instances, revision-fenced PNG
 screenshots, stdio MCP support, persistent panel layout and status-bar help.
 WAV and MP3 files open as background jobs and display real mono/stereo waveforms.
+Drop one or several WAV/MP3 files anywhere in the window to open them. Batches
+queue through the shared import jobs; the open-file panel can cancel queued files.
 The [filesystem browser](docs/browser.md) supports independent WAV/MP3 audition.
 Selection/whole-sample [gain, fades, reverse and reverb](docs/editing.md) support undo/redo.
 [Cut/copy/paste/delete/trim](docs/structural-edits.md) share history, with rate/channel conversion.
@@ -104,7 +106,7 @@ waveform and arrangement captures at wide, compact, narrow and 150% scale.
 - The generated design sheet is a visual proposal, not a screenshot of the shell.
 
 The approved [editor specification](.scratch/wavebob/spec.md) and
-[22 implementation tickets](.scratch/wavebob/README.md) are published in the local
+[implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
 current execution status. Tickets 01–20 and 22 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in

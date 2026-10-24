@@ -46,6 +46,9 @@ The minimum interval is one sample frame. The ruler uses absolute document time
 at the current zoom. The overview always spans the complete sample. The waveform
 uses cached extrema at broad scales and actual connected samples/points at frame
 detail; a single visible sample is shown held across that frame's interval.
+Peak envelopes have antialiased outlines so flat and very thin amplitude bands
+remain continuous at intermediate zoom and high DPI, while retaining their
+measured minimum/maximum values.
 
 GUI presentation commands expose exact view intervals separately from core state:
 

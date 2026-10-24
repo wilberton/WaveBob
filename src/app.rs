@@ -6,6 +6,8 @@ use wavebob::{CommandResult, documents::*};
 mod arranging;
 #[path = "app/browser.rs"]
 mod browser;
+#[path = "app/dropping.rs"]
+mod dropping;
 #[path = "app/editing.rs"]
 mod editing;
 #[path = "app/effects.rs"]
@@ -33,6 +35,7 @@ pub struct WaveBob {
     detail: Option<WaveformData>,
     gesture: Option<waveform::Gesture>,
     open_requested: bool,
+    file_imports: dropping::FileImports,
     dialog: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
     reported_jobs: HashSet<String>,
     browser_path: String,
@@ -435,6 +438,7 @@ impl WaveBob {
             self.cancel_gesture();
         }
         self.poll_dialog();
+        self.file_drops(ui.ctx());
         self.update_waveform();
         self.shortcuts(ui.ctx());
         let presentation = self.host.presentation();
@@ -701,6 +705,7 @@ impl WaveBob {
                 }
             });
         self.file_modals(ui.ctx(), &mut help);
+        self.file_drop_feedback(ui.ctx(), &mut help);
         self.status(ui, status, mode, &help, error.as_deref());
         self.host.set_ui_resources(
             [
@@ -711,6 +716,10 @@ impl WaveBob {
                     .then_some("native-project-picker"),
                 self.dialog.is_some().then_some("native-open-dialog"),
                 self.close_flow.is_some().then_some("dirty-close-dialog"),
+                (!self.file_imports.paths.is_empty()).then_some("file-drop-queue"),
+                ui.ctx()
+                    .input(|input| !input.raw.hovered_files.is_empty())
+                    .then_some("external-file-hover"),
             ]
             .into_iter()
             .flatten()
@@ -729,6 +738,7 @@ impl WaveBob {
             || self.close_flow.is_some()
             || self.host.presentation().close_requested
             || self.host.mix().requested_playing
+            || !self.file_imports.paths.is_empty()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(16));
@@ -864,6 +874,12 @@ impl WaveBob {
                             job_id: job.id.clone(),
                         }));
                     }
+                }
+                if !self.file_imports.paths.is_empty() {
+                    ui.label(RichText::new(format!("{} files queued",self.file_imports.paths.len())).small().color(MUTED));
+                    let response=ui.small_button("Cancel queued");
+                    help.observe(&response,"Cancel files that have not started opening. Running imports have their own cancel buttons.");
+                    if response.clicked()&&!self.host.frozen(){self.file_imports.clear();}
                 }
             });
         let handle = Rect::from_min_max(
