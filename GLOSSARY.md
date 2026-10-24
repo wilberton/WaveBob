@@ -13,7 +13,8 @@ project manifest. It preserves source or processed PCM without an MP3 generation
 
 
 **Audio document**: An open sample with its own identity, working audio revision,
-cursor and selection; its source file is a separate object.
+cursor and selection, plus an editable gain/fade envelope and effect stack; its
+source file is a separate object.
 _Avoid_: File (when referring to the open editable document).
 
 **Audio revision**: Immutable decoded audio together with sample rate and channel
@@ -61,27 +62,57 @@ time selection. Its audio revision changes for edits, excluding navigation.
 Removing it and its clips is one history entry.
 
 **Clip**: An independently identified instance of a pinned audio revision and
-source interval, positioned on a track in project frames. Closing or editing the
-source document leaves the instance intact.
+source interval, positioned on a track in project frames. Closing the source
+document leaves its audio available; subsequent source edits affect it only when
+it has a document link.
+
+**Pinned clip**: A clip retaining an independent source snapshot, unaffected by
+later edits to the originating document.
+
+**Linked clip**: A clip associated with an editable document whose rendered sound
+is refreshed from that document. Its placement, source interval and instance
+processing belong to the clip.
+
+**Effect stack**: An ordered set of editable, bypassable effects belonging to a
+document or a clip, separate from structural edits and its gain/fade envelope.
+
+**Gain/fade envelope**: An owner's overall gain together with its edge-anchored
+fade-in and fade-out, shaping the source body without replacing its audio.
+
+**Bounce**: A rendered audio snapshot of a document's source, envelope and effect
+stack, including its tail, used as an arrangement source.
+
+**Clip body**: The source interval placed on the timeline, excluding any trailing
+effect decay. Trimming and automatic crossfade geometry use this interval.
+
+**Effect tail**: The decaying output remaining after source input ends, extending
+audible duration beyond the source body without moving subsequent clips.
+
+**Render identity**: The identity of a document's audible result, covering its
+source revision, envelope, effect stack, effect tempo and rendering policy.
+
+**Effect tempo**: The explicit project BPM used by tempo-synced effects,
+independent of waveform selection and timeline ruler units.
 
 **Clip edit revision**: The immutable identity of a clip's placement, trim and
 instance processing state. A background edit may publish only against that exact
 identity. The pinned source audio revision remains separate.
 
-**Clip processing**: Ordered instance-only DSP applied over the clip's source
-interval, with an immutable prepared result. Trimming rebuilds the processing
-over the new bounds; reverb resets at the start and ends at the clip boundary.
+**Clip processing**: The instance's gain/fade envelope and ordered effect stack,
+applied to its source interval. Its audible result can include a tail beyond the
+body and is independent of other instances' processing.
 
-**Prepared mix**: An immutable arrangement revision with resampled clip buffers,
-track/master gains and active timeline segments, shared by playback and offline
-inspection. Preparation is derived work outside audio undo history.
+**Prepared mix**: A prepared arrangement rendering plan with clip sources,
+processing, latency alignment, tails, track/master controls and active timeline
+segments, shared by playback and offline inspection.
 
 **Effective track**: A track's current controls and whether it contributes under
 the mute-over-solo rule. Mono pan and stereo balance depend on each clip's layout.
 
 **Crossfade region**: The half-open project-frame intersection of two clips on
 one track, with equal-power gains derived from their geometry. A contained clip
-dips the containing voice and fades in/out. A third simultaneous clip is invalid.
+dips the containing voice and fades in/out. A third simultaneous body is invalid;
+effect-tail overlap is separate from body overlap.
 
 **Insertion order**: The stable ordering assigned when a clip is created, retained
 when it moves, trims or returns through history. It resolves equal-start ordering

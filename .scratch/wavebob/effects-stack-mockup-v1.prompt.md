@@ -1,0 +1,20 @@
+# Effect stack mockup generation
+
+Generated on 24 October 2026 using the built-in image generation tool.
+Style reference: `docs/ui-concept-01.png`.
+Output: [Mockup v1](effects-stack-mockup-v1.png).
+
+This is a UI concept. Control values and visual details are illustrative; the
+implementation must use the source parameter definitions reviewed in
+[the effect investigation](lemon-effects-review.md). In particular, Tempo is a
+toggle, and source parameter captions/units take precedence over image text.
+
+## Prompt
+
+Use case: ui-mockup.
+Create one high-fidelity desktop UI concept image for WaveBob, a focused dark audio waveform editor. This is a design mockup for discussion, not an illustration of hardware. Landscape composition, approximately 1600x1000, very sharp readable small UI typography. Use the provided reference image ONLY as a visual style reference: preserve the dark charcoal WaveBob surfaces, fine cool gray borders, blue waveform and selection accents, compact desktop typography. Show only ONE waveform-mode main app window, not the two reference layouts.
+The focus is the right-hand EFFECTS panel, fully visible and unobscured, about 300 logical pixels wide, and a SEPARATE floating native desktop effect-control window over the lower-left/middle of the waveform. Clearly give this effect editor its own external native titlebar, border and subtle shadow; it is a separate modeless window, not docked in the sidebar, not a modal or embedded card.
+Main app: File/Edit/View/Help menu, Waveform selected and Multitrack tabs, left Open files and File browser panels, central stereo waveform of Rain ambience.wav with overview above, centered transport below and slim persistent status bar at bottom. Show tiny triangular fade handles at the waveform upper-left/upper-right body edges, a small gain square at upper-center and delicate envelope lines.
+Right sidebar, exact header 'EFFECTS'. Below exact filename 'Rain ambience.wav' and smaller scope 'Whole document'. Compact stack rows, roughly 48px tall, top to bottom 'Parametric EQ', 'Reverb', 'Delay', 'Limiter'. Each row includes left reorder grip, small enable/power toggle, effect name, a SMALL square control-window button with the icon of an outward arrow/window, and a subtle more menu. NO inline knobs, sliders, parameter names, expanded effect cards, gain/fade buttons, Apply button, or target selection dropdown in this sidebar. Reverb row is selected with subtle blue highlight and its window button is lit to communicate an open editor. Delay is bypassed, visibly dimmed, with a small 'Bypassed' sublabel. Below rows a modest '+ Add effect' button. Footer 'Bypass all' toggle and a compact output meter. Keep the rest of sidebar quiet and spacious. No explanatory callout labels outside application.
+Floating Reverb window: own titlebar 'Reverb · Rain ambience.wav', small close button, approximate width 830 height 350. Faithfully adapt the ACTUAL Lemon Studio reverb layout to clean egui-style drawing, with restrained warm lemon-yellow dial indicators on dark panels, maintaining the reference's polished desktop aesthetic. Its main content is a large square 3D faceted amber wireframe room visualization on the left, and FOUR narrow parameter group columns to its right with thin borders and headers 'INPUT', 'ROOM', 'DECAY', 'MIX'. INPUT: M/S switch plus H.CUT and L.CUT dials. ROOM: paired controls in three rows, DELAY / TEMPO, SIZE / MOD, DIFF / SPEED. DECAY: BASS / DEC, CROSS / DAMP, a small typographic 'REVERB' wordmark below. MIX: three slim vertical faders 'DRY', 'ER', 'WET', and SEP dial underneath. Knobs must have clearly labeled captions, consistent geometry and yellow pointers. Prefer correct control hierarchy over excessive ornament. Show a small readable value '2.4 s' beside DEC. Footer 'Changes are heard live'. Do not invent musical instrument controls, keyboards, piano rolls, generic preset catalogs, or plugin host machinery.
+Quality: realistic production desktop app screenshot mockup, flat UI, precise crisp edges, coherent spacing, no perspective tilt, no hand or device, no watermark. Keep full right sidebar and all its row window buttons clear.

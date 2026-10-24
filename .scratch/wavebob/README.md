@@ -3,7 +3,9 @@
 Published: 23 October 2026. The user approved the command test seam and ticket
 breakdown and authorized local Markdown publication. The original 21 tickets
 were published as `ready-for-agent`; ticket 22 was subsequently added at the
-user's request. Read ticket files for current status.
+user's request. On 24 October the user approved the live-effects spec/mockup and
+publication of tickets 27–44, including all eleven effects and the documented
+mode/routing limitations. Read ticket files for current status.
 
 [Canonical specification](spec.md) | [UI mockups](../../docs/ui-concept-01.png) |
 [Tracker conventions](../../docs/agents/issue-tracker.md)
@@ -13,6 +15,15 @@ MP3 import and sample/arrangement export are required in version 1. They are
 included in tickets 06, 13 and 18, with browser, persistence and release coverage.
 
 ## Implementation tickets
+
+Approved work: [Live effect stacks, waveform envelopes and linked arrangement
+bounces](effects-and-clip-controls.md) (`ready-for-agent`, 24 October 2026), part
+of the canonical spec. All eleven algorithms will be written as focused WaveBob
+implementations using the pinned upstream source as reference, with egui editors.
+
+Review material: [Effect stack mockup](effects-stack-mockup-v1.png) and
+[Lemon Studio effects source review](lemon-effects-review.md). Updated scope uses
+separate native egui control windows and omits pre-alpha project migration.
 
 This table is navigation. Read individual tickets for current status, acceptance
 criteria and blockers; only start a ticket when all its blockers are `done`.
@@ -46,6 +57,40 @@ criteria and blockers; only start a ticket when all its blockers are `done`.
 | 25 | [Adjust waveform selection edges](issues/25-adjust-waveform-selection-edges.md) | 07 |
 | 26 | [Drag the crossfade endpoint](issues/26-drag-the-crossfade-endpoint.md) | 15, 17 |
 
+## Live effects and envelope work
+
+Execution order for this extension is 27 through 44 below. Each effect ticket
+delivers working DSP, its own egui editor and reference/public-seam verification.
+All eleven effects, including Balance, are required. Advanced EQ quality modes,
+external sidechains and Stereo Shaper extra outputs are deferred. Older pre-alpha
+project/preset/command migration is outside scope.
+
+Ticket files own status/blocker truth; `ready-for-agent` does not imply unblocked.
+At publication, 27's baseline blockers (10, 15, 19) are complete, so it is the new
+work's entry point. Ticket 21's separately deferred release checks do not block
+this development; preserve and report their remaining verification obligations.
+
+| ID | Ticket | Blocked by |
+| --- | --- | --- |
+| 27 | [Model live processing state and reference contracts](issues/27-model-live-processing-state-and-reference-contracts.md) | 10, 15, 19 |
+| 28 | [Stream effects with safe updates and latency alignment](issues/28-stream-effects-with-safe-updates-and-latency-alignment.md) | 27, 08, 16 |
+| 29 | [Build the effect stack and native editor framework](issues/29-build-the-effect-stack-and-native-editor-framework.md) | 28, 03 |
+| 30 | [Implement Soft Clipper and its egui editor](issues/30-implement-soft-clipper-and-its-egui-editor.md) | 29 |
+| 31 | [Implement Reverb and its egui editor](issues/31-implement-reverb-and-its-egui-editor.md) | 30 |
+| 32 | [Implement Parametric EQ and its egui editor](issues/32-implement-parametric-eq-and-its-egui-editor.md) | 31 |
+| 33 | [Implement Fast Distortion and its egui editor](issues/33-implement-fast-distortion-and-its-egui-editor.md) | 32 |
+| 34 | [Implement Delay and its egui editor](issues/34-implement-delay-and-its-egui-editor.md) | 33 |
+| 35 | [Implement Chorus and its egui editor](issues/35-implement-chorus-and-its-egui-editor.md) | 33 |
+| 36 | [Implement Limiter and its egui editor](issues/36-implement-limiter-and-its-egui-editor.md) | 33 |
+| 37 | [Implement Balance and its egui editor](issues/37-implement-balance-and-its-egui-editor.md) | 33 |
+| 38 | [Implement Stereo Enhancer and its egui editor](issues/38-implement-stereo-enhancer-and-its-egui-editor.md) | 33 |
+| 39 | [Implement Stereo Shaper and its egui editor](issues/39-implement-stereo-shaper-and-its-egui-editor.md) | 33 |
+| 40 | [Implement Transient Processor and its egui editor](issues/40-implement-transient-processor-and-its-egui-editor.md) | 33 |
+| 41 | [Add waveform and clip gain and fade handles](issues/41-add-waveform-and-clip-gain-and-fade-handles.md) | 29, 25, 26 |
+| 42 | [Refresh linked bounces and mix preserved tails](issues/42-refresh-linked-bounces-and-mix-preserved-tails.md) | 17, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 |
+| 43 | [Save editable processing and export rendered audio](issues/43-save-editable-processing-and-export-rendered-audio.md) | 42, 18, 19 |
+| 44 | [Verify the complete live effects workflow](issues/44-verify-the-complete-live-effects-workflow.md) | 43, 20 |
+
 ## Initial frontier
 
 Ticket 01 can start immediately. The other tickets wait for their declared
@@ -62,3 +107,12 @@ the ticket files rather than maintaining another status copy here.
 - Ticket 13 depends on 11 for shared export resampling.
 - Ticket 18 depends on 13 for the shared MP3 encoder.
 - The command/query seam is approved; focused gesture/render tests complement it.
+- The accepted live-effects mockup governs compact stack rows and separate native
+  egui editor windows. Reference values/units govern real controls where image
+  text is illustrative.
+- Include all eleven effects, stable typed parameters and original WaveBob DSP
+  following the reference algorithms; preserve source provenance/applicable notices.
+- Preserve tails and refresh all linked instances without timeline ripple. Source
+  editing, envelopes and stacks have separate ownership and chronological history.
+- Tickets 27–44 extend the delivered behavior; completed baseline tickets keep
+  their acceptance/verification history. Publication starts no implementation.
