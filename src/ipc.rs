@@ -515,7 +515,9 @@ mod unix_deadline_tests {
     #[test]
     fn stalled_unix_peer_cannot_block_frame_reads_or_writes_indefinitely() {
         let (stream, _unread_peer) = std::os::unix::net::UnixStream::pair().unwrap();
-        let mut stream = Stream::from(interprocess::os::unix::uds_local_socket::Stream::from(stream));
+        let mut stream = Stream::from(interprocess::os::unix::uds_local_socket::Stream::from(
+            stream,
+        ));
         stream.set_nonblocking(false).unwrap();
         let start = Instant::now();
         let error = read_frame(&mut stream, start + Duration::from_millis(40)).unwrap_err();
