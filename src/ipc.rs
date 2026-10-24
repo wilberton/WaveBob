@@ -90,6 +90,12 @@ fn write_frame(stream: &mut Stream, bytes: &[u8], deadline: Instant) -> io::Resu
     let mut remaining = bytes;
     while !remaining.is_empty() {
         if Instant::now() >= deadline {
+            #[cfg(test)]
+            eprintln!(
+                "[DEBUG-ipc21] write timeout total={} remaining={}",
+                bytes.len(),
+                remaining.len()
+            );
             return Err(io::ErrorKind::TimedOut.into());
         }
         // Remain compatible with peers using the backend's default 512-byte
@@ -115,6 +121,8 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
     let mut chunk = [0; 4096];
     loop {
         if Instant::now() >= deadline {
+            #[cfg(test)]
+            eprintln!("[DEBUG-ipc21] read timeout received={}", frame.len());
             return Err(io::ErrorKind::TimedOut.into());
         }
         match stream.read(&mut chunk) {
@@ -454,9 +462,19 @@ mod tests {
         let worker = thread::spawn(move || {
             let incoming = incoming.recv_timeout(Duration::from_secs(2)).unwrap();
             assert!(incoming.deadline > Instant::now());
+            let started = Instant::now();
+            eprintln!(
+                "[DEBUG-ipc21] worker received, budget={:?}",
+                incoming.deadline.saturating_duration_since(started)
+            );
             let response =
                 crate::protocol::dispatch_line(&mut crate::Session::default(), &incoming.line);
-            assert!(serde_json::to_vec(&response).unwrap().len() > 64 * 1024);
+            let bytes = serde_json::to_vec(&response).unwrap().len();
+            eprintln!(
+                "[DEBUG-ipc21] worker serialized {bytes} bytes in {:?}",
+                started.elapsed()
+            );
+            assert!(bytes > 64 * 1024);
             incoming.reply.send(response).unwrap();
         });
         let response = exchange(
