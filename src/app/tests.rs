@@ -549,6 +549,63 @@ fn browser_preview_button_is_enabled_for_selected_audio_and_uses_status_help() {
     );
 }
 
+#[test]
+fn effect_choice_apply_and_history_buttons_use_the_current_selection() {
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    h.app.dispatch(Command::SetSelection(SelectionParams {
+        document_id: document.id.clone(),
+        start_frame: 100,
+        end_frame: 4000,
+    }));
+    let effect = h.text_rect("Fade in").center();
+    h.click(effect);
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        document.revision_id
+    );
+    assert!(!h.app.host.history().can_undo);
+    let apply = h.text_rect("Apply").center();
+    h.click(apply);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.active_document().unwrap().revision_id == document.revision_id {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    let edited = h.app.active_document().unwrap();
+    assert!(edited.dirty);
+    assert_eq!(h.app.host.history().undo_count, 1);
+    assert_eq!(
+        h.app.detail.as_ref().unwrap().revision_id,
+        edited.revision_id
+    );
+    let undo = h.text_rect("Undo").center();
+    h.click(undo);
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        document.revision_id
+    );
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Z,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+    }]);
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        edited.revision_id
+    );
+    assert_eq!(
+        h.app.active_document().unwrap().selection,
+        Some(FrameRange {
+            start: 100,
+            end: 4000
+        })
+    );
+}
+
 fn canvas_rects(h: &mut Harness) -> [Rect; 2] {
     fn collect(shape: &egui::Shape, out: &mut Vec<Rect>) {
         match shape {

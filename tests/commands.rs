@@ -153,13 +153,15 @@ fn catalogue_advertises_only_implemented_commands_and_versioned_schemas() {
             "jobs",
             "selection",
             "transport",
-            "browser"
+            "browser",
+            "effects",
+            "history"
         ])
     );
     assert_eq!(result["request_schema"]["additionalProperties"], false);
     assert!(result["response_schema"]["properties"]["revision"].is_object());
     let commands = result["commands"].as_array().unwrap();
-    assert_eq!(commands.len(), 25);
+    assert_eq!(commands.len(), 29);
     for command in commands {
         assert_eq!(command["input_schema"]["type"], "object");
         assert_eq!(command["input_schema"]["additionalProperties"], false);
@@ -178,7 +180,15 @@ fn catalogue_advertises_only_implemented_commands_and_versioned_schemas() {
             "id":"probe", "command":command["name"],
             "params": if command["name"] == "transport.loop.set" { json!({"enabled":true}) } else { json!({}) },
         });
-        assert_eq!(send(&mut session, request)["status"], "ok");
+        let response = send(&mut session, request);
+        if matches!(
+            command["name"].as_str(),
+            Some("history.undo" | "history.redo")
+        ) {
+            assert_eq!(response["error"]["code"], "invalid_params");
+        } else {
+            assert_eq!(response["status"], "ok", "{response}");
+        }
     }
 }
 

@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::browser::{AuditionVolumeParams, BrowserSnapshot, PathParams};
 use crate::documents::*;
+use crate::effects::{ApplyEffectParams, HistoryInfo};
 use crate::presentation::{
     CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, RenderMetadata,
     RenderParams, SetLayoutParams, SetModeParams, SetViewportParams,
@@ -120,6 +121,10 @@ command_registry! {
     StartAudition(PathParams) => ("audition.start", "Decode and preview WAV or MP3 without creating an audio document.", true, false, true, BrowserSnapshot),
     StopAudition(EmptyParams) => ("audition.stop", "Cancel or stop browser preview without resuming editor playback.", true, false, false, BrowserSnapshot),
     SetAuditionVolume(AuditionVolumeParams) => ("audition.volume.set", "Set independent browser preview volume from zero to one.", true, false, false, BrowserSnapshot),
+    ApplyEffect(ApplyEffectParams) => ("effects.apply", "Apply gain, fade or reverse to an explicit immutable audio target as one undoable background edit.", true, false, false, JobInfo),
+    GetHistory(EmptyParams) => ("history.get", "Inspect chronological session undo and redo availability.", false, false, false, HistoryInfo),
+    Undo(EmptyParams) => ("history.undo", "Undo the latest committed audio edit.", true, false, false, HistoryInfo),
+    Redo(EmptyParams) => ("history.redo", "Redo the latest undone audio edit.", true, false, false, HistoryInfo),
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, false, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, false, PresentationSnapshot),
     SetViewport(SetViewportParams) => ("presentation.viewport.set", "Set a document's visible frame interval without changing its selection or audio.", true, true, false, PresentationSnapshot),
@@ -139,6 +144,8 @@ pub(crate) fn capabilities(gui: bool, device: bool) -> Capabilities {
         "selection".into(),
         "transport".into(),
         "browser".into(),
+        "effects".into(),
+        "history".into(),
     ];
     if device {
         capabilities.push("audio.output".into());

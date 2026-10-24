@@ -19,6 +19,8 @@ pub(crate) struct Audio {
     pub encoding: String,
     pub source: SourceDetails,
     pub samples: Arc<[f32]>,
+    pub peak_level: f64,
+    pub overloaded_samples: u64,
     peaks: Vec<Vec<Vec<(f32, f32)>>>,
 }
 
@@ -192,6 +194,20 @@ pub(crate) fn prepare(
     progress: impl Fn(u8),
 ) -> Result<Audio, CommandError> {
     let mut peaks = Vec::new();
+    let mut peak_level = 0.0_f64;
+    let mut overloaded_samples = 0_u64;
+    for chunk in samples.chunks(16384) {
+        if cancel.load(Ordering::Acquire) {
+            return Err(CommandError::new(
+                ErrorCode::Cancelled,
+                "Audio preparation cancelled",
+            ));
+        }
+        for sample in chunk {
+            peak_level = peak_level.max(sample.abs() as f64);
+            overloaded_samples += u64::from(sample.abs() > 1.0);
+        }
+    }
     let frames = samples.len() / channels as usize;
     for channel in 0..channels as usize {
         let mut levels = vec![Vec::new()];
@@ -237,6 +253,8 @@ pub(crate) fn prepare(
         encoding,
         source,
         samples: samples.into(),
+        peak_level,
+        overloaded_samples,
         peaks,
     })
 }

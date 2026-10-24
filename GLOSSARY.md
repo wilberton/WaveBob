@@ -36,3 +36,9 @@ session, which may await the audio output boundary.
 
 **Applied transport**: The playback source and frame position currently adopted
 by the output renderer, identified by its handoff generation.
+
+**History entry**: One committed audio edit with the before and after states
+needed for undo and redo. Navigation and playback are outside edit history.
+
+**Overload**: A floating-point audio value whose absolute amplitude exceeds
+unity. It is retained during editing and reported before output conversion.

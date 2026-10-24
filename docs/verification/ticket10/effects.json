@@ -1,0 +1,63 @@
+{
+  "capture": {
+    "id": "11",
+    "protocol_version": 1,
+    "result": {
+      "metadata": {
+        "frame_number": 15,
+        "height": 900,
+        "mode": "waveform",
+        "pending_resources": [],
+        "presentation_revision": 0,
+        "rendered_revision": 5,
+        "scale": 1.0,
+        "session_id": "c8298150-3c80-4388-9218-d8cb4be6aeda",
+        "width": 1440
+      },
+      "mime_type": "image/png",
+      "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpn7p7OZ\\effects.png"
+    },
+    "revision": 5,
+    "session_id": "c8298150-3c80-4388-9218-d8cb4be6aeda",
+    "status": "ok"
+  },
+  "document": {
+    "channels": 2,
+    "cursor": 24000,
+    "dirty": true,
+    "encoding": "wav_pcm16",
+    "frames": 144000,
+    "id": "3271fa7c-4f55-4b04-82d4-b221fb94f464",
+    "name": "Texture.wav",
+    "overloaded_samples": 0,
+    "path": "C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpn7p7OZ\\Texture.wav",
+    "peak_level": 0.449981689453125,
+    "revision_id": "bd49e277-a558-4492-b47f-51e9247ca132",
+    "sample_rate": 48000,
+    "selection": {
+      "end": 120000,
+      "start": 24000
+    },
+    "source_details": {
+      "bitrate_kbps": null,
+      "bitrate_mode": null,
+      "encoder_delay": null,
+      "encoder_padding": null
+    }
+  },
+  "history": {
+    "id": "10",
+    "protocol_version": 1,
+    "result": {
+      "can_redo": false,
+      "can_undo": true,
+      "redo_count": 0,
+      "redo_label": null,
+      "undo_count": 1,
+      "undo_label": "Fade out"
+    },
+    "revision": 5,
+    "session_id": "c8298150-3c80-4388-9218-d8cb4be6aeda",
+    "status": "ok"
+  }
+}

@@ -83,6 +83,43 @@ fn assert_same_audio(actual: &Value, expected: &Value) {
     }
 }
 
+fn finish_sync_job(call: &mut impl FnMut(&str, Value) -> Value, started: Value) -> Value {
+    assert_eq!(started["status"], "ok", "{started}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let job = call("jobs.get", json!({"job_id":started["result"]["id"]}));
+        if job["result"]["status"] != "running" {
+            assert_eq!(job["result"]["status"], "succeeded", "{job}");
+            return job["result"]["result"].clone();
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+async fn finish_mcp_job(
+    client: &RunningService<RoleClient, ClientConfig>,
+    started: Value,
+) -> Value {
+    assert_eq!(started["status"], "ok", "{started}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let job = response(
+            &call(
+                client,
+                "jobs.get",
+                json!({"params":{"job_id":started["result"]["id"]}}),
+            )
+            .await,
+        );
+        if job["result"]["status"] != "running" {
+            assert_eq!(job["result"]["status"], "succeeded", "{job}");
+            return job["result"]["result"].clone();
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+}
+
 fn assert_local_refs(schema: &Value, root: &Value) {
     match schema {
         Value::Object(fields) => {
@@ -110,7 +147,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 25);
+        assert_eq!(tools.len(), 29);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -246,7 +283,7 @@ async fn target_guards_and_invalid_envelopes_leave_the_session_usable() {
 }
 
 #[tokio::test]
-async fn mp3_import_samples_match_direct_headless_and_mcp_adapters() {
+async fn mp3_import_and_effects_match_direct_headless_and_mcp_adapters() {
     use std::io::{BufRead, BufReader, Write};
     use std::process::Stdio;
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -270,6 +307,11 @@ async fn mp3_import_samples_match_direct_headless_and_mcp_adapters() {
         assert!(std::time::Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(2));
     };
+    let started = direct(
+        "effects.apply",
+        json!({"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}),
+    );
+    finish_sync_job(&mut direct, started);
     let expected = direct(
         "documents.samples",
         json!({"document_id":doc["id"],"start_frame":500,"frames":4096}),
@@ -305,6 +347,11 @@ async fn mp3_import_samples_match_direct_headless_and_mcp_adapters() {
         assert!(std::time::Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(2));
     };
+    let started = wire(
+        "effects.apply",
+        json!({"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}),
+    );
+    finish_sync_job(&mut wire, started);
     assert_same_audio(
         &wire(
             "documents.samples",
@@ -334,6 +381,8 @@ async fn mp3_import_samples_match_direct_headless_and_mcp_adapters() {
         assert!(std::time::Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(2)).await;
     };
+    let started=response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":500,"end_frame":4596},"effect":{"kind":"gain","db":6.0}}})).await);
+    finish_mcp_job(&client, started).await;
     assert_same_audio(
         &response(
             &call(
@@ -725,6 +774,102 @@ mod live {
             fs::write(
                 Path::new(&directory).join("browser.json"),
                 serde_json::to_vec_pretty(&json!({"preview":preview,"capture":metadata})).unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn undoable_effects_and_waveform_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "effects-check");
+        let client = named_client(runtime.path(), "effects-check").await;
+        let path = runtime.path().join("Texture.wav");
+        let mut writer = hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: 48000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for frame in 0..144000 {
+            for frequency in [220.0, 330.0] {
+                let t = frame as f64 / 48000.0;
+                let amplitude = 0.25 + 0.2 * (t * 3.0).sin().abs();
+                writer
+                    .write_sample(
+                        ((t * frequency * std::f64::consts::TAU).sin() * amplitude * 32767.0)
+                            as i16,
+                    )
+                    .unwrap();
+            }
+        }
+        writer.finalize().unwrap();
+        let opened =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let doc = finish_mcp_job(&client, opened).await;
+        response(
+            &call(
+                &client,
+                "documents.selection.set",
+                json!({"params":{"document_id":doc["id"],"start_frame":24000,"end_frame":120000}}),
+            )
+            .await,
+        );
+        let started=response(&call(&client,"effects.apply",json!({"params":{"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":24000,"end_frame":120000},"effect":{"kind":"fade_out"}}})).await);
+        let edited = finish_mcp_job(&client, started).await;
+        assert_eq!(edited["dirty"], true);
+        response(&call(&client, "history.undo", json!({})).await);
+        let undone = response(
+            &call(
+                &client,
+                "documents.get",
+                json!({"params":{"document_id":doc["id"]}}),
+            )
+            .await,
+        );
+        assert_eq!(undone["result"]["revision_id"], doc["revision_id"]);
+        response(&call(&client, "history.redo", json!({})).await);
+        let redone = response(
+            &call(
+                &client,
+                "documents.get",
+                json!({"params":{"document_id":doc["id"]}}),
+            )
+            .await,
+        );
+        assert_eq!(redone["result"]["revision_id"], edited["revision_id"]);
+        let history = response(&call(&client, "history.get", json!({})).await);
+        assert_eq!(history["result"]["undo_count"], 1);
+        let captured=call(&client,"capture.png",json!({"params":{"path":runtime.path().join("effects.png"),"after_revision":redone["revision"]}})).await;
+        let metadata = response(&captured);
+        assert_eq!(metadata["status"], "ok");
+        let image = captured
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("effects.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                Path::new(&directory).join("effects.json"),
+                serde_json::to_vec_pretty(
+                    &json!({"document":edited,"history":history,"capture":metadata}),
+                )
+                .unwrap(),
             )
             .unwrap();
         }
@@ -1509,7 +1654,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 37);
+        assert_eq!(tools.len(), 41);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

@@ -130,6 +130,9 @@ impl DesktopHost {
     pub fn browser(&self) -> crate::browser::BrowserSnapshot {
         self.session.browser_snapshot()
     }
+    pub fn history(&self) -> crate::effects::HistoryInfo {
+        self.session.history_snapshot()
+    }
     pub fn initialize_browser(&mut self, path: String) {
         self.session.initialize_browser(path);
     }

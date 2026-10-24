@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::mpsc};
 use wavebob::{Command, EmptyParams, Outcome, Request, desktop::DesktopHost, presentation::*};
 use wavebob::{CommandResult, documents::*};
 mod browser;
+mod effects;
 mod visuals;
 mod waveform;
 use visuals::{Icon, icon_button};
@@ -25,6 +26,8 @@ pub struct WaveBob {
     browser_path: String,
     browser_seen_path: Option<String>,
     browser_edit_path: bool,
+    effect: wavebob::effects::Effect,
+    gain_db: f64,
 }
 
 #[derive(Default)]
@@ -267,6 +270,37 @@ impl WaveBob {
         })
         };
         let select_all=ctx.input(|input|input.events.iter().any(|event|matches!(event,egui::Event::Key{key:egui::Key::A,pressed:true,repeat:false,modifiers,..} if (modifiers.command||modifiers.ctrl||modifiers.mac_cmd) && !modifiers.shift && !modifiers.alt)));
+        let history_key = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                    ..
+                } if (modifiers.command || modifiers.ctrl || modifiers.mac_cmd)
+                    && !modifiers.alt =>
+                {
+                    match key {
+                        egui::Key::Z => Some(modifiers.shift),
+                        egui::Key::Y if !modifiers.shift => Some(true),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+        });
+        if let Some(redo) = history_key {
+            let history = self.host.history();
+            if (redo && history.can_redo) || (!redo && history.can_undo) {
+                self.gesture = None;
+                self.dispatch(if redo {
+                    Command::Redo(EmptyParams {})
+                } else {
+                    Command::Undo(EmptyParams {})
+                });
+            }
+        }
         if self.host.presentation().mode == ViewMode::Waveform
             && let Some(document) = self.active_document()
         {
@@ -346,6 +380,30 @@ impl WaveBob {
                         "Open a WAV or MP3 audio file in a new document.",
                     );
                     let edit = ui.menu_button("Edit", |ui| {
+                        let history = self.host.history();
+                        for (label, enabled, redo) in [
+                            ("Undo    Ctrl/Cmd+Z", history.can_undo, false),
+                            ("Redo    Ctrl/Cmd+Shift+Z", history.can_redo, true),
+                        ] {
+                            let response = ui.add_enabled(enabled, egui::Button::new(label));
+                            help.observe(
+                                &response,
+                                if redo {
+                                    "Reapply the last undone edit."
+                                } else {
+                                    "Restore the state before the last edit."
+                                },
+                            );
+                            if response.clicked() {
+                                self.dispatch(if redo {
+                                    Command::Redo(EmptyParams {})
+                                } else {
+                                    Command::Undo(EmptyParams {})
+                                });
+                                ui.close();
+                            }
+                        }
+                        ui.separator();
                         let document = self.active_document();
                         let enabled = mode == ViewMode::Waveform && document.is_some();
                         for (label, all) in [
@@ -595,7 +653,11 @@ impl WaveBob {
                                 |ui| {
                                     visuals::file_row(
                                         ui,
-                                        &document.name,
+                                        &if document.dirty {
+                                            format!("{} *", document.name)
+                                        } else {
+                                            document.name.clone()
+                                        },
                                         snapshot.active_document_id.as_ref() == Some(&document.id),
                                         false,
                                         true,
@@ -629,11 +691,25 @@ impl WaveBob {
                     .filter(|job| job.status == JobStatus::Running)
                 {
                     ui.add(
-                        egui::ProgressBar::new(job.progress as f32 / 100.0)
-                            .text(format!("Opening… {}%", job.progress)),
+                        egui::ProgressBar::new(job.progress as f32 / 100.0).text(format!(
+                            "{}… {}%",
+                            if job.kind == "import" {
+                                "Opening"
+                            } else {
+                                &job.kind
+                            },
+                            job.progress
+                        )),
                     );
-                    let response = ui.small_button("Cancel import");
-                    help.observe(&response, "Cancel this import without creating a document.");
+                    let response = ui.small_button(if job.kind == "import" {
+                        "Cancel import"
+                    } else {
+                        "Cancel edit"
+                    });
+                    help.observe(
+                        &response,
+                        "Cancel this job without publishing partial audio.",
+                    );
                     if response.clicked() {
                         self.dispatch(Command::CancelJob(JobParams {
                             job_id: job.id.clone(),
@@ -668,74 +744,6 @@ impl WaveBob {
             });
         }
         self.browser_view(ui, lower, help);
-    }
-
-    fn effects(&mut self, ui: &mut egui::Ui, area: Rect, help: &mut Help) {
-        let mut content = child(ui, area);
-        content.horizontal(|ui| {
-            let response = ui.add(egui::Button::new("›").frame(false));
-            help.observe(
-                &response,
-                "Hide the effects panel. Backtick toggles both panels.",
-            );
-            if response.clicked() {
-                self.layout(SetLayoutParams {
-                    right_visible: Some(false),
-                    ..Default::default()
-                });
-            }
-            section(ui, "EDIT & EFFECTS");
-        });
-        content.add_space(18.0);
-        content.label("Target");
-        let target = match self.display_document() {
-            Some(doc) if doc.selection.is_some() => "Selection",
-            Some(_) => "Whole sample",
-            None => "No editing target",
-        };
-        help.observe(&content.add_enabled(false,centered_button(target).min_size(Vec2::new(area.width(),26.0))),"Effects apply to the selection, or the whole sample when no selection exists. Editing arrives in ticket 10.");
-        content.add_space(14.0);
-        content.horizontal(|ui| {
-            ui.label("Gain");
-            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                ui.label(RichText::new("0.0 dB").small().color(MUTED));
-            });
-        });
-        content.style_mut().spacing.slider_width = area.width();
-        let mut gain = 0.0;
-        help.observe(
-            &content.add_enabled(
-                false,
-                egui::Slider::new(&mut gain, -24.0..=12.0).show_value(false),
-            ),
-            "Gain editing is not implemented yet.",
-        );
-        content.add_space(12.0);
-        for pair in [["Fade in", "Fade out"], ["Reverse", "Reverb"]] {
-            content.horizontal(|ui| {
-                for label in pair {
-                    help.observe(
-                        &ui.add_enabled(
-                            false,
-                            centered_button(label)
-                                .min_size(Vec2::new((area.width() - 7.0) / 2.0, 28.0)),
-                        ),
-                        "This audio effect is not implemented yet.",
-                    );
-                }
-            });
-            content.add_space(4.0);
-        }
-        content.add_space(5.0);
-        help.observe(
-            &content.add_enabled(
-                false,
-                centered_button("Apply")
-                    .fill(BLUE)
-                    .min_size(Vec2::new(area.width(), 30.0)),
-            ),
-            "Apply is unavailable until audio editing is implemented.",
-        );
     }
 
     fn multitrack_view(&self, ui: &mut egui::Ui, help: &mut Help) {

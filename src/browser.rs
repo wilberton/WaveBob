@@ -225,6 +225,8 @@ impl Browser {
                 dirty: false,
                 cursor: 0,
                 selection: None,
+                peak_level: audio.peak_level,
+                overloaded_samples: audio.overloaded_samples,
             },
             audio,
         ))

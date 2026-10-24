@@ -6,6 +6,7 @@ mod commands;
 #[cfg(feature = "gui")]
 pub mod desktop;
 pub mod documents;
+pub mod effects;
 pub mod ipc;
 pub mod mcp;
 #[cfg(feature = "gui")]
@@ -22,7 +23,7 @@ use serde_json::Value;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// An owned read model; changing it cannot mutate the session.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct SessionSnapshot {
     pub session_id: String,
     pub revision: u64,
@@ -70,6 +71,7 @@ pub enum CommandResult {
     Waveform(documents::WaveformData),
     Transport(Box<transport::TransportSnapshot>),
     Browser(Box<browser::BrowserSnapshot>),
+    History(effects::HistoryInfo),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -198,9 +200,10 @@ impl Session {
         }
         if transport.applied.generation == transport.requested.generation
             && let Some(id) = &transport.applied.document_id
+            && let Some(audio_revision) = &transport.applied.audio_revision_id
         {
             self.editor
-                .update_playback_cursor(id, transport.applied.frame);
+                .update_playback_cursor(id, audio_revision, transport.applied.frame);
         }
         self.synchronize_output(None);
     }
@@ -227,6 +230,9 @@ impl Session {
     }
     pub fn browser_snapshot(&self) -> browser::BrowserSnapshot {
         self.browser.snapshot()
+    }
+    pub fn history_snapshot(&self) -> effects::HistoryInfo {
+        self.editor.history_snapshot()
     }
     #[cfg(feature = "gui")]
     pub(crate) fn initialize_browser(&mut self, path: String) {

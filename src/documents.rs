@@ -8,6 +8,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
+mod editing;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct FrameRange {
@@ -22,7 +23,7 @@ pub struct SourceDetails {
     pub encoder_delay: Option<u32>,
     pub encoder_padding: Option<u32>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct DocumentInfo {
     pub id: String,
     pub revision_id: String,
@@ -37,6 +38,8 @@ pub struct DocumentInfo {
     pub dirty: bool,
     pub cursor: u64,
     pub selection: Option<FrameRange>,
+    pub peak_level: f64,
+    pub overloaded_samples: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -46,7 +49,7 @@ pub enum JobStatus {
     Failed,
     Cancelled,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct JobInfo {
     pub id: String,
     pub kind: String,
@@ -145,6 +148,7 @@ pub struct WaveformParams {
 enum Event {
     Progress(String, u8),
     Finished(String, Result<audio::Audio, CommandError>),
+    Edited(String, Result<Option<audio::Audio>, CommandError>),
 }
 pub(crate) type Wake = Arc<dyn Fn() + Send + Sync>;
 pub(crate) struct Editor {
@@ -155,6 +159,8 @@ pub(crate) struct Editor {
     sender: mpsc::Sender<Event>,
     receiver: mpsc::Receiver<Event>,
     wake: Option<Wake>,
+    pending_edits: BTreeMap<String, editing::PendingEdit>,
+    history: editing::History,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -167,6 +173,8 @@ impl Default for Editor {
             sender,
             receiver,
             wake: None,
+            pending_edits: BTreeMap::new(),
+            history: editing::History::default(),
         }
     }
 }
@@ -191,8 +199,12 @@ impl Editor {
     pub fn activate_for_transport(&mut self, id: &str) {
         self.active = Some(id.into());
     }
-    pub fn update_playback_cursor(&mut self, id: &str, frame: u64) {
-        if let Some(document) = self.documents.iter_mut().find(|doc| doc.id == id) {
+    pub fn update_playback_cursor(&mut self, id: &str, audio_revision: &str, frame: u64) {
+        if let Some(document) = self
+            .documents
+            .iter_mut()
+            .find(|doc| doc.id == id && doc.revision_id == audio_revision)
+        {
             document.cursor = frame.min(document.frames);
         }
     }
@@ -208,7 +220,8 @@ impl Editor {
         }
         if document.cursor != frame {
             advance(revision)?;
-            self.update_playback_cursor(id, frame);
+            let audio_revision = document.revision_id.clone();
+            self.update_playback_cursor(id, &audio_revision, frame);
         }
         Ok(self.document(id)?.clone())
     }
@@ -216,8 +229,9 @@ impl Editor {
         self.wake = Some(wake);
     }
     pub fn poll(&mut self, revision: &mut u64) {
-        for event in self.receiver.try_iter() {
+        while let Ok(event) = self.receiver.try_recv() {
             match event {
+                Event::Edited(id, result) => self.finish_edit(id, result, revision),
                 Event::Progress(id, percent) => {
                     if let Some((job, _)) = self.jobs.get_mut(&id)
                         && job.status == JobStatus::Running
@@ -271,6 +285,8 @@ impl Editor {
                                     dirty: false,
                                     cursor: 0,
                                     selection: None,
+                                    peak_level: audio.peak_level,
+                                    overloaded_samples: audio.overloaded_samples,
                                 };
                                 self.revisions
                                     .insert(document.revision_id.clone(), Arc::new(audio));
@@ -301,6 +317,10 @@ impl Editor {
         revision: &mut u64,
     ) -> Result<CommandResult, CommandError> {
         match command {
+            Command::ApplyEffect(params) => self.apply_effect(params),
+            Command::GetHistory(_) => Ok(CommandResult::History(self.history.snapshot())),
+            Command::Undo(_) => self.restore_history(false, revision),
+            Command::Redo(_) => self.restore_history(true, revision),
             Command::OpenDocument(params) => self.open(params),
             Command::GetDocument(params) => Ok(CommandResult::Document(
                 self.document(&params.document_id)?.clone().into(),
@@ -323,7 +343,8 @@ impl Editor {
                 }
                 advance(revision)?;
                 self.documents.retain(|doc| doc.id != document.id);
-                self.revisions.remove(&document.revision_id);
+                self.history.remove_document(&document.id);
+                self.collect_revisions();
                 if self.active.as_ref() == Some(&document.id) {
                     self.active = self.documents.last().map(|doc| doc.id.clone());
                 }
