@@ -157,13 +157,14 @@ fn catalogue_advertises_only_implemented_commands_and_versioned_schemas() {
             "effects",
             "history",
             "edit",
-            "audio.export"
+            "audio.export",
+            "arrangement"
         ])
     );
     assert_eq!(result["request_schema"]["additionalProperties"], false);
     assert!(result["response_schema"]["properties"]["revision"].is_object());
     let commands = result["commands"].as_array().unwrap();
-    assert_eq!(commands.len(), 37);
+    assert_eq!(commands.len(), 46);
     for command in commands {
         assert_eq!(command["input_schema"]["type"], "object");
         assert_eq!(command["input_schema"]["additionalProperties"], false);
@@ -186,7 +187,8 @@ fn catalogue_advertises_only_implemented_commands_and_versioned_schemas() {
         if matches!(
             command["name"].as_str(),
             Some("history.undo" | "history.redo")
-        ) {
+        ) && response["status"] == "error"
+        {
             assert_eq!(response["error"]["code"], "invalid_params");
         } else {
             assert_eq!(response["status"], "ok", "{response}");

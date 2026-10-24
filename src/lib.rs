@@ -1,5 +1,6 @@
 //! The shared application command interface. No window or audio device is required.
 
+pub mod arrangement;
 mod audio;
 pub mod browser;
 mod commands;
@@ -33,6 +34,7 @@ pub struct SessionSnapshot {
     pub documents: Vec<documents::DocumentInfo>,
     pub active_document_id: Option<String>,
     pub jobs: Vec<documents::JobInfo>,
+    pub arrangement: arrangement::Arrangement,
 }
 
 /// Typed requests are used directly by the GUI. Protocol adapters construct the
@@ -62,7 +64,7 @@ impl Request {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum CommandResult {
-    Snapshot(SessionSnapshot),
+    Snapshot(Box<SessionSnapshot>),
     Capabilities(Capabilities),
     Presentation(presentation::PresentationSnapshot),
     Rendered(presentation::RenderMetadata),
@@ -75,6 +77,7 @@ pub enum CommandResult {
     Browser(Box<browser::BrowserSnapshot>),
     History(effects::HistoryInfo),
     Clipboard(edits::ClipboardInfo),
+    Arrangement(Box<arrangement::Arrangement>),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -159,6 +162,7 @@ impl Default for Session {
                 documents: Vec::new(),
                 active_document_id: None,
                 jobs: Vec::new(),
+                arrangement: arrangement::Arrangement::default(),
             },
             editor: documents::Editor::default(),
             playback: transport::Playback::default(),
@@ -175,6 +179,7 @@ impl Session {
         snapshot.documents = self.editor.documents();
         snapshot.active_document_id = self.editor.active();
         snapshot.jobs = self.editor.jobs();
+        snapshot.arrangement = self.editor.arrangement();
         snapshot
     }
 
@@ -266,7 +271,7 @@ impl Session {
             return self.failure(Some(request.id), error);
         }
         let result = match request.command {
-            Command::GetSession(_) => Ok(CommandResult::Snapshot(self.snapshot())),
+            Command::GetSession(_) => Ok(CommandResult::Snapshot(self.snapshot().into())),
             Command::GetCapabilities(_) => Ok(CommandResult::Capabilities(commands::capabilities(
                 false,
                 self.playback.configured(),
@@ -343,6 +348,7 @@ impl Session {
             Command::ToggleLoop(_) => self.set_loop(!self.snapshot.loop_enabled),
             Command::GetPresentation(_)
             | Command::SetMode(_)
+            | Command::SetTimelineViewport(_)
             | Command::SetEffect(_)
             | Command::RequestQuit(_)
             | Command::SetViewport(_)
@@ -592,7 +598,7 @@ impl Session {
             self.snapshot.revision = revision;
             self.synchronize_output(None);
         }
-        Ok(CommandResult::Snapshot(self.snapshot()))
+        Ok(CommandResult::Snapshot(self.snapshot().into()))
     }
 
     pub(crate) fn failure(&self, id: Option<String>, error: CommandError) -> Response {

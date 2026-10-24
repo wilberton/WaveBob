@@ -141,13 +141,14 @@ impl WaveBob {
         if self.host.frozen() {
             return;
         }
-        let dirty = self.host.snapshot().documents.iter().any(|doc| {
-            doc.dirty
-                && match &target {
-                    CloseTarget::Quit => true,
-                    CloseTarget::Document(id) => id == &doc.id,
-                }
-        });
+        let dirty = (matches!(target, CloseTarget::Quit) && self.host.snapshot().arrangement.dirty)
+            || self.host.snapshot().documents.iter().any(|doc| {
+                doc.dirty
+                    && match &target {
+                        CloseTarget::Quit => true,
+                        CloseTarget::Document(id) => id == &doc.id,
+                    }
+            });
         if !dirty && let CloseTarget::Document(id) = &target {
             self.dispatch(Command::CloseDocument(CloseParams {
                 document_id: id.clone(),
@@ -426,6 +427,8 @@ impl WaveBob {
             });
             if !flow.saving {
                 ui.label("Save changes before closing?");
+                let arrangement_dirty=matches!(flow.target,CloseTarget::Quit)&&self.host.snapshot().arrangement.dirty;
+                if arrangement_dirty {ui.label("Arrangement has unsaved changes. Project saving is added in ticket 19; cancel to retain it, or explicitly discard.");}
                 for doc in self.host.snapshot().documents.into_iter().filter(|doc| {
                     doc.dirty
                         && match &flow.target {
@@ -439,7 +442,7 @@ impl WaveBob {
                     ui.colored_label(Color32::LIGHT_RED, error);
                 }
                 ui.horizontal(|ui| {
-                    let response = ui.button("Save");
+                    let response = ui.add_enabled(!arrangement_dirty,egui::Button::new("Save"));
                     help.observe(
                         &response,
                         "Save dirty audio before closing. MP3 settings are confirmed explicitly.",

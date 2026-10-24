@@ -1,0 +1,119 @@
+{
+  "arrangement": {
+    "id": "14",
+    "protocol_version": 1,
+    "result": {
+      "cursor": 0,
+      "dirty": true,
+      "revision_id": "995d2038-e1e6-46d3-a889-da52e1a6aef4",
+      "sample_rate": 48000,
+      "saved_revision_id": "aab73807-eb69-43ca-8d6b-3963f87165e3",
+      "selected_clip_ids": [
+        "2063881c-192d-4a44-8a2a-501463144914"
+      ],
+      "selection": null,
+      "tracks": [
+        {
+          "clips": [
+            {
+              "channels": 2,
+              "document_id": "8450428b-6f20-43e3-ab8d-089f049f0f5d",
+              "frames": 288000,
+              "id": "cab7968f-9ea9-4e8f-aa14-32826ed4f3cc",
+              "name": "Rain ambience.wav",
+              "position": 0,
+              "revision_id": "f8dbad62-bf7e-4e96-8168-b6b246a57a06",
+              "source_end": 288000,
+              "source_rate": 48000,
+              "source_start": 0
+            }
+          ],
+          "gain_db": 0.0,
+          "id": "c2b4a40f-23b4-40c8-9283-b7d2c6ad42ee",
+          "mute": false,
+          "name": "Ambience",
+          "pan": 0.0,
+          "solo": false
+        },
+        {
+          "clips": [
+            {
+              "channels": 2,
+              "document_id": "b7ed882a-722b-4be3-9b8d-78df4d901d6d",
+              "frames": 288000,
+              "id": "f6122f38-23ca-40dc-9451-cbd38697efd3",
+              "name": "Footsteps.wav",
+              "position": 96000,
+              "revision_id": "10c09f98-fbf7-4c94-9f8c-d1a56af898d5",
+              "source_end": 264600,
+              "source_rate": 44100,
+              "source_start": 0
+            }
+          ],
+          "gain_db": 0.0,
+          "id": "3540f695-7944-4e6f-b04d-f2c8c6ea9218",
+          "mute": false,
+          "name": "Footsteps",
+          "pan": 0.0,
+          "solo": false
+        },
+        {
+          "clips": [
+            {
+              "channels": 2,
+              "document_id": "39b5cf5b-74cb-4d97-a633-38840358b004",
+              "frames": 288000,
+              "id": "2063881c-192d-4a44-8a2a-501463144914",
+              "name": "Piano texture.wav",
+              "position": 192000,
+              "revision_id": "a88bf579-3c41-431d-9924-8a6a0645e8d8",
+              "source_end": 288000,
+              "source_rate": 48000,
+              "source_start": 0
+            }
+          ],
+          "gain_db": 0.0,
+          "id": "60f010a3-a167-4f3b-b955-0a02734e05ee",
+          "mute": false,
+          "name": "Texture",
+          "pan": 0.0,
+          "solo": false
+        },
+        {
+          "clips": [],
+          "gain_db": 0.0,
+          "id": "d51b5d64-8608-453f-8629-5e21f967ede0",
+          "mute": false,
+          "name": "Track 4",
+          "pan": 0.0,
+          "solo": false
+        }
+      ]
+    },
+    "revision": 10,
+    "session_id": "f43b20df-865c-4858-abfc-90caa899ad57",
+    "status": "ok"
+  },
+  "capture": {
+    "id": "21",
+    "protocol_version": 1,
+    "result": {
+      "metadata": {
+        "frame_number": 23,
+        "height": 900,
+        "mode": "multitrack",
+        "pending_resources": [],
+        "presentation_revision": 1,
+        "rendered_revision": 12,
+        "scale": 1.0,
+        "session_id": "f43b20df-865c-4858-abfc-90caa899ad57",
+        "width": 1440
+      },
+      "mime_type": "image/png",
+      "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpbhupAe\\arrangement.png"
+    },
+    "revision": 12,
+    "session_id": "f43b20df-865c-4858-abfc-90caa899ad57",
+    "status": "ok"
+  }
+}

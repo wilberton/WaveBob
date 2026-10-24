@@ -8,6 +8,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
+mod arranging;
 mod editing;
 mod saving;
 
@@ -179,6 +180,7 @@ pub(crate) struct Editor {
     history: editing::History,
     clipboard: Option<editing::Clipboard>,
     pending_outputs: BTreeMap<String, saving::PendingOutput>,
+    arrangement: crate::arrangement::Arrangement,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -195,13 +197,16 @@ impl Default for Editor {
             history: editing::History::default(),
             clipboard: None,
             pending_outputs: BTreeMap::new(),
+            arrangement: crate::arrangement::Arrangement::default(),
         }
     }
 }
 impl Editor {
     #[cfg(feature = "gui")]
     pub fn check_quit(&self, discard: bool) -> Result<(), CommandError> {
-        if !discard && self.documents.iter().any(|document| document.dirty) {
+        if !discard
+            && (self.arrangement.dirty || self.documents.iter().any(|document| document.dirty))
+        {
             return Err(CommandError::new(
                 ErrorCode::DirtyDocument,
                 "Save dirty documents or specify explicit discard intent before quitting",
@@ -365,6 +370,15 @@ impl Editor {
         revision: &mut u64,
     ) -> Result<CommandResult, CommandError> {
         match command {
+            command @ (Command::GetArrangement(_)
+            | Command::AddTrack(_)
+            | Command::UpdateTrack(_)
+            | Command::RemoveTrack(_)
+            | Command::InsertClip(_)
+            | Command::MoveClip(_)
+            | Command::RemoveClip(_)
+            | Command::NavigateArrangement(_)
+            | Command::GetClipWaveform(_)) => self.arrange(command, revision),
             Command::ApplyEffect(params) => self.apply_effect(params),
             Command::GetHistory(_) => Ok(CommandResult::History(self.history.snapshot())),
             Command::Undo(_) => self.restore_history(false, revision),

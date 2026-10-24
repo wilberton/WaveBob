@@ -45,3 +45,17 @@ unity. It is retained during editing and reported before output conversion.
 
 **Audio clipboard**: The session's retained copy of an audio interval, independent
 of the operating system's text clipboard and the source document's lifetime.
+
+**Arrangement**: Ordered tracks with clips, a project-rate timeline cursor and
+time selection. Its audio revision changes for edits, excluding navigation.
+
+**Track**: A named arrangement lane with stable identity, mute, solo, gain and pan.
+Removing it and its clips is one history entry.
+
+**Clip**: An independently identified instance of a pinned audio revision and
+source interval, positioned on a track in project frames. Closing or editing the
+source document leaves the instance intact.
+
+**Project frame**: An integer arrangement time boundary at the project sample
+rate, initially 48 kHz. Source-to-project duration conversion rounds once to the
+nearest frame, with a minimum of one for a nonempty source interval.

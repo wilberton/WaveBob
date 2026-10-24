@@ -94,6 +94,15 @@ macro_rules! command_registry {
 }
 
 command_registry! {
+    GetArrangement(EmptyParams) => ("arrangement.get", "Inspect tracks, pinned clips and exact project-frame navigation.", false, false, false, crate::arrangement::Arrangement),
+    AddTrack(crate::arrangement::AddTrackParams) => ("tracks.add", "Insert a named track as one undoable arrangement edit.", true, false, false, crate::arrangement::Arrangement),
+    UpdateTrack(crate::arrangement::UpdateTrackParams) => ("tracks.update", "Rename, reorder or change track controls as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
+    RemoveTrack(crate::arrangement::TrackParams) => ("tracks.remove", "Remove a track and its clips in one undoable edit.", true, false, false, crate::arrangement::Arrangement),
+    InsertClip(crate::arrangement::InsertClipParams) => ("clips.insert", "Insert an immutable source interval at an exact project frame; overlaps currently rejected.", true, false, false, crate::arrangement::Arrangement),
+    MoveClip(crate::arrangement::MoveClipParams) => ("clips.move", "Move a clip in time or between tracks as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
+    RemoveClip(crate::arrangement::ClipParams) => ("clips.remove", "Remove a clip as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
+    NavigateArrangement(crate::arrangement::NavigateParams) => ("arrangement.navigate", "Set cursor, time selection and selected clips without adding history.", true, false, false, crate::arrangement::Arrangement),
+    GetClipWaveform(crate::arrangement::ClipWaveformParams) => ("clips.waveform", "Read waveform peaks from a pinned clip even after its source document closes.", false, false, false, WaveformData),
     GetSession(EmptyParams) => ("session.get", "Inspect the current session state.", false, false, false, SessionSnapshot),
     GetCapabilities(EmptyParams) => ("session.capabilities", "Discover implemented commands and their schemas.", false, false, false, Capabilities),
     SetLoop(LoopParams) => ("transport.loop.set", "Set looping without starting audio playback.", true, false, false, SessionSnapshot),
@@ -137,6 +146,7 @@ command_registry! {
     ExportAudio(ExportParams) => ("audio.export", "Export an explicit document interval to WAV or MP3 as a cancellable atomic job.", true, false, false, JobInfo),
     SaveDocument(SaveParams) => ("documents.save", "Save a whole document with explicit overwrite intent; MP3 requires explicit lossy encoding settings.", true, false, false, JobInfo),
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, false, PresentationSnapshot),
+    SetTimelineViewport(crate::presentation::TimelineViewportParams) => ("presentation.timeline.set", "Set the visible arrangement interval in project frames.", true, true, false, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, false, PresentationSnapshot),
     SetEffect(SetEffectParams) => ("presentation.effects.set", "Choose visible effect parameters without applying an audio edit.", true, true, false, PresentationSnapshot),
     RequestQuit(QuitParams) => ("presentation.quit", "Close the attached GUI only when work is saved or discard is explicit; unfinished output must settle first.", true, true, false, PresentationSnapshot),
@@ -161,6 +171,7 @@ pub(crate) fn capabilities(gui: bool, device: bool) -> Capabilities {
         "history".into(),
         "edit".into(),
         "audio.export".into(),
+        "arrangement".into(),
     ];
     if device {
         capabilities.push("audio.output".into());

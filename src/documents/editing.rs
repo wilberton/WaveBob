@@ -64,9 +64,19 @@ impl Navigation {
 }
 #[derive(Clone)]
 struct Change {
-    before: DocumentInfo,
-    after: DocumentInfo,
+    state: ChangeState,
     label: String,
+}
+#[derive(Clone)]
+enum ChangeState {
+    Document {
+        before: Box<DocumentInfo>,
+        after: Box<DocumentInfo>,
+    },
+    Arrangement {
+        before: Box<crate::arrangement::Arrangement>,
+        after: Box<crate::arrangement::Arrangement>,
+    },
 }
 #[derive(Default)]
 pub(super) struct History {
@@ -85,8 +95,24 @@ impl History {
         }
     }
     pub fn remove_document(&mut self, id: &str) {
-        self.undo.retain(|change| change.before.id != id);
-        self.redo.retain(|change| change.before.id != id);
+        let keep = |change: &Change| !matches!(&change.state,ChangeState::Document{before,..} if before.id==id);
+        self.undo.retain(keep);
+        self.redo.retain(keep);
+    }
+    pub fn push_arrangement(
+        &mut self,
+        before: crate::arrangement::Arrangement,
+        after: crate::arrangement::Arrangement,
+        label: &str,
+    ) {
+        self.undo.push(Change {
+            state: ChangeState::Arrangement {
+                before: before.into(),
+                after: after.into(),
+            },
+            label: label.into(),
+        });
+        self.redo.clear();
     }
 }
 impl Editor {
@@ -108,9 +134,18 @@ impl Editor {
             retained.insert(doc.revision_id.clone());
         }
         for change in self.history.undo.iter().chain(&self.history.redo) {
-            retained.insert(change.before.revision_id.clone());
-            retained.insert(change.after.revision_id.clone());
+            match &change.state {
+                ChangeState::Document { before, after } => {
+                    retained.insert(before.revision_id.clone());
+                    retained.insert(after.revision_id.clone());
+                }
+                ChangeState::Arrangement { before, after } => {
+                    retained.extend(before.retained_revisions().cloned());
+                    retained.extend(after.retained_revisions().cloned());
+                }
+            }
         }
+        retained.extend(self.arrangement.retained_revisions().cloned());
         self.revisions.retain(|id, _| retained.contains(id));
     }
     pub(super) fn apply_effect(
@@ -443,8 +478,10 @@ impl Editor {
                 .find(|doc| doc.id == after.id)
                 .unwrap() = after.clone();
             self.history.undo.push(Change {
-                before,
-                after: after.clone(),
+                state: ChangeState::Document {
+                    before: before.into(),
+                    after: after.clone().into(),
+                },
                 label: pending.label,
             });
             self.history.redo.clear();
@@ -496,24 +533,47 @@ impl Editor {
             .clone();
         advance(revision)?;
         stack.pop();
-        let mut restored = if redo {
-            change.after.clone()
-        } else {
-            change.before.clone()
-        };
-        let current = self.document(&restored.id)?;
-        restored.path = current.path.clone();
-        restored.name = current.name.clone();
-        restored.saved_revision_id = current.saved_revision_id.clone();
-        restored.save_format = current.save_format.clone();
-        restored.save_sample_rate = current.save_sample_rate;
-        restored.dirty = restored.saved_revision_id.as_ref() != Some(&restored.revision_id);
-        *self
-            .documents
-            .iter_mut()
-            .find(|doc| doc.id == restored.id)
-            .expect("closed document history is removed") = restored.clone();
-        self.active = Some(restored.id.clone());
+        match &change.state {
+            ChangeState::Document { before, after } => {
+                let mut restored = if redo {
+                    *after.clone()
+                } else {
+                    *before.clone()
+                };
+                let current = self.document(&restored.id)?;
+                restored.path = current.path.clone();
+                restored.name = current.name.clone();
+                restored.saved_revision_id = current.saved_revision_id.clone();
+                restored.save_format = current.save_format.clone();
+                restored.save_sample_rate = current.save_sample_rate;
+                restored.dirty = restored.saved_revision_id.as_ref() != Some(&restored.revision_id);
+                *self
+                    .documents
+                    .iter_mut()
+                    .find(|doc| doc.id == restored.id)
+                    .expect("closed document history is removed") = restored.clone();
+                self.active = Some(restored.id.clone());
+            }
+            ChangeState::Arrangement { before, after } => {
+                let mut restored = if redo {
+                    *after.clone()
+                } else {
+                    *before.clone()
+                };
+                restored.saved_revision_id = self.arrangement.saved_revision_id.clone();
+                restored.dirty = restored.saved_revision_id.as_ref() != Some(&restored.revision_id);
+                restored.cursor = self.arrangement.cursor;
+                restored.selection = self.arrangement.selection.clone();
+                restored.selected_clip_ids = self
+                    .arrangement
+                    .selected_clip_ids
+                    .iter()
+                    .filter(|id| restored.clip(id).is_some())
+                    .cloned()
+                    .collect();
+                self.arrangement = restored;
+            }
+        }
         if redo {
             self.history.undo.push(change);
         } else {

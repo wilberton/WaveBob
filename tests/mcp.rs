@@ -183,7 +183,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 37);
+        assert_eq!(tools.len(), 46);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -260,6 +260,12 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
                     value.as_object_mut().unwrap().remove("session_id");
                     if let Some(object) = value["result"].as_object_mut() {
                         object.remove("session_id");
+                        if let Some(arrangement) =
+                            object.get_mut("arrangement").and_then(Value::as_object_mut)
+                        {
+                            arrangement.remove("revision_id");
+                            arrangement.remove("saved_revision_id");
+                        }
                     }
                 }
                 assert_eq!(actual, expected);
@@ -556,6 +562,144 @@ mod live {
             ],
         )
         .await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn editable_arrangement_and_pinned_waveforms_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "arrangement-check");
+        let client = named_client(runtime.path(), "arrangement-check").await;
+        let mut documents = Vec::new();
+        for (index, name) in ["Rain ambience.wav", "Footsteps.wav", "Piano texture.wav"]
+            .iter()
+            .enumerate()
+        {
+            let path = runtime.path().join(name);
+            let rate = if index == 1 { 44100 } else { 48000 };
+            let mut writer = hound::WavWriter::create(
+                &path,
+                hound::WavSpec {
+                    channels: 2,
+                    sample_rate: rate,
+                    bits_per_sample: 24,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            for frame in 0..rate * 6 {
+                let t = frame as f64 / rate as f64;
+                for channel in 0..2 {
+                    let envelope = (0.2 + 0.1 * (t * 2.3).sin())
+                        * (if index == 1 {
+                            (t * 4.0).sin().abs().powi(8)
+                        } else {
+                            1.0
+                        });
+                    let value = (t
+                        * (150.0 + index as f64 * 91.0 + channel as f64 * 20.0)
+                        * std::f64::consts::TAU)
+                        .sin()
+                        * envelope;
+                    writer.write_sample((value * 8388607.0) as i32).unwrap();
+                }
+            }
+            writer.finalize().unwrap();
+            let started =
+                response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+            documents.push(finish_mcp_job(&client, started).await);
+        }
+        for (index, name) in ["Ambience", "Footsteps", "Texture", "Track 4"]
+            .iter()
+            .enumerate()
+        {
+            let arr = response(&call(&client, "tracks.add", json!({"params":{"name":name}})).await);
+            assert_eq!(arr["status"], "ok");
+            if index < 3 {
+                let doc = &documents[index];
+                let track = &arr["result"]["tracks"][index]["id"];
+                let result=response(&call(&client,"clips.insert",json!({"params":{"track_id":track,"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":0,"source_end":doc["frames"],"position":index as u64*48_000*2}})).await);
+                assert_eq!(result["status"], "ok", "{result}");
+            }
+        }
+        let arrangement = response(&call(&client, "arrangement.get", json!({})).await);
+        let first = &arrangement["result"]["tracks"][0]["clips"][0];
+        let before = response(
+            &call(
+                &client,
+                "clips.waveform",
+                json!({"params":{"clip_id":first["id"],"bins":32}}),
+            )
+            .await,
+        )["result"]
+            .clone();
+        response(
+            &call(
+                &client,
+                "documents.close",
+                json!({"params":{"document_id":documents[0]["id"]}}),
+            )
+            .await,
+        );
+        assert_eq!(
+            response(
+                &call(
+                    &client,
+                    "clips.waveform",
+                    json!({"params":{"clip_id":first["id"],"bins":32}})
+                )
+                .await
+            )["result"],
+            before
+        );
+        response(
+            &call(
+                &client,
+                "presentation.set_mode",
+                json!({"params":{"mode":"multitrack"}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "presentation.timeline.set",
+                json!({"params":{"start_frame":0,"end_frame":576_000}}),
+            )
+            .await,
+        );
+        response(&call(&client,"arrangement.navigate",json!({"params":{"cursor":192_000,"selection":{"start":144_000,"end":240_000},"selected_clip_ids":[arrangement["result"]["tracks"][1]["clips"][0]["id"]]}})).await);
+        let captured = call(
+            &client,
+            "capture.png",
+            json!({"params":{"path":runtime.path().join("arrangement.png")}}),
+        )
+        .await;
+        let metadata = response(&captured);
+        assert_eq!(metadata["status"], "ok", "{metadata}");
+        let image = captured
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("arrangement.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                Path::new(&directory).join("arrangement.json"),
+                serde_json::to_vec_pretty(&json!({"arrangement":arrangement,"capture":metadata}))
+                    .unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
     }
 
     #[tokio::test]
@@ -1982,7 +2126,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 51);
+        assert_eq!(tools.len(), 61);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

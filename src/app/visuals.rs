@@ -482,36 +482,3 @@ pub fn waveform_canvas(
     );
     response
 }
-
-pub fn demo_clip(painter: &egui::Painter, rect: Rect, name: &str, color: Color32, seed: usize) {
-    let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
-    painter.rect(
-        rect,
-        3.0,
-        color.gamma_multiply(0.22),
-        Stroke::new(1.0, color),
-        egui::StrokeKind::Inside,
-    );
-    painter.text(
-        rect.min + Vec2::new(8.0, 6.0),
-        egui::Align2::LEFT_TOP,
-        name,
-        egui::FontId::proportional(11.0),
-        Color32::from_rgb(230, 235, 241),
-    );
-    let waveform = rect
-        .shrink2(Vec2::new(2.0, 16.0))
-        .translate(Vec2::new(0.0, 9.0));
-    for i in 0..waveform.width() as usize {
-        let phase = i as f32 * 0.31 + seed as f32 * 1.7;
-        let envelope = (0.1 + (phase * 0.02).sin().abs() * 0.28) * (0.3 + phase.sin().abs() * 0.7);
-        let x = waveform.left() + i as f32;
-        painter.line_segment(
-            [
-                Pos2::new(x, waveform.center().y - envelope * waveform.height()),
-                Pos2::new(x, waveform.center().y + envelope * waveform.height()),
-            ],
-            Stroke::new(1.0, color),
-        );
-    }
-}

@@ -181,6 +181,7 @@ impl DesktopHost {
         }
         let expected = match &request.command {
             Command::SetMode(params) => params.expected_presentation_revision,
+            Command::SetTimelineViewport(params) => params.expected_presentation_revision,
             Command::SetEffect(params) => params.expected_presentation_revision,
             Command::RequestQuit(params) => params.expected_presentation_revision,
             Command::SetViewport(params) => params.expected_presentation_revision,
@@ -213,6 +214,24 @@ impl DesktopHost {
                     return self.session.failure(Some(request.id), error);
                 }
                 presentation.effect = params.effect.clone();
+                return self.commit_presentation(request.id, presentation, false);
+            }
+            Command::SetTimelineViewport(params) => {
+                if params.start_frame >= params.end_frame
+                    || params.end_frame > crate::arrangement::MAX_TIMELINE_FRAME
+                {
+                    return self.session.failure(
+                        Some(request.id),
+                        CommandError::new(
+                            ErrorCode::InvalidParams,
+                            "Timeline viewport must be nonempty within 24 hours",
+                        ),
+                    );
+                }
+                presentation.timeline = crate::documents::FrameRange {
+                    start: params.start_frame,
+                    end: params.end_frame,
+                };
                 return self.commit_presentation(request.id, presentation, false);
             }
             Command::SetMode(params) => {

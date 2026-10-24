@@ -2,6 +2,7 @@ use eframe::egui::{self, Align, Color32, Pos2, Rect, RichText, Sense, Stroke, Ve
 use std::{collections::HashSet, sync::mpsc};
 use wavebob::{Command, EmptyParams, Outcome, Request, desktop::DesktopHost, presentation::*};
 use wavebob::{CommandResult, documents::*};
+mod arranging;
 mod browser;
 mod editing;
 mod effects;
@@ -37,6 +38,9 @@ pub struct WaveBob {
     close_flow: Option<saving::CloseFlow>,
     close_save_job: Option<String>,
     os_close_pending: bool,
+    arrangement_gesture: Option<arranging::Gesture>,
+    clip_waves: std::collections::BTreeMap<String, WaveformData>,
+    track_drafts: std::collections::BTreeMap<String, arranging::TrackDraft>,
 }
 
 #[derive(Default)]
@@ -420,6 +424,9 @@ impl WaveBob {
             self.gesture = None;
             self.host.set_transient_resources(Vec::new());
         }
+        if mode != ViewMode::Multitrack && !self.host.frozen() {
+            self.arrangement_gesture = None;
+        }
         let mut help = Help::default();
         let error = self.error.clone().or(self.host.transport().output.error).or_else(|| match &presentation.preferences {
             PreferenceStatus::Error { .. } => Some("Layout preferences could not be saved or loaded. Check the preferences file and its permissions.".into()),
@@ -762,9 +769,13 @@ impl WaveBob {
                                 },
                             )
                             .inner;
+                        let response=response.interact(Sense::click_and_drag());
+                        if response.drag_started() && self.host.presentation().mode==ViewMode::Multitrack && !self.host.frozen() {
+                            self.arrangement_gesture=Some(arranging::Gesture::Insert{document:document.clone(),revision:self.host.snapshot().revision});
+                        }
                         help.observe(
                             &response,
-                            "Show this document in the waveform editing view.",
+                            "Click to edit this waveform. Drag onto a track in multitrack mode to insert a pinned clip.",
                         );
                         if response.clicked() {
                             self.dispatch(Command::ActivateDocument(DocumentParams {
@@ -840,79 +851,6 @@ impl WaveBob {
         self.browser_view(ui, lower, help);
     }
 
-    fn multitrack_view(&self, ui: &mut egui::Ui, help: &mut Help) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Arrangement").strong());
-            ui.label(
-                RichText::new("DEMO · Track editing not yet available")
-                    .small()
-                    .color(MUTED),
-            );
-        });
-        ui.add_space(6.0);
-        let width = ui.available_width();
-        let controls = 154.0_f32.min(width * 0.35);
-        let (ruler_rect, _) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::hover());
-        visuals::ruler(
-            &ui.painter_at(ruler_rect),
-            Rect::from_min_max(ruler_rect.min + Vec2::new(controls, 0.0), ruler_rect.max),
-            0.0,
-            134.893,
-        );
-        egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui,|ui| {
-            let lane_height=((ui.available_height()-12.0)/4.0).clamp(86.0,150.0);
-            for (index,(name,color)) in [("Ambience",visuals::TEAL),("Footsteps",visuals::WAVE),("Texture",visuals::GOLD),("Track 4",MUTED)].iter().enumerate() {
-                let (row,response)=ui.allocate_exact_size(Vec2::new(width,lane_height),Sense::hover());
-                help.observe(&response,"Demonstration arrangement. Clips and track controls become editable in ticket 14.");
-                let painter=ui.painter_at(row);
-                let header=Rect::from_min_max(row.min,Pos2::new(row.left()+controls,row.bottom()));
-                painter.rect_filled(header,0.0,Color32::from_rgb(23,30,37));
-                painter.line_segment([header.right_top(),header.right_bottom()],Stroke::new(1.0,BORDER));
-                painter.hline(row.x_range(),row.bottom(),Stroke::new(1.0,BORDER));
-                let mut track=child(ui,header.shrink2(Vec2::new(10.0,8.0)));
-                track.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Track {}",index+1)).small().color(MUTED));
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center),|ui| {
-                        for label in ["S","M"] {help.observe(&ui.add_enabled(false,egui::Button::new(label).min_size(Vec2::new(21.0,21.0))),"Demo track controls are disabled until ticket 14.");}
-                    });
-                });
-                track.label(RichText::new(*name).strong());
-                track.horizontal(|ui| {
-                    let mut gain=[0.7,0.4,0.55,0.7][index];
-                    ui.spacing_mut().slider_width=(controls-85.0).max(32.0);
-                    ui.add_enabled(false,egui::Slider::new(&mut gain,0.0..=1.0).show_value(false));
-                    ui.label(RichText::new(["0.0 dB","-6.0 dB","-3.0 dB","0.0 dB"][index]).size(10.0).color(MUTED));
-                });
-                let c=Pos2::new(header.right()-19.0,header.bottom()-20.0);
-                painter.circle(c,10.0,Color32::from_rgb(30,38,46),Stroke::new(1.0,BORDER));
-                painter.line_segment([c,c-Vec2::new(0.0,8.0)],Stroke::new(1.5,visuals::WAVE));
-                let lane=Rect::from_min_max(header.right_top(),row.max);
-                visuals::grid(&painter,lane);
-                let clip=|start:f32,end:f32| Rect::from_min_max(Pos2::new(lane.left()+start*lane.width()+7.0,lane.top()+8.0),Pos2::new(lane.left()+end*lane.width()-7.0,lane.bottom()-8.0));
-                match index {
-                    0 => visuals::demo_clip(&painter,clip(0.0,1.0),"Rain ambience.wav",*color,index),
-                    1 => {
-                        visuals::demo_clip(&painter,clip(0.07,0.32),"Footsteps.wav",*color,index);
-                        visuals::demo_clip(&painter,clip(0.48,0.74),"Footsteps.wav",*color,index);
-                        visuals::demo_clip(&painter,clip(0.64,0.93),"Footsteps.wav",*color,index+2);
-                        let overlap=clip(0.65,0.73);
-                        painter.line_segment([overlap.left_top(),overlap.right_bottom()],Stroke::new(1.0,*color));
-                        painter.line_segment([overlap.left_bottom(),overlap.right_top()],Stroke::new(1.0,*color));
-                    }
-                    2 => {
-                        visuals::demo_clip(&painter,clip(0.26,0.57),"Piano texture.wav",*color,index);
-                        visuals::demo_clip(&painter,clip(0.77,1.0),"Piano texture.wav",*color,index+2);
-                    }
-                    _ => {
-                        painter.rect_stroke(lane.shrink(8.0),2.0,Stroke::new(1.0,BORDER),egui::StrokeKind::Inside);
-                        painter.text(lane.center(),egui::Align2::CENTER_CENTER,"Drag audio here",egui::FontId::proportional(12.0),MUTED);
-                    }
-                }
-                painter.vline(lane.left()+lane.width()*0.39,lane.y_range(),Stroke::new(1.0,Color32::from_rgb(225,233,245)));
-            }
-        });
-    }
-
     fn status(
         &self,
         ui: &mut egui::Ui,
@@ -960,7 +898,28 @@ impl WaveBob {
                 })
                 .unwrap_or_else(|| "No document · Cursor — · No selection".into())
         } else {
-            "Empty arrangement · Selection: none · Selected clips: 0".into()
+            let arrangement = self.host.snapshot().arrangement;
+            if arrangement.tracks.is_empty() {
+                "Empty arrangement · Selection: none · Selected clips: 0".into()
+            } else {
+                let selection = arrangement
+                    .selection
+                    .as_ref()
+                    .map_or("No selection".into(), |r| {
+                        format!(
+                            "Selection {}–{} · {} frames",
+                            exact_time(r.start, arrangement.sample_rate),
+                            exact_time(r.end, arrangement.sample_rate),
+                            r.end - r.start
+                        )
+                    });
+                format!(
+                    "Cursor {} · {} · Selected clips: {}",
+                    exact_time(arrangement.cursor, arrangement.sample_rate),
+                    selection,
+                    arrangement.selected_clip_ids.len()
+                )
+            }
         };
         let saving = matches!(
             self.host.presentation().preferences,

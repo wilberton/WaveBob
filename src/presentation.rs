@@ -9,7 +9,7 @@ pub enum ViewMode {
     Multitrack,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct PresentationSnapshot {
     pub revision: u64,
     pub mode: ViewMode,
@@ -21,6 +21,22 @@ pub struct PresentationSnapshot {
     pub effect: crate::effects::Effect,
     #[serde(default)]
     pub close_requested: bool,
+    #[serde(default = "default_timeline")]
+    pub timeline: crate::documents::FrameRange,
+}
+impl Default for PresentationSnapshot {
+    fn default() -> Self {
+        Self {
+            revision: 0,
+            mode: ViewMode::default(),
+            layout: PanelLayout::default(),
+            preferences: PreferenceStatus::default(),
+            viewports: Default::default(),
+            effect: Default::default(),
+            close_requested: false,
+            timeline: default_timeline(),
+        }
+    }
 }
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -33,6 +49,19 @@ pub struct QuitParams {
 #[serde(deny_unknown_fields)]
 pub struct SetEffectParams {
     pub effect: crate::effects::Effect,
+    pub expected_presentation_revision: Option<u64>,
+}
+pub fn default_timeline() -> crate::documents::FrameRange {
+    crate::documents::FrameRange {
+        start: 0,
+        end: 480_000,
+    }
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TimelineViewportParams {
+    pub start_frame: u64,
+    pub end_frame: u64,
     pub expected_presentation_revision: Option<u64>,
 }
 

@@ -5,19 +5,25 @@ timeline, and move or remove clips with undoable command-driven placement.
 
 **Blocked by:** 22 — Refine the UI to match the accepted mockups; 10 — Undoable gain, fades and reverse on the editing target.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Track and clip IDs, exact positions/source ranges and pinned source revision
+- [x] Track and clip IDs, exact positions/source ranges and pinned source revision
   are queryable; later waveform edits leave existing clips unchanged.
-- [ ] Drop previews and clip drags commit once on release, support another track,
+- [x] Drop previews and clip drags commit once on release, support another track,
   clamp/reject negative time, and cancel safely on invalid/off-track drops.
-- [ ] A seconds ruler, timeline navigation, cursor/time selection and selected-clip
+- [x] A seconds ruler, timeline navigation, cursor/time selection and selected-clip
   count work with command equivalents. Deleting a track removes its clips in
   one undoable operation.
-- [ ] Command and gesture tests verify placement, drag cancellation and history.
+- [x] Command and gesture tests verify placement, drag cancellation and history.
   Until the crossfade slice lands, overlaps are explicitly unavailable rather
   than appearing to implement the final transition behavior.
 
 ## Specification
 
 [WaveBob editor specification](../spec.md).
+
+## Verification
+
+96 GUI-enabled and 64 GUI-free tests pass, both Clippy variants and formatting.
+Native MCP placement, pinned-source lifetime and framebuffer capture pass; see
+[the verification record](../../../docs/verification/ticket14/README.md).

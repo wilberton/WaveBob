@@ -7,6 +7,80 @@ struct Harness {
     size: Vec2,
     step: f64,
 }
+
+#[test]
+fn arrangement_library_drop_moves_once_and_invalid_or_escape_drops_cancel() {
+    use wavebob::arrangement::*;
+    let (mut h, _directory) = audio_harness();
+    h.app.dispatch(Command::AddTrack(AddTrackParams::default()));
+    h.app.dispatch(Command::AddTrack(AddTrackParams::default()));
+    h.app.set_mode(ViewMode::Multitrack);
+    h.app
+        .dispatch(Command::SetTimelineViewport(TimelineViewportParams {
+            start_frame: 0,
+            end_frame: 48_000,
+            expected_presentation_revision: None,
+        }));
+    h.frame(vec![]);
+    let source = h.text_rect("Gestures.wav").center();
+    let track1 = h.text_rect("Track 1");
+    let target = Pos2::new(600.0, track1.center().y + 35.0);
+    let history = h.app.host.history().undo_count;
+    h.drag(source, target);
+    h.frame(vec![]);
+    let arr = h.app.host.snapshot().arrangement;
+    assert_eq!(arr.tracks[0].clips.len(), 1, "{:?}", h.app.error);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    let clip = arr.tracks[0].clips[0].clone();
+    let clip_text = text_shapes(&h.frame(vec![]))
+        .into_iter()
+        .find(|(rect, text)| text == "Gestures.wav" && rect.left() > 400.0)
+        .unwrap()
+        .0;
+    let from = clip_text.left_center() + Vec2::new(10.0, 25.0);
+    let track2 = h.text_rect("Track 2");
+    let to = Pos2::new(750.0, track2.center().y + 35.0);
+    h.drag(from, to);
+    h.frame(vec![]);
+    let arr = h.app.host.snapshot().arrangement;
+    assert!(arr.tracks[0].clips.is_empty());
+    assert_eq!(arr.tracks[1].clips[0].id, clip.id);
+    assert_eq!(h.app.host.history().undo_count, history + 2);
+    let clip_text = text_shapes(&h.frame(vec![]))
+        .into_iter()
+        .find(|(rect, text)| text == "Gestures.wav" && rect.left() > 400.0)
+        .unwrap()
+        .0;
+    let from = clip_text.left_center() + Vec2::new(10.0, 25.0);
+    let before = h.app.host.snapshot();
+    h.drag(from, Pos2::new(20.0, 400.0));
+    assert_eq!(h.app.host.snapshot(), before);
+    h.frame(vec![
+        egui::Event::PointerMoved(from),
+        egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ]);
+    h.frame(vec![egui::Event::PointerMoved(target)]);
+    assert_eq!(h.app.host.history().undo_count, history + 2);
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    h.frame(vec![egui::Event::PointerButton {
+        pos: target,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    assert_eq!(h.app.host.snapshot(), before);
+}
 impl Harness {
     fn new() -> Self {
         let ctx = egui::Context::default();
