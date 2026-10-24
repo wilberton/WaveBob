@@ -2,6 +2,7 @@ use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::browser::{AuditionVolumeParams, BrowserSnapshot, PathParams};
 use crate::documents::*;
 use crate::presentation::{
     CaptureParams, CaptureResult, PresentationRevisionParams, PresentationSnapshot, RenderMetadata,
@@ -112,6 +113,13 @@ command_registry! {
     SeekDocument(CursorParams) => ("transport.seek", "Seek a document without clearing its selection or changing playing/paused state.", true, false, false, DocumentInfo),
     RewindDocument(DocumentParams) => ("transport.rewind", "Seek a document to absolute start without changing its playing/paused state.", true, false, false, DocumentInfo),
     RetryOutput(EmptyParams) => ("transport.output.retry", "Retry recoverable audio device initialization or failure.", true, false, true, TransportSnapshot),
+    GetBrowser(EmptyParams) => ("browser.get", "Inspect folder contents, selected file and independent audition.", false, false, false, BrowserSnapshot),
+    BrowseFolder(PathParams) => ("browser.navigate", "List a folder asynchronously, retaining navigation after errors.", true, false, false, BrowserSnapshot),
+    SelectBrowserFile(PathParams) => ("browser.select", "Select a listed file without opening or auditioning it.", true, false, false, BrowserSnapshot),
+    OpenBrowserFile(PathParams) => ("browser.open", "Stop audition and open the specified browser audio file.", true, false, false, JobInfo),
+    StartAudition(PathParams) => ("audition.start", "Decode and preview WAV or MP3 without creating an audio document.", true, false, true, BrowserSnapshot),
+    StopAudition(EmptyParams) => ("audition.stop", "Cancel or stop browser preview without resuming editor playback.", true, false, false, BrowserSnapshot),
+    SetAuditionVolume(AuditionVolumeParams) => ("audition.volume.set", "Set independent browser preview volume from zero to one.", true, false, false, BrowserSnapshot),
     GetPresentation(EmptyParams) => ("presentation.get", "Inspect GUI mode and presentation revision.", false, true, false, PresentationSnapshot),
     SetMode(SetModeParams) => ("presentation.set_mode", "Select waveform or multitrack mode.", true, true, false, PresentationSnapshot),
     SetViewport(SetViewportParams) => ("presentation.viewport.set", "Set a document's visible frame interval without changing its selection or audio.", true, true, false, PresentationSnapshot),
@@ -130,6 +138,7 @@ pub(crate) fn capabilities(gui: bool, device: bool) -> Capabilities {
         "jobs".into(),
         "selection".into(),
         "transport".into(),
+        "browser".into(),
     ];
     if device {
         capabilities.push("audio.output".into());

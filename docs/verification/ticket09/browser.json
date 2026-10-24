@@ -1,0 +1,130 @@
+{
+  "capture": {
+    "id": "11",
+    "protocol_version": 1,
+    "result": {
+      "metadata": {
+        "frame_number": 14,
+        "height": 900,
+        "mode": "waveform",
+        "pending_resources": [],
+        "presentation_revision": 0,
+        "rendered_revision": 5,
+        "scale": 1.0,
+        "session_id": "b12fce3b-8e1b-430c-9e46-1fd985993e34",
+        "width": 1440
+      },
+      "mime_type": "image/png",
+      "path": "\\\\?\\C:\\Users\\Andy\\AppData\\Local\\Temp\\.tmpFd2B4f\\browser.png"
+    },
+    "revision": 5,
+    "session_id": "b12fce3b-8e1b-430c-9e46-1fd985993e34",
+    "status": "ok"
+  },
+  "preview": {
+    "audition": {
+      "channels": 1,
+      "error": null,
+      "frames": 8192,
+      "id": "b7d3f5af-85c1-4f1e-84a6-fc9a761a13ef",
+      "loading": false,
+      "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\cbr-1ch-44100-tagged.mp3",
+      "playing": true,
+      "sample_rate": 44100
+    },
+    "audition_volume": 0.75,
+    "entries": [
+      {
+        "directory": false,
+        "name": "cbr-1ch-44100-tagged.f32",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\cbr-1ch-44100-tagged.f32",
+        "supported": false
+      },
+      {
+        "directory": false,
+        "name": "cbr-1ch-44100-tagged.mp3",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\cbr-1ch-44100-tagged.mp3",
+        "supported": true
+      },
+      {
+        "directory": false,
+        "name": "cbr-1ch-44100-untagged.f32",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\cbr-1ch-44100-untagged.f32",
+        "supported": false
+      },
+      {
+        "directory": false,
+        "name": "cbr-1ch-44100-untagged.mp3",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\cbr-1ch-44100-untagged.mp3",
+        "supported": true
+      },
+      {
+        "directory": false,
+        "name": "cbr-2ch-48000-tagged.f32",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\cbr-2ch-48000-tagged.f32",
+        "supported": false
+      },
+      {
+        "directory": false,
+        "name": "cbr-2ch-48000-tagged.mp3",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\cbr-2ch-48000-tagged.mp3",
+        "supported": true
+      },
+      {
+        "directory": false,
+        "name": "manifest.json",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\manifest.json",
+        "supported": false
+      },
+      {
+        "directory": false,
+        "name": "README.md",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\README.md",
+        "supported": false
+      },
+      {
+        "directory": false,
+        "name": "vbr-1ch-22050-tagged.f32",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\vbr-1ch-22050-tagged.f32",
+        "supported": false
+      },
+      {
+        "directory": false,
+        "name": "vbr-1ch-22050-tagged.mp3",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\vbr-1ch-22050-tagged.mp3",
+        "supported": true
+      },
+      {
+        "directory": false,
+        "name": "vbr-2ch-44100-tagged.f32",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\vbr-2ch-44100-tagged.f32",
+        "supported": false
+      },
+      {
+        "directory": false,
+        "name": "vbr-2ch-44100-tagged.mp3",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\vbr-2ch-44100-tagged.mp3",
+        "supported": true
+      },
+      {
+        "directory": false,
+        "name": "vbr-2ch-48000-untagged.f32",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\vbr-2ch-48000-untagged.f32",
+        "supported": false
+      },
+      {
+        "directory": false,
+        "name": "vbr-2ch-48000-untagged.mp3",
+        "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\vbr-2ch-48000-untagged.mp3",
+        "supported": true
+      }
+    ],
+    "error": null,
+    "loading": false,
+    "parent": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures",
+    "path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio",
+    "requested_path": "C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests/fixtures/audio",
+    "selected_path": "\\\\?\\C:\\Users\\Andy\\Documents\\Work\\Projects\\WaveBob\\tests\\fixtures\\audio\\cbr-1ch-44100-tagged.mp3",
+    "skipped_paths": 0
+  }
+}

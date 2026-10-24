@@ -110,7 +110,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 19);
+        assert_eq!(tools.len(), 25);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -602,6 +602,129 @@ mod live {
                     &json!({"playing":playing,"paused":paused,"looped":looped,"capture":metadata}),
                 )
                 .unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI and default output device"]
+    async fn browser_mp3_audition_open_and_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "browser-check");
+        let client = named_client(runtime.path(), "browser-check").await;
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/cbr-1ch-44100-tagged.mp3");
+        response(
+            &call(
+                &client,
+                "browser.navigate",
+                json!({"params":{"path":path.parent().unwrap()}}),
+            )
+            .await,
+        );
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let state = loop {
+            let state = response(&call(&client, "browser.get", json!({})).await)["result"].clone();
+            if state["loading"] == false {
+                break state;
+            }
+            assert!(Instant::now() < deadline);
+        };
+        let selected = state["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"] == "cbr-1ch-44100-tagged.mp3")
+            .unwrap()["path"]
+            .clone();
+        response(
+            &call(
+                &client,
+                "browser.select",
+                json!({"params":{"path":selected}}),
+            )
+            .await,
+        );
+        loop {
+            let state =
+                response(&call(&client, "transport.get", json!({})).await)["result"].clone();
+            if state["output"]["status"] == "ready" {
+                break;
+            }
+            assert_ne!(state["output"]["status"], "failed", "{state}");
+            assert!(Instant::now() < deadline);
+        }
+        let start = response(
+            &call(
+                &client,
+                "audition.start",
+                json!({"params":{"path":selected}}),
+            )
+            .await,
+        );
+        assert_eq!(start["status"], "ok");
+        let preview = loop {
+            let state = response(&call(&client, "browser.get", json!({})).await)["result"].clone();
+            if state["audition"]["loading"] == false {
+                break state;
+            }
+            assert!(Instant::now() < deadline);
+        };
+        assert!(preview["audition"]["error"].is_null(), "{preview}");
+        assert_eq!(preview["audition"]["frames"], 8192);
+        assert!(
+            response(&call(&client, "session.get", json!({})).await)["result"]["documents"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        let job = response(
+            &call(&client, "browser.open", json!({"params":{"path":selected}})).await,
+        )["result"]["id"]
+            .clone();
+        loop {
+            let state = response(
+                &call(&client, "jobs.get", json!({"params":{"job_id":job}})).await,
+            )["result"]
+                .clone();
+            if state["status"] == "succeeded" {
+                break;
+            }
+            assert_ne!(state["status"], "failed", "{state}");
+            assert!(Instant::now() < deadline);
+        }
+        assert!(
+            response(&call(&client, "browser.get", json!({})).await)["result"]["audition"]["id"]
+                .is_null()
+        );
+        let captured = call(
+            &client,
+            "capture.png",
+            json!({"params":{"path":runtime.path().join("browser.png")}}),
+        )
+        .await;
+        let metadata = response(&captured);
+        assert_eq!(metadata["status"], "ok");
+        let image = captured
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("browser.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                Path::new(&directory).join("browser.json"),
+                serde_json::to_vec_pretty(&json!({"preview":preview,"capture":metadata})).unwrap(),
             )
             .unwrap();
         }
@@ -1386,7 +1509,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 30);
+        assert_eq!(tools.len(), 37);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

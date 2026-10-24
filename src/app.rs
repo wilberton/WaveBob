@@ -2,6 +2,7 @@ use eframe::egui::{self, Align, Color32, Pos2, Rect, RichText, Sense, Stroke, Ve
 use std::{collections::HashSet, sync::mpsc};
 use wavebob::{Command, EmptyParams, Outcome, Request, desktop::DesktopHost, presentation::*};
 use wavebob::{CommandResult, documents::*};
+mod browser;
 mod visuals;
 mod waveform;
 use visuals::{Icon, icon_button};
@@ -21,6 +22,9 @@ pub struct WaveBob {
     open_requested: bool,
     dialog: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
     reported_jobs: HashSet<String>,
+    browser_path: String,
+    browser_seen_path: Option<String>,
+    browser_edit_path: bool,
 }
 
 #[derive(Default)]
@@ -238,6 +242,10 @@ impl WaveBob {
         app.host
             .configure_preferences(preferences, cc.egui_ctx.clone());
         app.host.listen(directory, name, cc.egui_ctx.clone())?;
+        if let Ok(path) = std::env::current_dir() {
+            app.browser_path = path.to_string_lossy().into_owned();
+            app.host.initialize_browser(app.browser_path.clone());
+        }
         Ok(app)
     }
 
@@ -659,62 +667,7 @@ impl WaveBob {
                 ..Default::default()
             });
         }
-        let footer_height = 104.0_f32.min(lower.height() * 0.35);
-        let mut browser = child(
-            ui,
-            Rect::from_min_max(
-                lower.min,
-                Pos2::new(lower.right(), lower.bottom() - footer_height),
-            ),
-        );
-        section(&mut browser, "FILE BROWSER");
-        browser.add_space(5.0);
-        let crumb = browser.add_enabled(
-            false,
-            centered_button("Samples  ›  Field recordings")
-                .min_size(Vec2::new(lower.width(), 25.0)),
-        );
-        help.observe(
-            &crumb,
-            "Filesystem browsing arrives in ticket 09. These folder rows are a visual preview.",
-        );
-        egui::ScrollArea::vertical()
-            .id_salt("file-browser")
-            .auto_shrink([false, false])
-            .show(&mut browser, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for folder in ["..", "City", "Forest", "Indoor", "Weather"] {
-                    help.observe(
-                        &visuals::file_row(ui, folder, false, true, false),
-                        "Folder navigation is not implemented yet.",
-                    );
-                }
-                for name in [
-                    "Birds in trees.wav",
-                    "Creek close.wav",
-                    "Rain ambience.wav",
-                    "Wind gusts.wav",
-                ] {
-                    help.observe(
-                        &visuals::file_row(ui, name, false, false, false),
-                        "Opening and auditioning browser files arrive in ticket 09.",
-                    );
-                }
-            });
-        let footer = Rect::from_min_max(
-            Pos2::new(lower.left(), lower.bottom() - footer_height + 4.0),
-            lower.max,
-        );
-        let mut preview = child(ui, footer);
-        preview.separator();
-        preview.label(RichText::new("Browser preview").strong().small());
-        preview.label(RichText::new("No file selected").small().color(MUTED));
-        preview.horizontal(|ui| {
-            help.observe(&icon_button(ui,Icon::Play,"Audition",false,false),"Browser audition is unavailable until filesystem browsing and playback are implemented.");
-            let mut volume=0.75;
-            ui.spacing_mut().slider_width=(footer.width()-65.0).max(30.0);
-            help.observe(&ui.add_enabled(false,egui::Slider::new(&mut volume,0.0..=1.0).show_value(false)),"Independent audition volume arrives with browser playback.");
-        });
+        self.browser_view(ui, lower, help);
     }
 
     fn effects(&mut self, ui: &mut egui::Ui, area: Rect, help: &mut Help) {

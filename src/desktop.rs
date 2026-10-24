@@ -127,6 +127,12 @@ impl DesktopHost {
     pub fn snapshot(&self) -> SessionSnapshot {
         self.session.snapshot()
     }
+    pub fn browser(&self) -> crate::browser::BrowserSnapshot {
+        self.session.browser_snapshot()
+    }
+    pub fn initialize_browser(&mut self, path: String) {
+        self.session.initialize_browser(path);
+    }
     pub fn presentation(&self) -> PresentationSnapshot {
         self.presentation.clone()
     }
@@ -441,6 +447,19 @@ impl DesktopHost {
                         self.session.transport_snapshot().requested.generation
                     )
                 }))
+                .chain(
+                    self.session
+                        .browser_snapshot()
+                        .loading
+                        .then(|| "browser-listing".into()),
+                )
+                .chain(
+                    self.session
+                        .browser_snapshot()
+                        .audition
+                        .loading
+                        .then(|| "browser-audition-decode".into()),
+                )
                 .collect(),
         };
         let response = self.session.success(

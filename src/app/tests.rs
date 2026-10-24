@@ -5,6 +5,7 @@ struct Harness {
     app: WaveBob,
     time: f64,
     size: Vec2,
+    step: f64,
 }
 impl Harness {
     fn new() -> Self {
@@ -15,13 +16,14 @@ impl Harness {
             app: WaveBob::default(),
             time: 0.0,
             size: Vec2::new(1440.0, 900.0),
+            step: 0.1,
         };
         harness.frame(Vec::new());
         harness.frame(Vec::new());
         harness
     }
     fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
-        self.time += 0.1;
+        self.time += self.step;
         let mut output = self.ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
@@ -458,6 +460,95 @@ fn audio_harness() -> (Harness, tempfile::TempDir) {
     h.frame(Vec::new());
     (h, directory)
 }
+
+#[test]
+fn browser_single_click_selects_and_double_click_opens_without_audition_race() {
+    let (mut h, directory) = audio_harness();
+    h.app.dispatch(Command::CloseDocument(CloseParams {
+        document_id: h.app.active_document().unwrap().id,
+        discard_changes: false,
+    }));
+    h.app.browser_path = directory.path().to_string_lossy().into_owned();
+    h.app
+        .dispatch(Command::BrowseFolder(wavebob::browser::PathParams {
+            path: h.app.browser_path.clone(),
+        }));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.host.browser().loading {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    h.step = 0.02;
+    let pos = h.text_rect("Gestures.wav").center();
+    h.click(pos);
+    assert!(h.app.host.snapshot().documents.is_empty());
+    assert!(h.app.host.browser().selected_path.is_some());
+    assert!(!h.app.host.browser().audition.loading);
+    h.click(pos);
+    while h.app.host.snapshot().documents.is_empty() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    assert_eq!(h.app.active_document().unwrap().name, "Gestures.wav");
+    assert!(!h.app.host.browser().audition.playing);
+}
+#[test]
+fn browser_preview_button_is_enabled_for_selected_audio_and_uses_status_help() {
+    let (mut h, directory) = audio_harness();
+    let (session, mut output) = wavebob::Session::with_manual_output(48000).unwrap();
+    h.app.host = DesktopHost::with_session(session);
+    h.app
+        .dispatch(Command::BrowseFolder(wavebob::browser::PathParams {
+            path: directory.path().to_string_lossy().into_owned(),
+        }));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.host.browser().loading {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    let row = h.text_rect("Gestures.wav").center();
+    h.click(row);
+    fn find(shapes: &egui::Shape) -> Option<Rect> {
+        match shapes {
+            egui::Shape::Rect(shape)
+                if (shape.rect.width() - 46.0).abs() < 0.1
+                    && (shape.rect.height() - 28.0).abs() < 0.1
+                    && shape.rect.left() < 80.0 =>
+            {
+                Some(shape.rect)
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(find),
+            _ => None,
+        }
+    }
+    let frame = h.frame(vec![]);
+    let rect = frame
+        .shapes
+        .iter()
+        .find_map(|shape| find(&shape.shape))
+        .unwrap();
+    h.click(rect.center());
+    while h.app.host.browser().audition.loading {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    assert!(h.app.host.browser().audition.playing);
+    assert!(h.app.host.snapshot().documents.is_empty());
+    let mut pcm = [[0.0; 2]; 8];
+    output.render_into(&mut pcm);
+    assert!(pcm.iter().flatten().any(|sample| *sample != 0.0));
+    let frame = h.frame(vec![egui::Event::PointerMoved(rect.center())]);
+    assert!(
+        text_shapes(&frame)
+            .iter()
+            .any(|(_, text)| text.starts_with("Stop preview"))
+    );
+}
+
 fn canvas_rects(h: &mut Harness) -> [Rect; 2] {
     fn collect(shape: &egui::Shape, out: &mut Vec<Rect>) {
         match shape {

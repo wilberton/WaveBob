@@ -1,6 +1,7 @@
 //! The shared application command interface. No window or audio device is required.
 
 mod audio;
+pub mod browser;
 mod commands;
 #[cfg(feature = "gui")]
 pub mod desktop;
@@ -68,6 +69,7 @@ pub enum CommandResult {
     Samples(documents::SamplesData),
     Waveform(documents::WaveformData),
     Transport(Box<transport::TransportSnapshot>),
+    Browser(Box<browser::BrowserSnapshot>),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -136,6 +138,7 @@ pub struct Session {
     snapshot: SessionSnapshot,
     editor: documents::Editor,
     playback: transport::Playback,
+    browser: browser::Browser,
     last_active_document: Option<String>,
     wake: Option<documents::Wake>,
 }
@@ -153,6 +156,7 @@ impl Default for Session {
             },
             editor: documents::Editor::default(),
             playback: transport::Playback::default(),
+            browser: browser::Browser::default(),
             last_active_document: None,
             wake: None,
         }
@@ -170,8 +174,28 @@ impl Session {
 
     pub fn poll_jobs(&mut self) {
         self.editor.poll(&mut self.snapshot.revision);
+        self.browser.poll();
+        if let Some((document, audio)) = self.browser.take_ready() {
+            match self
+                .playback
+                .request(&document, audio, false, true, Some(0))
+            {
+                Ok(()) => {
+                    let _ = self
+                        .playback
+                        .set_gain(self.browser.snapshot().audition_volume as f32);
+                    self.browser.set_playing(true);
+                }
+                Err(error) => self.browser.fail(error),
+            }
+        }
         self.playback.poll();
         let transport = self.playback.snapshot();
+        if transport.requested.document_id.as_deref() == self.browser.source_id()
+            && !transport.pending
+        {
+            self.browser.set_playing(transport.applied.playing);
+        }
         if transport.applied.generation == transport.requested.generation
             && let Some(id) = &transport.applied.document_id
         {
@@ -182,6 +206,7 @@ impl Session {
     }
     pub fn set_waker(&mut self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
         self.wake = Some(wake.clone());
+        self.browser.set_wake(wake.clone());
         self.editor.set_wake(wake);
     }
     pub fn with_manual_output(rate: u32) -> Result<(Self, transport::ManualOutput), CommandError> {
@@ -199,6 +224,13 @@ impl Session {
     }
     pub fn audio_output_configured(&self) -> bool {
         self.playback.configured()
+    }
+    pub fn browser_snapshot(&self) -> browser::BrowserSnapshot {
+        self.browser.snapshot()
+    }
+    #[cfg(feature = "gui")]
+    pub(crate) fn initialize_browser(&mut self, path: String) {
+        let _ = self.browser.navigate(path);
     }
     #[cfg(feature = "audio-output")]
     pub fn enable_native_output(&mut self) {
@@ -233,6 +265,63 @@ impl Session {
             Command::SeekDocument(params) => self.seek_document(&params.document_id, params.frame),
             Command::RewindDocument(params) => self.seek_document(&params.document_id, 0),
             Command::RetryOutput(_) => self.retry_output(),
+            Command::GetBrowser(_) => Ok(CommandResult::Browser(self.browser.snapshot().into())),
+            Command::BrowseFolder(params) => {
+                let revision = self.next_revision();
+                revision.and_then(|revision| {
+                    let state = self.browser.navigate(params.path)?;
+                    self.snapshot.revision = revision;
+                    Ok(CommandResult::Browser(state.into()))
+                })
+            }
+            Command::SelectBrowserFile(params) => {
+                let revision = self.next_revision();
+                revision.and_then(|revision| {
+                    let state = self.browser.select(params.path)?;
+                    self.snapshot.revision = revision;
+                    Ok(CommandResult::Browser(state.into()))
+                })
+            }
+            Command::StartAudition(params) => self.start_audition(params.path),
+            Command::StopAudition(_) => self.stop_audition(),
+            Command::SetAuditionVolume(params) => {
+                if !params.volume.is_finite() || !(0.0..=1.0).contains(&params.volume) {
+                    Err(CommandError::new(
+                        ErrorCode::InvalidParams,
+                        "Audition volume must be between zero and one",
+                    ))
+                } else {
+                    self.next_revision().and_then(|revision| {
+                        if self.playback.snapshot().requested.document_id.as_deref()
+                            == self.browser.source_id()
+                        {
+                            self.playback.set_gain(params.volume as f32)?;
+                        }
+                        if self.browser.snapshot().audition_volume != params.volume {
+                            self.browser.set_volume(params.volume);
+                            self.snapshot.revision = revision;
+                        }
+                        Ok(CommandResult::Browser(self.browser.snapshot().into()))
+                    })
+                }
+            }
+            Command::OpenBrowserFile(params) => {
+                if !browser::supported(std::path::Path::new(&params.path)) {
+                    Err(CommandError::new(
+                        ErrorCode::UnsupportedFormat,
+                        "Open supports WAV and MP3 files",
+                    ))
+                } else {
+                    let result = self.editor.execute(
+                        Command::OpenDocument(documents::OpenParams { path: params.path }),
+                        &mut self.snapshot.revision,
+                    );
+                    if result.is_ok() {
+                        let _ = self.stop_audition();
+                    }
+                    result
+                }
+            }
             Command::SetLoop(params) => self.set_loop(params.enabled),
             Command::ToggleLoop(_) => self.set_loop(!self.snapshot.loop_enabled),
             Command::GetPresentation(_)
@@ -252,8 +341,15 @@ impl Session {
                     None
                 };
                 let before = self.snapshot.revision;
+                let stop_preview = matches!(
+                    &command,
+                    Command::ActivateDocument(_) | Command::CloseDocument(_)
+                );
                 let result = self.editor.execute(command, &mut self.snapshot.revision);
                 if result.is_ok() {
+                    if stop_preview {
+                        let _ = self.stop_audition();
+                    }
                     let seek = seek.filter(|(id, frame)| self.output_seek_needed(id, *frame));
                     if seek.is_some() && before == self.snapshot.revision {
                         match self.next_revision() {
@@ -331,6 +427,7 @@ impl Session {
             return Ok(CommandResult::Transport(self.playback.snapshot().into()));
         }
         let revision = self.next_revision()?;
+        self.browser.stop();
         let seek = if document.cursor >= document.frames {
             Some(0)
         } else if state.applied.document_id.as_deref() == Some(id)
@@ -350,6 +447,11 @@ impl Session {
         Ok(CommandResult::Transport(self.playback.snapshot().into()))
     }
     pub(crate) fn pause_output(&mut self) -> Result<bool, CommandError> {
+        let audition = self.browser.snapshot().audition;
+        if audition.id.is_some() {
+            self.stop_audition()?;
+            return Ok(true);
+        }
         if !self.playback.snapshot().requested.playing {
             return Ok(false);
         }
@@ -359,6 +461,27 @@ impl Session {
             self.snapshot.revision = revision;
         }
         Ok(changed)
+    }
+    fn start_audition(&mut self, path: String) -> Result<CommandResult, CommandError> {
+        self.playback.ready()?;
+        let revision = self.next_revision()?;
+        let state = self.browser.start(path)?;
+        self.playback.pause()?;
+        self.snapshot.revision = revision;
+        Ok(CommandResult::Browser(state.into()))
+    }
+    fn stop_audition(&mut self) -> Result<CommandResult, CommandError> {
+        let state = self.browser.snapshot();
+        if state.audition.id.is_some() {
+            let revision = self.next_revision()?;
+            if self.playback.snapshot().requested.document_id.as_deref() == self.browser.source_id()
+            {
+                self.playback.clear()?;
+            }
+            self.browser.stop();
+            self.snapshot.revision = revision;
+        }
+        Ok(CommandResult::Browser(self.browser.snapshot().into()))
     }
     fn seek_document(&mut self, id: &str, frame: u64) -> Result<CommandResult, CommandError> {
         let before = self.snapshot.revision;
@@ -384,6 +507,9 @@ impl Session {
             self.last_active_document = active;
         }
         if let Some(id) = self.playback.snapshot().requested.document_id {
+            if Some(id.as_str()) == self.browser.source_id() {
+                return;
+            }
             match self.editor.playback_audio(&id) {
                 Ok((document, audio)) => {
                     let state = self.playback.snapshot();

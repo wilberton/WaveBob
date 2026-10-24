@@ -132,6 +132,7 @@ struct Plan {
     playing: bool,
     position: u64,
     phase: u64,
+    gain: f32,
 }
 struct Renderer {
     incoming: rtrb::Consumer<Box<Plan>>,
@@ -218,7 +219,7 @@ impl Renderer {
             let b = audio.samples[second as usize * audio.channels as usize + channel];
             (a as f64 + (b as f64 - a as f64) * fraction as f64) as f32
         };
-        let output = [sample(0), sample(1)];
+        let output = [sample(0) * plan.gain, sample(1) * plan.gain];
         self.peak = self.peak.max(output[0].abs()).max(output[1].abs());
         plan.phase += audio.rate as u64;
         plan.position += plan.phase / self.rate as u64;
@@ -272,6 +273,7 @@ pub(crate) struct Playback {
     source: Option<Arc<Audio>>,
     bounds: Option<FrameRange>,
     ids: (u128, u128),
+    gain: f32,
     #[cfg(feature = "audio-output")]
     native: Option<native::Native>,
 }
@@ -285,6 +287,7 @@ impl Default for Playback {
             source: None,
             bounds: None,
             ids: (0, 0),
+            gain: 1.0,
             #[cfg(feature = "audio-output")]
             native: None,
         }
@@ -394,6 +397,7 @@ impl Playback {
                 end: document.frames,
             })
         });
+        self.gain = 1.0;
         self.submit(Some(audio), ids, bounds, playing, seek)
     }
     fn submit(
@@ -425,6 +429,7 @@ impl Playback {
             playing,
             position: 0,
             phase: 0,
+            gain: self.gain,
         }));
         self.flush();
         Ok(())
@@ -459,6 +464,20 @@ impl Playback {
     pub fn clear(&mut self) -> Result<(), CommandError> {
         if self.source.is_some() {
             self.submit(None, (0, 0), None, false, Some(0))?;
+        }
+        Ok(())
+    }
+    pub fn set_gain(&mut self, gain: f32) -> Result<(), CommandError> {
+        self.can_request()?;
+        self.gain = gain;
+        if self.source.is_some() {
+            self.submit(
+                self.source.clone(),
+                self.ids,
+                self.bounds.clone(),
+                self.state.requested.playing,
+                None,
+            )?;
         }
         Ok(())
     }
