@@ -165,7 +165,7 @@ fn catalogue_advertises_only_implemented_commands_and_versioned_schemas() {
     assert_eq!(result["request_schema"]["additionalProperties"], false);
     assert!(result["response_schema"]["properties"]["revision"].is_object());
     let commands = result["commands"].as_array().unwrap();
-    assert_eq!(commands.len(), 55);
+    assert_eq!(commands.len(), 56);
     for command in commands {
         assert_eq!(command["input_schema"]["type"], "object");
         assert_eq!(command["input_schema"]["additionalProperties"], false);

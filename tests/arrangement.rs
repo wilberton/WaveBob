@@ -320,6 +320,7 @@ fn invalid_placement_is_atomic_and_navigation_stays_out_of_history() {
     let insert = json!({"track_id":first,"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":0,"source_end":4,"position":0});
     let arr = ok(&mut session, "clips.insert", insert.clone());
     let clip = arr["tracks"][1]["clips"][0]["id"].clone();
+    ok(&mut session, "clips.insert", insert.clone());
     let before = session.snapshot();
     let history = ok(&mut session, "history.get", json!({}));
     for params in [

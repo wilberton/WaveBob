@@ -198,6 +198,83 @@ fn clip_edge_trim_and_single_clip_effect_target_use_shared_jobs() {
     h.click(apply);
     assert_eq!(h.app.host.history().undo_count, history);
 }
+
+#[test]
+fn crossfade_overlay_tracks_clip_drag_and_third_drop_has_visible_rejection() {
+    use wavebob::arrangement::*;
+    let (mut h, _dir) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    h.app.dispatch(Command::AddTrack(AddTrackParams::default()));
+    let track = h.app.host.snapshot().arrangement.tracks[0].id.clone();
+    for position in [0, 2400] {
+        h.app.dispatch(Command::InsertClip(InsertClipParams {
+            track_id: track.clone(),
+            document_id: doc.id.clone(),
+            revision_id: doc.revision_id.clone(),
+            source_start: 0,
+            source_end: doc.frames,
+            position,
+        }));
+    }
+    h.app.set_mode(ViewMode::Multitrack);
+    h.app
+        .dispatch(Command::SetTimelineViewport(TimelineViewportParams {
+            start_frame: 0,
+            end_frame: 14400,
+            expected_presentation_revision: None,
+        }));
+    let frame = h.frame(vec![]);
+    assert!(
+        text_shapes(&frame)
+            .iter()
+            .any(|(_, text)| text == "Auto crossfade")
+    );
+    let before = h.app.host.snapshot();
+    let row = h.text_rect("Track 1");
+    let source = h.text_rect("Gestures.wav").center();
+    let lane_left = 408.0;
+    let lane_width = 818.0;
+    h.drag(
+        source,
+        Pos2::new(
+            lane_left + lane_width * 3000.0 / 14400.0,
+            row.center().y + 35.0,
+        ),
+    );
+    assert_eq!(h.app.host.snapshot(), before);
+    assert!(h.app.error.as_ref().unwrap().contains("two simultaneous"));
+    let frame = h.frame(vec![]);
+    assert!(
+        text_shapes(&frame)
+            .iter()
+            .any(|(_, text)| text.contains("two simultaneous"))
+    );
+    let second = text_shapes(&h.frame(vec![]))
+        .into_iter()
+        .filter(|(r, t)| t == "Gestures.wav" && r.left() > 400.0 && r.right() < 1240.0)
+        .max_by(|a, b| a.0.left().total_cmp(&b.0.left()))
+        .unwrap()
+        .0;
+    let from = second.left_center() + Vec2::new(10.0, 25.0);
+    h.drag(from, from + Vec2::new(lane_width * 3000.0 / 14400.0, 0.0));
+    h.frame(vec![]);
+    assert!(
+        h.app
+            .host
+            .snapshot()
+            .arrangement
+            .crossfades()
+            .regions
+            .is_empty(),
+        "{:?}",
+        h.app.error
+    );
+    assert!(
+        !text_shapes(&h.frame(vec![]))
+            .iter()
+            .any(|(_, text)| text == "Auto crossfade")
+    );
+}
 impl Harness {
     fn new() -> Self {
         let ctx = egui::Context::default();

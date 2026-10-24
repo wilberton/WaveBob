@@ -10,6 +10,7 @@ pub struct Arrangement {
     pub id: String,
     pub revision_id: String,
     pub master_gain_db: f64,
+    pub next_clip_order: u64,
     pub sample_rate: u32,
     pub tracks: Vec<Track>,
     pub cursor: u64,
@@ -24,6 +25,7 @@ impl Default for Arrangement {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             master_gain_db: 0.0,
+            next_clip_order: 0,
             saved_revision_id: Some(revision_id.clone()),
             revision_id,
             sample_rate: 48_000,
@@ -71,19 +73,27 @@ impl Arrangement {
             ));
         }
         for track in &self.tracks {
-            for (i, a) in track.clips.iter().enumerate() {
+            let mut edges = Vec::with_capacity(track.clips.len() * 2);
+            for a in &track.clips {
+                if a.frames == 0 {
+                    return Err(invalid("A clip must contain at least one project frame"));
+                }
                 if a.position
                     .checked_add(a.frames)
                     .is_none_or(|end| end > MAX_TIMELINE_FRAME)
                 {
                     return Err(invalid("Clip exceeds the 24 hour timeline limit"));
                 }
-                if track.clips.iter().skip(i + 1).any(|b| {
-                    a.position < b.position.saturating_add(b.frames)
-                        && b.position < a.position.saturating_add(a.frames)
-                }) {
+                edges.push((a.position, 1i32));
+                edges.push((a.position + a.frames, -1));
+            }
+            edges.sort_unstable();
+            let mut active = 0;
+            for (_, delta) in edges {
+                active += delta;
+                if active > 2 {
                     return Err(invalid(
-                        "Overlapping clips are unavailable until automatic crossfades are implemented",
+                        "A track supports at most two simultaneous clips. Move this clip or use another track.",
                     ));
                 }
             }
@@ -108,6 +118,7 @@ pub struct Clip {
     pub document_id: String,
     pub revision_id: String,
     pub edit_revision_id: String,
+    pub insertion_order: u64,
     pub processed_revision_id: Option<String>,
     pub effects: Vec<crate::effects::Effect>,
     pub source_frames: u64,
@@ -232,4 +243,109 @@ pub struct NavigateParams {
 }
 pub(crate) fn invalid(message: &str) -> CommandError {
     CommandError::new(ErrorCode::InvalidParams, message)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CrossfadeKind {
+    Staggered,
+    Contained,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct CrossfadeRegion {
+    pub track_id: String,
+    pub first_clip_id: String,
+    pub second_clip_id: String,
+    pub start: u64,
+    pub end: u64,
+    pub kind: CrossfadeKind,
+    pub contained_clip_id: Option<String>,
+}
+impl CrossfadeRegion {
+    pub fn gains(&self, frame: u64) -> [f64; 2] {
+        if frame < self.start || frame >= self.end || self.start >= self.end {
+            return [1.0; 2];
+        }
+        let length = self.end - self.start;
+        if length == 1 || (self.kind == CrossfadeKind::Contained && length == 2) {
+            return [std::f64::consts::FRAC_1_SQRT_2; 2];
+        }
+        let t = (frame - self.start) as f64 / (length - 1) as f64;
+        match self.kind {
+            CrossfadeKind::Staggered if frame == self.start => [1.0, 0.0],
+            CrossfadeKind::Staggered if frame + 1 == self.end => [0.0, 1.0],
+            CrossfadeKind::Staggered => [
+                (t * std::f64::consts::FRAC_PI_2).cos(),
+                (t * std::f64::consts::FRAC_PI_2).sin(),
+            ],
+            CrossfadeKind::Contained => {
+                let (outer, inner) = if frame == self.start || frame + 1 == self.end {
+                    (1.0, 0.0)
+                } else if (frame - self.start) * 2 == length - 1 {
+                    (0.0, 1.0)
+                } else {
+                    (
+                        (t * std::f64::consts::PI).cos().abs(),
+                        (t * std::f64::consts::PI).sin(),
+                    )
+                };
+                if self.contained_clip_id.as_ref() == Some(&self.first_clip_id) {
+                    [inner, outer]
+                } else {
+                    [outer, inner]
+                }
+            }
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct CrossfadeData {
+    pub revision_id: String,
+    pub regions: Vec<CrossfadeRegion>,
+}
+impl Arrangement {
+    pub fn crossfades(&self) -> CrossfadeData {
+        let mut regions = Vec::new();
+        for track in &self.tracks {
+            let mut clips = track.clips.iter().collect::<Vec<_>>();
+            clips.sort_by_key(|clip| (clip.position, clip.insertion_order));
+            let mut active: Vec<&Clip> = Vec::new();
+            for clip in clips {
+                active.retain(|other| other.position + other.frames > clip.position);
+                for previous in &active {
+                    let end =
+                        (previous.position + previous.frames).min(clip.position + clip.frames);
+                    let coincident =
+                        previous.position == clip.position && previous.frames == clip.frames;
+                    let contained = if coincident {
+                        None
+                    } else if previous.position + previous.frames >= clip.position + clip.frames {
+                        Some(clip.id.clone())
+                    } else if previous.position == clip.position {
+                        Some(previous.id.clone())
+                    } else {
+                        None
+                    };
+                    regions.push(CrossfadeRegion {
+                        track_id: track.id.clone(),
+                        first_clip_id: previous.id.clone(),
+                        second_clip_id: clip.id.clone(),
+                        start: clip.position,
+                        end,
+                        kind: if contained.is_some() {
+                            CrossfadeKind::Contained
+                        } else {
+                            CrossfadeKind::Staggered
+                        },
+                        contained_clip_id: contained,
+                    });
+                }
+                active.push(clip);
+            }
+        }
+        CrossfadeData {
+            revision_id: self.revision_id.clone(),
+            regions,
+        }
+    }
 }

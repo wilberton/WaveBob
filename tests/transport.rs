@@ -425,6 +425,72 @@ fn fractional_device_phase_interpolates_across_whole_sample_loop_boundary() {
 }
 
 #[test]
+fn crossfade_envelopes_and_graph_replacement_stay_allocation_free() {
+    let (mut session, mut output, _dir, id) = fixture(48000, 2, &[8192; 16]);
+    let doc = ok(send(
+        &mut session,
+        "documents.get",
+        json!({"document_id":id}),
+    ));
+    let arr = ok(send(&mut session, "tracks.add", json!({})));
+    let track = arr["tracks"][0]["id"].clone();
+    for position in [0, 0] {
+        ok(send(
+            &mut session,
+            "clips.insert",
+            json!({"track_id":track,"document_id":id,"revision_id":doc["revision_id"],"source_start":0,"source_end":8,"position":position}),
+        ));
+    }
+    ok(send(
+        &mut session,
+        "transport.loop.set",
+        json!({"enabled":true}),
+    ));
+    ok(send(&mut session, "mix.play", json!({})));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let mix = ok(send(&mut session, "mix.get", json!({})));
+        if mix["prepared_revision_id"] == mix["revision_id"] {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let mut frames = [[0.0; 2]; 8];
+    ALLOCS.set(0);
+    FREES.set(0);
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    assert_eq!(ALLOCS.get(), 0);
+    assert_eq!(FREES.get(), 0);
+    assert_eq!(frames[0], [0.25; 2]);
+    assert_eq!(frames[7], [0.25; 2]);
+    assert!(frames[3][0] > 0.3);
+    state(&mut session);
+    let clip = session.snapshot().arrangement.tracks[0].clips[1].id.clone();
+    ok(send(
+        &mut session,
+        "clips.move",
+        json!({"clip_id":clip,"track_id":track,"position":4}),
+    ));
+    loop {
+        let mix = ok(send(&mut session, "mix.get", json!({})));
+        if mix["prepared_revision_id"] == mix["revision_id"] {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    assert_eq!(ALLOCS.get(), 0);
+    assert_eq!(FREES.get(), 0);
+    assert!(frames.iter().flatten().all(|value| value.is_finite()));
+}
+
+#[test]
 fn device_loss_is_recoverable_and_headless_editing_needs_no_output() {
     let mut headless = Session::default();
     assert_eq!(state(&mut headless)["output"]["status"], "disabled");

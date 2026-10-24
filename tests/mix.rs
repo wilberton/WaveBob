@@ -70,6 +70,231 @@ fn samples(session: &mut Session, start: u64, frames: u32) -> Value {
 fn near(actual: f64, expected: f64) {
     assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
 }
+
+#[test]
+fn staggered_crossfade_audio_endpoints_and_move_trim_history_follow_geometry() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut session, mut output) = Session::with_manual_output(48000).unwrap();
+    let a = source(&mut session, dir.path(), "A.wav", 48000, 2, &[0.25; 16]);
+    let b = source(&mut session, dir.path(), "B.wav", 48000, 2, &[0.75; 16]);
+    let arr = call(&mut session, "tracks.add", json!({}));
+    let track = arr["tracks"][0]["id"].clone();
+    insert(&mut session, &a, &track, 0);
+    let arr = insert(&mut session, &b, &track, 4);
+    let first = arr["tracks"][0]["clips"][0].clone();
+    let second = arr["tracks"][0]["clips"][1].clone();
+    let regions = call(&mut session, "arrangement.crossfades", json!({}));
+    assert_eq!(regions["regions"][0]["start"], 4);
+    assert_eq!(regions["regions"][0]["end"], 8);
+    assert_eq!(regions["regions"][0]["kind"], "staggered");
+    prepare(&mut session);
+    let offline = samples(&mut session, 0, 12);
+    for frame in 4..8 {
+        let t = (frame - 4) as f64 / 3.0;
+        near(
+            offline["channels"][0][frame].as_f64().unwrap(),
+            0.25 * (t * std::f64::consts::FRAC_PI_2).cos()
+                + 0.75 * (t * std::f64::consts::FRAC_PI_2).sin(),
+        );
+    }
+    call(&mut session, "mix.play", json!({}));
+    let mut live = [[0.0; 2]; 12];
+    output.render_into(&mut live);
+    for (frame, value) in live.iter().enumerate() {
+        assert_eq!(
+            value[0] as f64,
+            offline["channels"][0][frame].as_f64().unwrap()
+        );
+    }
+    assert_eq!(
+        call(
+            &mut session,
+            "clips.samples",
+            json!({"clip_id":first["id"],"frames":8})
+        )["channels"],
+        json!(vec![vec![0.25; 8]; 2])
+    );
+    call(
+        &mut session,
+        "clips.move",
+        json!({"clip_id":second["id"],"track_id":track,"position":8}),
+    );
+    assert!(
+        call(&mut session, "arrangement.crossfades", json!({}))["regions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    call(&mut session, "mix.seek", json!({"frame":10}));
+    prepare(&mut session);
+    output.render_into(&mut []);
+    assert_eq!(
+        call(&mut session, "transport.get", json!({}))["applied"]["frame"],
+        10
+    );
+    call(&mut session, "history.undo", json!({}));
+    assert_eq!(
+        call(&mut session, "arrangement.crossfades", json!({})),
+        regions
+    );
+    call(&mut session, "history.redo", json!({}));
+    assert!(
+        call(&mut session, "arrangement.crossfades", json!({}))["regions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    call(&mut session, "history.undo", json!({}));
+    let started = call(
+        &mut session,
+        "clips.trim",
+        json!({"clip_id":first["id"],"edit_revision_id":first["edit_revision_id"],"source_start":0,"source_end":4}),
+    );
+    job(&mut session, started);
+    assert!(
+        call(&mut session, "arrangement.crossfades", json!({}))["regions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    call(&mut session, "history.undo", json!({}));
+    assert_eq!(
+        call(&mut session, "arrangement.crossfades", json!({})),
+        regions
+    );
+}
+
+#[test]
+fn containment_shared_edges_and_coincident_insertion_order_have_defined_audio() {
+    for (outer_start, outer_frames, inner_start, inner_frames, kind) in [
+        (0, 9, 2, 5, "contained"),
+        (0, 9, 0, 5, "contained"),
+        (0, 9, 4, 5, "contained"),
+        (0, 5, 0, 5, "staggered"),
+        (0, 3, 1, 1, "contained"),
+        (0, 4, 1, 2, "contained"),
+        (0, 2, 1, 2, "staggered"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::default();
+        let outer = source(
+            &mut session,
+            dir.path(),
+            "Outer.wav",
+            48000,
+            2,
+            &vec![0.25; outer_frames * 2],
+        );
+        let inner = source(
+            &mut session,
+            dir.path(),
+            "Inner.wav",
+            48000,
+            2,
+            &vec![0.75; inner_frames * 2],
+        );
+        let arr = call(&mut session, "tracks.add", json!({}));
+        let track = arr["tracks"][0]["id"].clone();
+        let arr = insert(&mut session, &outer, &track, outer_start);
+        let first = arr["tracks"][0]["clips"][0]["id"].clone();
+        insert(&mut session, &inner, &track, inner_start);
+        let data = call(&mut session, "arrangement.crossfades", json!({}));
+        let region = &data["regions"][0];
+        assert_eq!(region["kind"], kind);
+        assert_eq!(region["first_clip_id"], first);
+        prepare(&mut session);
+        let mixed = samples(
+            &mut session,
+            0,
+            (outer_start + outer_frames as u64).max(inner_start + inner_frames as u64) as u32,
+        );
+        let start = region["start"].as_u64().unwrap();
+        let end = region["end"].as_u64().unwrap();
+        for frame in start..end {
+            let length = end - start;
+            let expected = if length == 1 || (kind == "contained" && length == 2) {
+                std::f64::consts::FRAC_1_SQRT_2
+            } else {
+                let t = (frame - start) as f64 / (length - 1) as f64;
+                if kind == "contained" {
+                    0.25 * (t * std::f64::consts::PI).cos().abs()
+                        + 0.75 * (t * std::f64::consts::PI).sin()
+                } else {
+                    0.25 * (t * std::f64::consts::FRAC_PI_2).cos()
+                        + 0.75 * (t * std::f64::consts::FRAC_PI_2).sin()
+                }
+            };
+            near(
+                mixed["channels"][0][frame as usize].as_f64().unwrap(),
+                expected,
+            );
+        }
+    }
+    // A short clip inserted first still has the inner role when a later, longer
+    // clip shares its start; insertion order remains independently observable.
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::default();
+    let inner = source(
+        &mut session,
+        dir.path(),
+        "Short first.wav",
+        48000,
+        2,
+        &[0.75; 10],
+    );
+    let outer = source(
+        &mut session,
+        dir.path(),
+        "Long second.wav",
+        48000,
+        2,
+        &[0.25; 18],
+    );
+    let arr = call(&mut session, "tracks.add", json!({}));
+    let track = arr["tracks"][0]["id"].clone();
+    let arr = insert(&mut session, &inner, &track, 0);
+    let first = arr["tracks"][0]["clips"][0]["id"].clone();
+    insert(&mut session, &outer, &track, 0);
+    let data = call(&mut session, "arrangement.crossfades", json!({}));
+    assert_eq!(data["regions"][0]["first_clip_id"], first);
+    assert_eq!(data["regions"][0]["contained_clip_id"], first);
+    prepare(&mut session);
+    let mixed = samples(&mut session, 0, 9);
+    for (frame, expected) in [(0, 0.25), (2, 0.75), (4, 0.25), (8, 0.25)] {
+        assert_eq!(mixed["channels"][0][frame].as_f64().unwrap(), expected);
+    }
+}
+
+#[test]
+fn third_simultaneous_clip_is_rejected_atomically_but_adjacent_regions_are_valid() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::default();
+    let doc = source(&mut session, dir.path(), "One.wav", 48000, 2, &[0.25; 16]);
+    let arr = call(&mut session, "tracks.add", json!({}));
+    let track = arr["tracks"][0]["id"].clone();
+    insert(&mut session, &doc, &track, 0);
+    insert(&mut session, &doc, &track, 4);
+    let before = session.snapshot();
+    let history = call(&mut session, "history.get", json!({}));
+    let rejected=serde_json::to_value(protocol::dispatch_line(&mut session,&json!({"id":"third","command":"clips.insert","params":{"track_id":track,"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":0,"source_end":8,"position":6}}).to_string())).unwrap();
+    assert_eq!(rejected["error"]["code"], "invalid_params");
+    assert!(
+        rejected["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("two simultaneous")
+    );
+    assert_eq!(session.snapshot(), before);
+    assert_eq!(call(&mut session, "history.get", json!({})), history);
+    insert(&mut session, &doc, &track, 8);
+    assert_eq!(
+        call(&mut session, "arrangement.crossfades", json!({}))["regions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
 #[test]
 fn prepared_mix_places_mixed_rate_sources_and_live_frames_equal_offline() {
     let dir = tempfile::tempdir().unwrap();
@@ -181,6 +406,7 @@ fn mute_solo_pan_gain_master_and_overload_are_observable_without_a_device() {
     near(mixed["channels"][0][0].as_f64().unwrap(), 2.0);
     assert_eq!(mixed["overloaded_samples"], 4);
     near(mixed["peak_level"].as_f64().unwrap(), 2.0);
+    assert_eq!(mixed["channels"][1], json!(vec![0.0; 4]));
 }
 #[test]
 fn timeline_loops_silence_and_processed_clips_share_live_mixing() {

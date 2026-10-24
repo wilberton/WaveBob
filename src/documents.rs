@@ -406,6 +406,7 @@ impl Editor {
             Command::ApplyClipEffect(params) => self.process_clip(params),
             Command::ReadClipSamples(params) => self.clip_samples(params),
             command @ (Command::GetArrangement(_)
+            | Command::GetCrossfades(_)
             | Command::SetMasterGain(_)
             | Command::AddTrack(_)
             | Command::UpdateTrack(_)

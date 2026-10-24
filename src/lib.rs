@@ -82,6 +82,7 @@ pub enum CommandResult {
     Arrangement(Box<arrangement::Arrangement>),
     Mix(Box<mixing::MixState>),
     MixSamples(mixing::MixSamples),
+    Crossfades(arrangement::CrossfadeData),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -155,6 +156,7 @@ pub struct Session {
     last_active_document: Option<String>,
     wake: Option<documents::Wake>,
     pending_mix_play: bool,
+    pending_mix_seek: Option<u64>,
     mix_failure: Option<(String, CommandError)>,
 }
 
@@ -176,6 +178,7 @@ impl Default for Session {
             last_active_document: None,
             wake: None,
             pending_mix_play: false,
+            pending_mix_seek: None,
             mix_failure: None,
         }
     }
@@ -486,6 +489,7 @@ impl Session {
         self.playback
             .request(&document, audio, self.snapshot.loop_enabled, true, seek)?;
         self.pending_mix_play = false;
+        self.pending_mix_seek = None;
         self.editor.activate_for_transport(id);
         self.last_active_document = Some(id.into());
         self.snapshot.revision = revision;
@@ -520,6 +524,7 @@ impl Session {
         let revision = self.next_revision()?;
         let state = self.browser.start(path)?;
         self.pending_mix_play = false;
+        self.pending_mix_seek = None;
         self.playback.pause()?;
         self.snapshot.revision = revision;
         Ok(CommandResult::Browser(state.into()))
@@ -559,6 +564,7 @@ impl Session {
         if active != self.last_active_document {
             let _ = self.playback.pause();
             self.pending_mix_play = false;
+            self.pending_mix_seek = None;
             self.last_active_document = active;
         }
         if self.synchronize_mix(seek.as_ref()) {

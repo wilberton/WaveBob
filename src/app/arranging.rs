@@ -77,6 +77,7 @@ impl WaveBob {
     pub(super) fn multitrack_view(&mut self, ui: &mut egui::Ui, help: &mut Help) {
         let snapshot = self.host.snapshot();
         let arrangement = snapshot.arrangement;
+        let crossfades = arrangement.crossfades();
         let view = self.host.presentation().timeline;
         let frozen = self.host.frozen();
         let escape = ui
@@ -223,7 +224,7 @@ impl WaveBob {
                 if update.name.is_some()||update.index.is_some()||update.mute.is_some()||update.solo.is_some()||update.gain_db.is_some()||update.pan.is_some(){command=Some(Command::UpdateTrack(update));}
                 if let Some(command)=command && !frozen {self.dispatch(command);}
                 let blank=ui.interact(lane,ui.scope_id().with((&track.id,"lane")),Sense::click_and_drag());
-                help.observe(&blank,"Drag audio here. Click for a cursor; drag empty timeline to select time. Overlaps are unavailable until crossfades.");
+                help.observe(&blank,"Drag audio here. Two overlapping clips crossfade automatically; a third simultaneous clip is rejected. Drag empty time to select.");
                 if blank.drag_started()&&!frozen&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {self.arrangement_gesture=Some(Gesture::Select{anchor:frame_at(pos,lane,&view),revision:snapshot.revision});}
                 if blank.clicked()&&!frozen&&let Some(pos)=blank.interact_pointer_pos(){self.navigate_arrangement(frame_at(pos,lane,&view),None,Vec::new());}
                 let color=[visuals::TEAL,visuals::WAVE,visuals::GOLD][index%3];
@@ -263,6 +264,18 @@ impl WaveBob {
                             if handle.drag_started()&&!frozen&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {self.arrangement_gesture=Some(Gesture::Trim{clip:clip.clone(),left,anchor:frame_at(pos,lane,&view),revision:snapshot.revision});}
                         }
                     }
+                }
+                for region in crossfades.regions.iter().filter(|region|region.track_id==track.id) {
+                    let x=|frame:u64|lane.left()+(frame as f64-view.start as f64) as f32/(view.end-view.start) as f32*lane.width();
+                    let overlap=Rect::from_min_max(Pos2::new(x(region.start),lane.top()+27.0),Pos2::new(x(region.end),lane.bottom()-9.0));
+                    let painter=ui.painter_at(lane);
+                    painter.rect_filled(overlap,0.0,color.gamma_multiply(0.10));
+                    for voice in 0..2 {
+                        let points=(0..=32).map(|i|{let frame=region.start+(region.end-region.start-1)*i/32;let gain=region.gains(frame)[voice];Pos2::new(overlap.left()+overlap.width()*i as f32/32.0,overlap.bottom()-overlap.height()*gain as f32)}).collect::<Vec<_>>();
+                        painter.add(egui::Shape::line(points,Stroke::new(1.2,color)));
+                    }
+                    if overlap.width()>95.0 {painter.rect_filled(Rect::from_center_size(Pos2::new(overlap.center().x,lane.top()+7.0),Vec2::new(if region.kind==CrossfadeKind::Contained{115.0}else{90.0},13.0)),2.0,SURFACE);painter.text(Pos2::new(overlap.center().x,lane.top()+1.0),egui::Align2::CENTER_TOP,if region.kind==CrossfadeKind::Contained{"Auto crossfade · dip"}else{"Auto crossfade"},egui::FontId::proportional(10.0),Color32::WHITE);}
+                    let response=ui.interact(overlap.intersect(lane),ui.scope_id().with((&region.first_clip_id,&region.second_clip_id,"crossfade-help")),Sense::hover());help.observe(&response,"Automatic equal-power transition derived from the clip overlap. Moving or trimming clips updates both the sound and these curves.");
                 }
                 if let Some(selection)=&arrangement.selection {
                     let x=|frame:u64|lane.left()+(frame as f64-view.start as f64) as f32/(view.end-view.start) as f32*lane.width();
@@ -306,6 +319,7 @@ impl WaveBob {
                         document_id: document.id.clone(),
                         revision_id: document.revision_id.clone(),
                         edit_revision_id: String::new(),
+                        insertion_order: 0,
                         processed_revision_id: None,
                         effects: Vec::new(),
                         source_frames: document.frames,

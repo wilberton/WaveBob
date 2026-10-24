@@ -41,6 +41,7 @@ impl Session {
         self.browser.stop();
         self.playback.pause()?;
         self.pending_mix_play = true;
+        self.pending_mix_seek = None;
         self.last_active_document = self.editor.active();
         if arrangement.cursor >= self.editor.mix_document(self.snapshot.loop_enabled).frames {
             let _ = self.editor.execute(
@@ -95,7 +96,17 @@ impl Session {
             let _ = self.playback.clear();
             return true;
         }
+        let explicit = seek
+            .filter(|(id, _)| id == &arrangement.id)
+            .map(|(_, frame)| *frame)
+            .or(self.pending_mix_seek);
+        if explicit.is_some() {
+            self.pending_mix_seek = explicit;
+        }
         let Some(graph) = self.editor.prepared_mix() else {
+            if !self.pending_mix_play && !transport.requested.playing && explicit.is_none() {
+                return true;
+            }
             if let Err(error) = self.editor.ensure_mix(false)
                 && error.code != ErrorCode::Busy
             {
@@ -106,9 +117,6 @@ impl Session {
             return true;
         };
         let document = self.editor.mix_document(self.snapshot.loop_enabled);
-        let explicit = seek
-            .filter(|(id, _)| id == &arrangement.id)
-            .map(|(_, frame)| *frame);
         if self.pending_mix_play
             || explicit.is_some()
             || self
@@ -130,7 +138,10 @@ impl Session {
                 self.pending_mix_play || transport.requested.playing,
                 position,
             ) {
-                Ok(()) => self.pending_mix_play = false,
+                Ok(()) => {
+                    self.pending_mix_play = false;
+                    self.pending_mix_seek = None;
+                }
                 Err(error) => {
                     self.mix_failure = Some((arrangement.revision_id, error));
                     self.pending_mix_play = false;

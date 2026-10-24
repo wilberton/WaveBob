@@ -359,6 +359,10 @@ in this specification and affected tickets.
   clip in/out over the two halves of the contained interval, returning to the
   containing clip afterward. Define one-frame degeneracies without NaNs and
   verify resulting audio, not only the overlay.
+  Shared-start/shared-end pairs of unequal lengths use containment; fully
+  coincident clips use stable insertion ordering for the ordinary transition.
+  Containment of one/two project frames shares both voices at 1/√2. Longer
+  containment uses sin(πt) for the inner voice and |cos(πt)| for the outer voice.
 - Offline arrangement export and live playback consume the same prepared mixing
   semantics: source interval, resampling, clip effects, crossfade, track gain/pan,
   mute/solo and master output. Export does not require a physical output device.

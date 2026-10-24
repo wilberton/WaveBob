@@ -183,7 +183,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 55);
+        assert_eq!(tools.len(), 56);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -563,6 +563,197 @@ mod live {
             ],
         )
         .await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn automatic_crossfade_audio_and_overlay_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "crossfade-check");
+        let client = named_client(runtime.path(), "crossfade-check").await;
+        let mut documents = Vec::new();
+        for (index, name) in ["Rain ambience.wav", "Footsteps.wav", "Piano texture.wav"]
+            .iter()
+            .enumerate()
+        {
+            let frames = [288000, 192000, 144000][index];
+            let path = runtime.path().join(name);
+            let mut writer = hound::WavWriter::create(
+                &path,
+                hound::WavSpec {
+                    channels: 2,
+                    sample_rate: 48000,
+                    bits_per_sample: 24,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            for frame in 0..frames {
+                let t = frame as f64 / 48000.0;
+                let envelope = if index == 1 {
+                    (t * 5.1).sin().abs().powi(8)
+                } else {
+                    0.4 + 0.3 * (t * 1.7).sin().abs()
+                };
+                for channel in 0..2 {
+                    let value = (t
+                        * (170.0 + index as f64 * 91.0 + channel as f64 * 23.0)
+                        * std::f64::consts::TAU)
+                        .sin()
+                        * envelope
+                        * 0.3;
+                    writer.write_sample((value * 8388607.0) as i32).unwrap();
+                }
+            }
+            writer.finalize().unwrap();
+            let opened =
+                response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+            documents.push(finish_mcp_job(&client, opened).await);
+        }
+        for (index, name) in ["Ambience", "Footsteps", "Texture", "Track 4"]
+            .iter()
+            .enumerate()
+        {
+            let arr = response(&call(&client, "tracks.add", json!({"params":{"name":name}})).await);
+            let track = &arr["result"]["tracks"][index]["id"];
+            if index < 3 {
+                let doc = &documents[index];
+                let positions = if index == 1 {
+                    vec![48000, 144000]
+                } else {
+                    vec![if index == 0 { 0 } else { 192000 }]
+                };
+                for position in positions {
+                    assert_eq!(response(&call(&client,"clips.insert",json!({"params":{"track_id":track,"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":0,"source_end":doc["frames"],"position":position}})).await)["status"],"ok");
+                }
+            }
+            if index == 1 {
+                response(
+                    &call(
+                        &client,
+                        "tracks.update",
+                        json!({"params":{"track_id":track,"solo":true,"gain_db":-6.0}}),
+                    )
+                    .await,
+                );
+            }
+        }
+        let arr = response(&call(&client, "arrangement.get", json!({})).await)["result"].clone();
+        let foot = &arr["tracks"][1];
+        let a = &foot["clips"][0];
+        let b = &foot["clips"][1];
+        let regions = response(&call(&client, "arrangement.crossfades", json!({})).await);
+        assert_eq!(regions["result"]["regions"][0]["start"], 144000);
+        assert_eq!(regions["result"]["regions"][0]["end"], 240000);
+        let rejected=response(&call(&client,"clips.insert",json!({"params":{"track_id":foot["id"],"document_id":documents[1]["id"],"revision_id":documents[1]["revision_id"],"source_start":0,"source_end":documents[1]["frames"],"position":96000}})).await);
+        assert_eq!(rejected["error"]["code"], "invalid_params");
+        assert_eq!(
+            response(&call(&client, "arrangement.get", json!({})).await)["result"],
+            arr
+        );
+        let prepared = response(
+            &call(
+                &client,
+                "mix.prepare",
+                json!({"params":{"revision_id":arr["revision_id"]}}),
+            )
+            .await,
+        );
+        finish_mcp_output(&client, prepared).await;
+        let frame = 156345;
+        let a_pcm = response(
+            &call(
+                &client,
+                "clips.samples",
+                json!({"params":{"clip_id":a["id"],"start_frame":frame-48000,"frames":1}}),
+            )
+            .await,
+        );
+        let b_pcm = response(
+            &call(
+                &client,
+                "clips.samples",
+                json!({"params":{"clip_id":b["id"],"start_frame":frame-144000,"frames":1}}),
+            )
+            .await,
+        );
+        let mixed = response(
+            &call(
+                &client,
+                "mix.samples",
+                json!({"params":{"revision_id":arr["revision_id"],"start_frame":frame,"frames":1}}),
+            )
+            .await,
+        );
+        let t = (frame - 144000) as f64 / 95999.0;
+        for channel in 0..2 {
+            let expected = (a_pcm["result"]["channels"][channel][0].as_f64().unwrap()
+                * (t * std::f64::consts::FRAC_PI_2).cos()
+                + b_pcm["result"]["channels"][channel][0].as_f64().unwrap()
+                    * (t * std::f64::consts::FRAC_PI_2).sin())
+                * 10.0f64.powf(-6.0 / 20.0);
+            assert!(
+                (mixed["result"]["channels"][channel][0].as_f64().unwrap() - expected).abs() < 1e-6
+            );
+        }
+        response(
+            &call(
+                &client,
+                "presentation.set_mode",
+                json!({"params":{"mode":"multitrack"}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "presentation.timeline.set",
+                json!({"params":{"start_frame":0,"end_frame":384000}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "arrangement.navigate",
+                json!({"params":{"cursor":192000,"selected_clip_ids":[b["id"]]}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "presentation.effects.set",
+                json!({"params":{"effect":{"kind":"gain","db":-3.0}}}),
+            )
+            .await,
+        );
+        let captured = call(
+            &client,
+            "capture.png",
+            json!({"params":{"path":runtime.path().join("crossfade.png")}}),
+        )
+        .await;
+        let metadata = response(&captured);
+        assert_eq!(metadata["status"], "ok");
+        let image = captured
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("crossfade.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(Path::new(&directory).join("crossfade.json"),serde_json::to_vec_pretty(&json!({"crossfades":regions,"mixed":mixed,"capture":metadata,"third_overlap":rejected})).unwrap()).unwrap();
+        }
+        client.cancel().await.unwrap();
     }
 
     #[tokio::test]
@@ -2422,7 +2613,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 72);
+        assert_eq!(tools.len(), 73);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

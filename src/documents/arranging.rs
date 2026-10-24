@@ -29,6 +29,9 @@ impl Editor {
         }
         let mut next = self.arrangement.clone();
         let label = match command {
+            Command::GetCrossfades(_) => {
+                return Ok(CommandResult::Crossfades(self.arrangement.crossfades()));
+            }
             Command::SetMasterGain(params) => {
                 if !params.gain_db.is_finite() || !(-120.0..=24.0).contains(&params.gain_db) {
                     return Err(invalid("Master gain must be -120..24 dB"));
@@ -128,6 +131,7 @@ impl Editor {
                     document_id: doc.id.clone(),
                     revision_id: doc.revision_id.clone(),
                     edit_revision_id: uuid::Uuid::new_v4().to_string(),
+                    insertion_order: next.next_clip_order,
                     processed_revision_id: None,
                     effects: Vec::new(),
                     source_frames: audio.frames(),
@@ -139,6 +143,12 @@ impl Editor {
                     frames,
                 };
                 next.selected_clip_ids = vec![clip.id.clone()];
+                next.next_clip_order = next.next_clip_order.checked_add(1).ok_or_else(|| {
+                    CommandError::new(
+                        ErrorCode::RevisionExhausted,
+                        "Clip insertion counter exhausted",
+                    )
+                })?;
                 track.clips.push(clip);
                 "Insert clip"
             }
@@ -205,9 +215,11 @@ impl Editor {
             _ => unreachable!(),
         };
         for track in &mut next.tracks {
-            track
-                .clips
-                .sort_by(|a, b| a.position.cmp(&b.position).then(a.id.cmp(&b.id)));
+            track.clips.sort_by(|a, b| {
+                a.position
+                    .cmp(&b.position)
+                    .then(a.insertion_order.cmp(&b.insertion_order))
+            });
         }
         let ids: std::collections::BTreeSet<_> = next
             .tracks

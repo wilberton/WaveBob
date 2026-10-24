@@ -71,6 +71,14 @@ inspection. Preparation is derived work outside audio undo history.
 **Effective track**: A track's current controls and whether it contributes under
 the mute-over-solo rule. Mono pan and stereo balance depend on each clip's layout.
 
+**Crossfade region**: The half-open project-frame intersection of two clips on
+one track, with equal-power gains derived from their geometry. A contained clip
+dips the containing voice and fades in/out. A third simultaneous clip is invalid.
+
+**Insertion order**: The stable ordering assigned when a clip is created, retained
+when it moves, trims or returns through history. It resolves equal-start ordering
+independently from UUID spelling.
+
 **Project frame**: An integer arrangement time boundary at the project sample
 rate, initially 48 kHz. Source-to-project duration conversion rounds once to the
 nearest frame, with a minimum of one for a nonempty source interval.

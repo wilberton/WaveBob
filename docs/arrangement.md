@@ -13,9 +13,9 @@ pan -1..1. `tracks.remove` removes the track and all its clips in one history en
 `clips.insert` takes `track_id`, `document_id`, `revision_id`, source_start,
 source_end and position. It pins that immutable revision; waveform editing and
 closing the source document leave the clip unchanged. `clips.move` takes clip_id,
-track_id and position; `clips.remove` takes clip_id. Invalid placement, overlap,
+track_id and position; `clips.remove` takes clip_id. Invalid placement, third overlap,
 stale revisions or invalid identifiers leave state/history unchanged. Overlaps
-are rejected pending the automatic crossfade implementation in ticket 17.
+derive [automatic crossfades](crossfades.md); a third simultaneous clip is rejected.
 
 `clips.waveform` takes clip_id and bins (1..2048). It reads the pinned source
 interval even after closing the source document. Queries never reopen files.

@@ -48,5 +48,5 @@ phase as sample playback. Finite floating-point headroom is preserved; mixes who
 conservative peak bound exceeds float32 range are rejected before playback. Retained
 source, history, clipboard and prepared PCM share the existing 2 GiB budget.
 
-Automatic overlap envelopes are added in ticket 17. Current placement rejects
-overlaps explicitly.
+Two overlapping clips on a track use [automatic crossfade envelopes](crossfades.md).
+A third simultaneous clip is rejected atomically.

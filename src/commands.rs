@@ -94,6 +94,7 @@ macro_rules! command_registry {
 }
 
 command_registry! {
+    GetCrossfades(EmptyParams) => ("arrangement.crossfades", "Inspect derived equal-power overlap regions and containment roles.", false, false, false, crate::arrangement::CrossfadeData),
     GetMix(EmptyParams) => ("mix.get", "Inspect prepared mix revision, effective tracks and output levels.", false, false, false, crate::mixing::MixState),
     PrepareMix(crate::mixing::PrepareMixParams) => ("mix.prepare", "Prepare immutable clip resampling and a project-clock mixer without an audio device.", true, false, false, JobInfo),
     ReadMixSamples(crate::mixing::MixSamplesParams) => ("mix.samples", "Render a bounded project-frame interval through the same mixer as live playback.", false, false, false, crate::mixing::MixSamples),
@@ -109,7 +110,7 @@ command_registry! {
     AddTrack(crate::arrangement::AddTrackParams) => ("tracks.add", "Insert a named track as one undoable arrangement edit.", true, false, false, crate::arrangement::Arrangement),
     UpdateTrack(crate::arrangement::UpdateTrackParams) => ("tracks.update", "Rename, reorder or change track controls as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
     RemoveTrack(crate::arrangement::TrackParams) => ("tracks.remove", "Remove a track and its clips in one undoable edit.", true, false, false, crate::arrangement::Arrangement),
-    InsertClip(crate::arrangement::InsertClipParams) => ("clips.insert", "Insert an immutable source interval at an exact project frame; overlaps currently rejected.", true, false, false, crate::arrangement::Arrangement),
+    InsertClip(crate::arrangement::InsertClipParams) => ("clips.insert", "Insert an immutable source interval at an exact project frame, deriving pairwise crossfades and rejecting third overlaps.", true, false, false, crate::arrangement::Arrangement),
     MoveClip(crate::arrangement::MoveClipParams) => ("clips.move", "Move a clip in time or between tracks as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
     RemoveClip(crate::arrangement::ClipParams) => ("clips.remove", "Remove a clip as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
     NavigateArrangement(crate::arrangement::NavigateParams) => ("arrangement.navigate", "Set cursor, time selection and selected clips without adding history.", true, false, false, crate::arrangement::Arrangement),

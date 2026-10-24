@@ -22,6 +22,12 @@ struct PreparedClip {
     key: String,
     buffer: Buffer,
     gains: [f64; 2],
+    envelopes: Vec<Envelope>,
+}
+#[derive(Debug)]
+struct Envelope {
+    region: crate::arrangement::CrossfadeRegion,
+    first: bool,
 }
 #[derive(Debug)]
 struct Segment {
@@ -57,10 +63,17 @@ impl Graph {
             let clip = &self.clips[*index];
             debug_assert!(frame < clip.end);
             let offset = (frame - clip.start) as usize * clip.buffer.channels + clip.buffer.offset;
+            let i = clip
+                .envelopes
+                .partition_point(|envelope| envelope.region.end <= frame);
+            let envelope = clip.envelopes.get(i).map_or(1.0, |envelope| {
+                envelope.region.gains(frame)[usize::from(!envelope.first)]
+            });
             for (channel, value) in result.iter_mut().enumerate() {
                 *value += clip.buffer.samples[offset + channel.min(clip.buffer.channels - 1)]
                     as f64
-                    * clip.gains[channel];
+                    * clip.gains[channel]
+                    * envelope;
             }
         }
         [result[0] as f32, result[1] as f32]
@@ -79,6 +92,26 @@ pub(crate) fn prepare(
         .map(|clip| (clip.key.clone(), clip.buffer.clone()))
         .collect();
     let any_solo = arrangement.tracks.iter().any(|track| track.solo);
+    let mut envelopes: BTreeMap<String, Vec<Envelope>> = BTreeMap::new();
+    for region in arrangement.crossfades().regions {
+        envelopes
+            .entry(region.first_clip_id.clone())
+            .or_default()
+            .push(Envelope {
+                region: region.clone(),
+                first: true,
+            });
+        envelopes
+            .entry(region.second_clip_id.clone())
+            .or_default()
+            .push(Envelope {
+                region,
+                first: false,
+            });
+    }
+    for list in envelopes.values_mut() {
+        list.sort_by_key(|envelope| envelope.region.start);
+    }
     let master = 10.0f64.powf(arrangement.master_gain_db / 20.0);
     let mut clips = Vec::new();
     let mut events = Vec::new();
@@ -130,7 +163,7 @@ pub(crate) fn prepare(
             buffer
         };
         let gain = master * 10.0f64.powf(track.gain_db / 20.0);
-        let gains = if input.audio.channels == 1 {
+        let mut gains = if input.audio.channels == 1 {
             let angle = (track.pan + 1.0) * std::f64::consts::FRAC_PI_4;
             [gain * angle.cos(), gain * angle.sin()]
         } else if track.pan >= 0.0 {
@@ -141,6 +174,11 @@ pub(crate) fn prepare(
                 gain * (-track.pan * std::f64::consts::FRAC_PI_2).cos(),
             ]
         };
+        if track.pan == 1.0 {
+            gains[0] = 0.0;
+        } else if track.pan == -1.0 {
+            gains[1] = 0.0;
+        }
         let audible = !track.mute && (!any_solo || track.solo);
         if audible {
             events.push((input.clip.position, true, index));
@@ -148,6 +186,7 @@ pub(crate) fn prepare(
             bound += input.audio.peak_level * gain;
         }
         clips.push(PreparedClip {
+            envelopes: envelopes.remove(&input.clip.id).unwrap_or_default(),
             start: input.clip.position,
             end: input.clip.position + input.clip.frames,
             key,
