@@ -71,9 +71,10 @@ if args.gui:
     print("Shipped GUI attachment and MCP screenshots", flush=True)
     runtime = args.out / "runtime"
     runtime.mkdir()
+    native_log = (args.out / "gui-native.log").open("wb")
     gui = subprocess.Popen([executable("wavebob"), "--hidden", "--name", "Release smoke",
                             "--runtime-dir", str(runtime), "--preferences", str(args.out / "layout.json")],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, creationflags=creationflags)
+                           stdout=subprocess.DEVNULL, stderr=native_log, creationflags=creationflags)
     try:
         deadline = time.monotonic() + 30
         while True:
@@ -98,7 +99,9 @@ if args.gui:
         if gui.poll() is None:
             gui.kill()
             gui.wait()
-        gui.stderr.close()
+        native_log.close()
+        if gui.returncode:
+            print((args.out / "gui-native.log").read_text(encoding="utf-8", errors="replace")[-16000:])
 record = {"archive": str(args.archive.resolve()), "archive_sha256": archive_hash,
           "build_commit": manifest["commit"], "host": manifest["host"], "results": results}
 (args.out / "smoke-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
