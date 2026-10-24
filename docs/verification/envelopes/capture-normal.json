@@ -1,0 +1,42 @@
+{
+  "clips": {
+    "editor_id": null,
+    "frame_number": 20,
+    "height": 900,
+    "instance_id": null,
+    "mode": "multitrack",
+    "owner": {
+      "id": "146ea52b-8f2e-4dcc-a996-b33e97877931",
+      "kind": "clip"
+    },
+    "pending_resources": [],
+    "presentation_revision": 1,
+    "preview_id": null,
+    "processing_identity": "e6865df81fa04c3a42cfeeafec3b2e93155e287f2aac2260f2f8c318ae3744ff",
+    "processing_revision": "738f3940-e041-41ac-8314-be0087030b55",
+    "rendered_revision": 8,
+    "scale": 1.0,
+    "session_id": "c16fc7b7-8448-4109-883e-6dd61bccfc93",
+    "width": 1440
+  },
+  "waveform": {
+    "editor_id": null,
+    "frame_number": 6,
+    "height": 900,
+    "instance_id": null,
+    "mode": "waveform",
+    "owner": {
+      "id": "4f10b5c5-080c-4d3c-a3a9-ac8e6a3da40f",
+      "kind": "document"
+    },
+    "pending_resources": [],
+    "presentation_revision": 0,
+    "preview_id": null,
+    "processing_identity": "f088e3ca2e0c46530cdd927ace6e4193d54bb2cf6ea1290094d8acd806944084",
+    "processing_revision": "ab12b02a-e4fd-4773-aa46-edc720043b85",
+    "rendered_revision": 2,
+    "scale": 1.0,
+    "session_id": "c16fc7b7-8448-4109-883e-6dd61bccfc93",
+    "width": 1440
+  }
+}

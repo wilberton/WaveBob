@@ -155,6 +155,35 @@ impl Editor {
                 track.clips.push(clip);
                 "Insert clip"
             }
+            Command::DuplicateClip(params) => {
+                let (origin, source) = next
+                    .clip(&params.clip_id)
+                    .ok_or_else(|| not_found("clip"))?;
+                let track_id = params.track_id.unwrap_or_else(|| origin.id.clone());
+                let mut clip = source.clone();
+                clip.id = uuid::Uuid::new_v4().to_string();
+                clip.edit_revision_id = uuid::Uuid::new_v4().to_string();
+                clip.processing.edit_revision_id = uuid::Uuid::new_v4().to_string();
+                for instance in &mut clip.processing.effects {
+                    instance.id = uuid::Uuid::new_v4().to_string();
+                }
+                clip.position = params.position;
+                clip.insertion_order = next.next_clip_order;
+                next.next_clip_order = next.next_clip_order.checked_add(1).ok_or_else(|| {
+                    CommandError::new(
+                        ErrorCode::RevisionExhausted,
+                        "Clip insertion counter exhausted",
+                    )
+                })?;
+                next.selected_clip_ids = vec![clip.id.clone()];
+                next.tracks
+                    .iter_mut()
+                    .find(|track| track.id == track_id)
+                    .ok_or_else(|| not_found("track"))?
+                    .clips
+                    .push(clip);
+                "Duplicate clip"
+            }
             Command::MoveClip(params) => {
                 let (track, clip) = next
                     .clip(&params.clip_id)

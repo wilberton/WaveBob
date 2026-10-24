@@ -49,6 +49,12 @@ fn selection_edge(x: f32, plot: Rect, view: &FrameRange, selection: &FrameRange)
 impl WaveBob {
     pub(super) fn display_document(&self) -> Option<DocumentInfo> {
         let mut document = self.active_document()?;
+        if let Ok(state) = self
+            .host
+            .processing(wavebob::processing::Owner::Document(document.id.clone()))
+        {
+            document.processing = state.preview.unwrap_or(state.committed);
+        }
         if let Some(Gesture::Selection {
             document_id,
             audio_revision,
@@ -147,7 +153,7 @@ impl WaveBob {
         document: &DocumentInfo,
         view: &FrameRange,
     ) {
-        if self.host.frozen() {
+        if self.host.frozen() || self.envelope_drag.is_some() || self.envelope_pointer_claimed {
             return;
         }
         let ctx = &response.ctx;
@@ -456,6 +462,41 @@ impl WaveBob {
                 )
                 .inner;
             help.observe(&response,"Click to place the cursor; drag to select across channels; drag a selection edge to adjust it. Scroll or middle-drag pans; Ctrl/Cmd + scroll or pinch zooms. Escape cancels.");
+            let plot = visuals::main_plot(response.rect);
+            let body = Rect::from_min_max(
+                Pos2::new(
+                    plot.left()
+                        - (view.start as f64 / (view.end - view.start) as f64 * plot.width() as f64)
+                            as f32,
+                    plot.top(),
+                ),
+                Pos2::new(
+                    plot.left()
+                        + ((document.frames - view.start) as f64 / (view.end - view.start) as f64
+                            * plot.width() as f64) as f32,
+                    plot.bottom(),
+                ),
+            );
+            let owner = wavebob::processing::Owner::Document(document.id.clone());
+            self.envelope_handles(
+                ui,
+                &envelopes::Target {
+                    owner: owner.clone(),
+                    body,
+                    visible: plot,
+                    frames: document.frames,
+                    rate: document.sample_rate,
+                    reserved: Vec::new(),
+                    selected: true,
+                },
+                help,
+            );
+            response.context_menu(|ui| {
+                if ui.button("Gain and fades…").clicked() {
+                    self.open_envelope_entry(owner);
+                    ui.close();
+                }
+            });
             self.main_gestures(&response, &document, &view);
         }
         self.host

@@ -396,3 +396,59 @@ fn unfinished_export_integration_cannot_write_dry_audio_or_mark_processing_saved
         true
     );
 }
+
+#[test]
+fn source_navigation_does_not_retarget_or_discard_an_explicit_owner_preview() {
+    let (mut s, dir, doc) = fixture();
+    let owner = owner(&doc);
+    let other_path = dir.path().join("other.wav");
+    std::fs::copy(dir.path().join("source.wav"), &other_path).unwrap();
+    let started = ok(&mut s, "documents.open", json!({"path":other_path}));
+    let other = wait_job(&mut s, &started["id"])["result"].clone();
+    ok(
+        &mut s,
+        "documents.activate",
+        json!({"document_id":doc["id"]}),
+    );
+    let state = get(&mut s, &owner);
+    let preview = ok(
+        &mut s,
+        "processing.preview.begin",
+        json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"]}),
+    );
+    ok(
+        &mut s,
+        "processing.preview.update",
+        json!({"preview_id":preview["preview_id"],"change":envelope(-12.0)}),
+    );
+    ok(
+        &mut s,
+        "documents.cursor.set",
+        json!({"document_id":doc["id"],"frame":8}),
+    );
+    ok(
+        &mut s,
+        "documents.selection.set",
+        json!({"document_id":doc["id"],"start_frame":4,"end_frame":16}),
+    );
+    ok(
+        &mut s,
+        "documents.activate",
+        json!({"document_id":other["id"]}),
+    );
+    assert_eq!(get(&mut s, &owner)["preview_id"], preview["preview_id"]);
+    ok(
+        &mut s,
+        "processing.preview.commit",
+        json!({"preview_id":preview["preview_id"]}),
+    );
+    assert_eq!(
+        get(&mut s, &owner)["committed"]["envelope"]["gain_db"],
+        -12.0
+    );
+    assert_eq!(
+        ok(&mut s, "documents.get", json!({"document_id":other["id"]}))["dirty"],
+        false
+    );
+    assert_eq!(ok(&mut s, "history.get", json!({}))["undo_count"], 1);
+}

@@ -22,8 +22,10 @@ Updates validate the same actions as direct edits and coalesce into one transien
 state. Queries expose both states. Commit creates one chronological history entry;
 cancel restores committed state. A no-op creates no history or revision. An invalid
 update preserves the last valid preview. Only one preview exists per session.
-Starting another valid preview replaces it. Successful concurrent mutations cancel
-an unfinished preview; stale source/owner state cannot commit. Previews expire after
+Starting another valid preview replaces it. Successful concurrent source/processing
+mutations cancel an unfinished preview; stale source/owner state cannot commit.
+Cursor, time/clip selection and active-document navigation preserve the explicit
+preview owner; they neither retarget its controls nor change its render identity. Previews expire after
 60 seconds without an update. GUI windows must retain owner IDs and cancel gestures
 on target changes; selection never changes the explicit automation owner.
 

@@ -13,9 +13,21 @@ struct Gui(Child);
 
 impl Gui {
     fn start(directory: &Path, name: &str) -> Self {
+        Self::start_options(directory, name, "1440x900", "1")
+    }
+    fn start_options(directory: &Path, name: &str, size: &str, scale: &str) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_wavebob"));
         command
-            .args(["--hidden", "--name", name, "--runtime-dir"])
+            .args([
+                "--hidden",
+                "--window-size",
+                size,
+                "--ui-scale",
+                scale,
+                "--name",
+                name,
+                "--runtime-dir",
+            ])
             .arg(directory)
             .arg("--preferences")
             .arg(directory.join(format!("{name}-layout.json")))
@@ -457,4 +469,135 @@ fn native_soft_clipper_editor_capture_and_stable_window_lifecycle() {
         "presentation.quit",
         json!({"discard_changes":true}),
     ));
+}
+
+#[test]
+#[ignore = "requires actual native waveform/arrangement capture at multiple DPI sizes"]
+fn native_envelope_waveform_and_clip_captures_at_normal_high_dpi_and_narrow_widths() {
+    for (name, size, scale) in [
+        ("normal", "1440x900", "1"),
+        ("high-dpi", "1440x900", "1.5"),
+        ("narrow", "800x600", "1"),
+    ] {
+        let runtime = tempfile::tempdir().unwrap();
+        let mut gui = Gui::start_options(runtime.path(), name, size, scale);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let instance = loop {
+            let instances = ipc::discover(runtime.path()).unwrap();
+            if let Some(instance) = instances.into_iter().find(|instance| instance.name == name) {
+                break instance;
+            }
+            if let Some(status) = gui.0.try_wait().unwrap() {
+                panic!(
+                    "GUI exited {status}: {}",
+                    fs::read_to_string(runtime.path().join(format!("{name}.log"))).unwrap()
+                );
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let client = Client::attach(runtime.path(), &instance.session_id).unwrap();
+        let source = runtime.path().join("Envelope stereo.wav");
+        let mut writer = hound::WavWriter::create(
+            &source,
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: 48000,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            },
+        )
+        .unwrap();
+        for frame in 0..48000 {
+            let phase = frame as f32 * std::f32::consts::TAU / 48000.0;
+            writer.write_sample((phase * 997.0).sin() * 0.7).unwrap();
+            writer.write_sample((phase * 1733.0).sin() * 0.5).unwrap();
+        }
+        writer.finalize().unwrap();
+        let started = success(request(&client, "documents.open", json!({"path":source})));
+        let document = loop {
+            let job = success(request(
+                &client,
+                "jobs.get",
+                json!({"job_id":started["id"]}),
+            ));
+            if job["status"] != "running" {
+                assert_eq!(job["status"], "succeeded", "{job}");
+                break job["result"].clone();
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        let edit = |owner: &Value, gain: f64, fade_in: u64, fade_out: u64| {
+            let state = success(request(&client, "processing.get", json!({"owner":owner})));
+            success(request(
+                &client,
+                "processing.edit",
+                json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"],"change":{"action":"set_envelope","envelope":{"gain_db":gain,"fade_in_frames":fade_in,"fade_out_frames":fade_out}}}),
+            ))
+        };
+        let owner = json!({"kind":"document","id":document["id"]});
+        edit(&owner, -6.0, 8000, 12000);
+        let waveform = success(request(&client, "capture.png", json!({"timeout_ms":10000})));
+        assert_eq!(waveform["metadata"]["owner"], owner);
+        assert_eq!(waveform["metadata"]["scale"], scale.parse::<f64>().unwrap());
+        pixels(Path::new(waveform["path"].as_str().unwrap()));
+        retain(
+            Path::new(waveform["path"].as_str().unwrap()),
+            &format!("waveform-{name}.png"),
+        );
+        edit(&owner, 0.0, 0, 0);
+        let arrangement = success(request(&client, "tracks.add", json!({})));
+        let track = arrangement["tracks"][0]["id"].clone();
+        let arrangement = success(request(
+            &client,
+            "clips.insert",
+            json!({"track_id":track,"document_id":document["id"],"revision_id":document["revision_id"],"source_start":0,"source_end":48000,"position":0}),
+        ));
+        let clip = arrangement["tracks"][0]["clips"][0].clone();
+        let clip_owner = json!({"kind":"clip","id":clip["id"]});
+        edit(&clip_owner, -6.0, 8000, 12000);
+        success(request(
+            &client,
+            "clips.duplicate",
+            json!({"clip_id":clip["id"],"position":36000}),
+        ));
+        success(request(
+            &client,
+            "arrangement.navigate",
+            json!({"cursor":24000,"selection":null,"selected_clip_ids":[clip["id"]]}),
+        ));
+        success(request(
+            &client,
+            "presentation.set_mode",
+            json!({"mode":"multitrack"}),
+        ));
+        success(request(
+            &client,
+            "presentation.timeline.set",
+            json!({"start_frame":0,"end_frame":96000}),
+        ));
+        let arrangement = success(request(&client, "capture.png", json!({"timeout_ms":10000})));
+        assert_eq!(arrangement["metadata"]["owner"], clip_owner);
+        pixels(Path::new(arrangement["path"].as_str().unwrap()));
+        retain(
+            Path::new(arrangement["path"].as_str().unwrap()),
+            &format!("clips-{name}.png"),
+        );
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::write(
+                Path::new(&directory).join(format!("capture-{name}.json")),
+                serde_json::to_vec_pretty(
+                    &json!({"waveform":waveform["metadata"],"clips":arrangement["metadata"]}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        success(request(
+            &client,
+            "presentation.quit",
+            json!({"discard_changes":true}),
+        ));
+    }
 }

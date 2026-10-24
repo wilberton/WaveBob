@@ -30,6 +30,13 @@ impl Editor {
             }
         }
     }
+    #[cfg(feature = "gui")]
+    pub(crate) fn active_processing_preview(&self) -> Option<Snapshot> {
+        self.preview
+            .as_ref()
+            .and_then(|preview| self.processing_snapshot(preview.owner.clone()).ok())
+            .filter(|snapshot| snapshot.preview_id.is_some())
+    }
     pub(super) fn has_active_preview(&self) -> bool {
         self.preview
             .as_ref()

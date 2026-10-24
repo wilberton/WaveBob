@@ -360,3 +360,114 @@ fn invalid_placement_is_atomic_and_navigation_stays_out_of_history() {
     );
     assert_eq!(session.snapshot(), before);
 }
+
+#[test]
+fn duplicates_copy_envelopes_and_stack_values_with_independent_owners_and_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::default();
+    let document = open(&mut session, dir.path());
+    let arrangement = ok(&mut session, "tracks.add", json!({}));
+    let track = arrangement["tracks"][0]["id"].clone();
+    let arrangement = ok(
+        &mut session,
+        "clips.insert",
+        json!({"track_id":track,"document_id":document["id"],"revision_id":document["revision_id"],"source_start":0,"source_end":4,"position":0}),
+    );
+    let original = arrangement["tracks"][0]["clips"][0].clone();
+    let owner = json!({"kind":"clip","id":original["id"]});
+    let edit = |session: &mut Session, owner: &Value, change: Value| {
+        let state = ok(session, "processing.get", json!({"owner":owner}));
+        ok(
+            session,
+            "processing.edit",
+            json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"],"change":change}),
+        )
+    };
+    edit(
+        &mut session,
+        &owner,
+        json!({"action":"set_envelope","envelope":{"gain_db":-12.0,"fade_in_frames":4,"fade_out_frames":3}}),
+    );
+    let state = edit(
+        &mut session,
+        &owner,
+        json!({"action":"add","kind":"soft_clipper"}),
+    );
+    let history = ok(&mut session, "history.get", json!({}))["undo_count"]
+        .as_u64()
+        .unwrap();
+    let arrangement = ok(
+        &mut session,
+        "clips.duplicate",
+        json!({"clip_id":original["id"],"position":8}),
+    );
+    let copy = arrangement["tracks"][0]["clips"][1].clone();
+    assert_ne!(copy["id"], original["id"]);
+    assert_eq!(copy["revision_id"], original["revision_id"]);
+    assert_eq!(copy["document_id"], original["document_id"]);
+    assert_eq!(copy["linked"], original["linked"]);
+    assert_eq!(
+        copy["processing"]["envelope"],
+        state["committed"]["envelope"]
+    );
+    assert_eq!(
+        copy["processing"]["effects"][0]["parameters"],
+        state["committed"]["effects"][0]["parameters"]
+    );
+    assert_ne!(
+        copy["processing"]["effects"][0]["id"],
+        state["committed"]["effects"][0]["id"]
+    );
+    assert_eq!(
+        ok(&mut session, "history.get", json!({}))["undo_count"]
+            .as_u64()
+            .unwrap(),
+        history + 1
+    );
+    ok(&mut session, "history.undo", json!({}));
+    assert_eq!(
+        ok(&mut session, "arrangement.get", json!({}))["tracks"][0]["clips"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    ok(&mut session, "history.redo", json!({}));
+    let copy_owner = json!({"kind":"clip","id":copy["id"]});
+    edit(
+        &mut session,
+        &copy_owner,
+        json!({"action":"set_envelope","envelope":{"gain_db":6.0,"fade_in_frames":0,"fade_out_frames":0}}),
+    );
+    assert_eq!(
+        ok(&mut session, "processing.get", json!({"owner":owner}))["committed"]["envelope"]["gain_db"],
+        -12.0
+    );
+    let current = ok(&mut session, "arrangement.get", json!({}))["tracks"][0]["clips"][0].clone();
+    let started = ok(
+        &mut session,
+        "clips.trim",
+        json!({"clip_id":original["id"],"edit_revision_id":current["edit_revision_id"],"source_start":1,"source_end":3}),
+    );
+    let trimmed = clip_job(&mut session, started);
+    assert_eq!(
+        trimmed["processing"]["envelope"],
+        json!({"gain_db":-12.0,"fade_in_frames":2,"fade_out_frames":2})
+    );
+    let source = ok(
+        &mut session,
+        "documents.get",
+        json!({"document_id":document["id"]}),
+    );
+    assert_eq!(source["revision_id"], document["revision_id"]);
+    let before = ok(&mut session, "arrangement.get", json!({}));
+    assert_eq!(
+        dispatch(
+            &mut session,
+            "clips.duplicate",
+            json!({"clip_id":copy["id"],"position":wavebob::arrangement::MAX_TIMELINE_FRAME})
+        )["error"]["code"],
+        "invalid_params"
+    );
+    assert_eq!(ok(&mut session, "arrangement.get", json!({})), before);
+}

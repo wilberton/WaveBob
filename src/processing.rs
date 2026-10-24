@@ -8,7 +8,9 @@ pub const DSP_VERSION: u32 = 1;
 pub const MAX_EFFECTS: usize = 32;
 pub const REFERENCE_COMMIT: &str = "0af860dfd31c7ee9cbf8af6747617e031a1a7742";
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(
     tag = "kind",
     content = "id",

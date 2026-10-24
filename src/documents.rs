@@ -449,6 +449,12 @@ impl Editor {
                     | Command::BeginProcessingPreview(_)
                     | Command::CancelJob(_)
                     | Command::PrepareMix(_)
+                    | Command::SetCursor(_)
+                    | Command::SetSelection(_)
+                    | Command::SelectAll(_)
+                    | Command::ClearSelection(_)
+                    | Command::NavigateArrangement(_)
+                    | Command::ActivateDocument(_)
             );
         let result = self.execute_inner(command, revision);
         if result.is_ok() && cancel_preview {
@@ -505,6 +511,7 @@ impl Editor {
             | Command::UpdateTrack(_)
             | Command::RemoveTrack(_)
             | Command::InsertClip(_)
+            | Command::DuplicateClip(_)
             | Command::MoveClip(_)
             | Command::RemoveClip(_)
             | Command::NavigateArrangement(_)

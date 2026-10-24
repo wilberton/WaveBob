@@ -953,6 +953,9 @@ fn open_action_real_channels_document_switching_and_failed_jobs_use_shared_state
 }
 
 fn audio_harness() -> (Harness, tempfile::TempDir) {
+    audio_harness_with_session(wavebob::Session::default())
+}
+fn audio_harness_with_session(session: wavebob::Session) -> (Harness, tempfile::TempDir) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("Gestures.wav");
     let mut writer = hound::WavWriter::create(
@@ -972,6 +975,7 @@ fn audio_harness() -> (Harness, tempfile::TempDir) {
     }
     writer.finalize().unwrap();
     let mut h = Harness::new();
+    h.app.host = DesktopHost::with_session(session);
     h.app.open_path(path);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while h.app.active_document().is_none() {
@@ -2409,4 +2413,588 @@ fn compact_rows_emit_stable_bypass_open_and_drag_reorder_actions() {
     render(vec![egui::Event::PointerMoved(grips[1])]);
     let (_, actions) = render(vec![pointer(grips[1], false)]);
     assert!(actions.iter().any(|action|matches!(action,effects::StackEvent::Edit(Action::Move{effect_id,index:1}) if effect_id == &first)),"{actions:?}");
+}
+
+#[test]
+fn waveform_envelope_gain_preview_cancel_and_commit_preserve_source_navigation() {
+    use wavebob::processing::Owner;
+    let (mut h, _directory) = audio_harness();
+    let original = h.app.active_document().unwrap();
+    h.app.dispatch(Command::SetSelection(SelectionParams {
+        document_id: original.id.clone(),
+        start_frame: 400,
+        end_frame: 1200,
+    }));
+    let before = h.app.active_document().unwrap();
+    let owner = Owner::Document(before.id.clone());
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = Pos2::new(plot.center().x, plot.top() + 6.0);
+    let moved = point + Vec2::new(0.0, 40.0);
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    h.frame(vec![pointer_event(
+        point,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(moved)]);
+    let state = h.app.host.processing(owner.clone()).unwrap();
+    assert_eq!(state.committed.envelope.gain_db, Some(0.0));
+    assert_eq!(state.preview.unwrap().envelope.gain_db, Some(-10.0));
+    assert_eq!(h.app.host.history().undo_count, 0);
+    assert_eq!(h.app.active_document().unwrap().cursor, before.cursor);
+    assert_eq!(h.app.active_document().unwrap().selection, before.selection);
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    h.frame(vec![pointer_event(
+        moved,
+        egui::PointerButton::Primary,
+        false,
+    )]);
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview
+            .is_none()
+    );
+    assert_eq!(h.app.host.history().undo_count, 0);
+    h.drag(point, moved);
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(-10.0)
+    );
+    assert_eq!(h.app.host.history().undo_count, 1);
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        original.revision_id
+    );
+    assert_eq!(h.app.active_document().unwrap().selection, before.selection);
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(0.0)
+    );
+    h.app.dispatch(Command::Redo(EmptyParams {}));
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(-10.0)
+    );
+}
+
+#[test]
+fn waveform_fades_overlap_and_double_click_reset_without_selection_edits() {
+    use wavebob::processing::Owner;
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id.clone());
+    h.app.dispatch(Command::SetSelection(SelectionParams {
+        document_id: document.id.clone(),
+        start_frame: 1000,
+        end_frame: 2000,
+    }));
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let y = plot.top() + 6.0;
+    h.drag(
+        Pos2::new(plot.left() + 1.0, y),
+        Pos2::new(plot.left() + plot.width() * 0.75, y),
+    );
+    let first = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .envelope;
+    assert!((first.fade_in_frames as i64 - 3600).abs() <= 1, "{first:?}");
+    h.drag(
+        Pos2::new(plot.right() - 1.0, y),
+        Pos2::new(plot.left() + plot.width() * 0.25, y),
+    );
+    let state = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .envelope;
+    assert!(
+        (state.fade_out_frames as i64 - 3600).abs() <= 1,
+        "{state:?}"
+    );
+    assert_eq!(state.fade_in_frames, first.fade_in_frames);
+    assert!(state.fade_in_frames + state.fade_out_frames > document.frames);
+    assert_eq!(
+        h.app.active_document().unwrap().selection,
+        Some(FrameRange {
+            start: 1000,
+            end: 2000
+        })
+    );
+    let point = Pos2::new(
+        plot.left() + plot.width() * state.fade_in_frames as f32 / document.frames as f32,
+        y,
+    );
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    for _ in 0..2 {
+        h.frame(vec![pointer_event(
+            point,
+            egui::PointerButton::Primary,
+            true,
+        )]);
+        h.frame(vec![pointer_event(
+            point,
+            egui::PointerButton::Primary,
+            false,
+        )]);
+    }
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .fade_in_frames,
+        0
+    );
+    assert!(h.app.envelope_dialog.is_none());
+    assert_eq!(h.app.host.history().undo_count, 3);
+}
+
+#[test]
+fn offscreen_and_colliding_handles_have_exact_entry_without_false_source_edges() {
+    use wavebob::processing::Owner;
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id.clone());
+    h.app.dispatch(Command::SetViewport(SetViewportParams {
+        document_id: document.id.clone(),
+        start_frame: 1000,
+        end_frame: 1800,
+        expected_presentation_revision: None,
+    }));
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    h.click(Pos2::new(plot.left() + 2.0, plot.top() + 6.0));
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .envelope,
+        wavebob::processing::Envelope::unity()
+    );
+    assert!(h.app.envelope_dialog.is_none());
+    assert_eq!(h.app.host.history().undo_count, 0);
+    let exact = h.text_rect("Gain and fades…").center();
+    h.click(exact);
+    assert!(h.app.envelope_dialog.is_some());
+    let mute = h.text_rect("Mute (−∞ dB)").center();
+    h.click(mute);
+    let apply = h.text_rect("Apply envelope").center();
+    h.click(apply);
+    assert!(h.app.envelope_dialog.is_none());
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        None
+    );
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        document.revision_id
+    );
+}
+
+#[test]
+fn clip_envelope_handles_win_over_move_trim_and_keep_source_bounds() {
+    use wavebob::arrangement::*;
+    use wavebob::processing::Owner;
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    h.app.dispatch(Command::AddTrack(AddTrackParams::default()));
+    let track = h.app.host.snapshot().arrangement.tracks[0].id.clone();
+    h.app.dispatch(Command::InsertClip(InsertClipParams {
+        track_id: track,
+        document_id: document.id.clone(),
+        revision_id: document.revision_id.clone(),
+        source_start: 0,
+        source_end: document.frames,
+        position: 0,
+    }));
+    h.app.set_mode(ViewMode::Multitrack);
+    h.app
+        .dispatch(Command::SetTimelineViewport(TimelineViewportParams {
+            start_frame: 0,
+            end_frame: document.frames * 2,
+            expected_presentation_revision: None,
+        }));
+    let output = h.frame(vec![]);
+    let text = text_shapes(&output)
+        .into_iter()
+        .find(|(rect, text)| text == "Gestures.wav" && rect.left() > 400.0 && rect.right() < 1240.0)
+        .unwrap()
+        .0;
+    let left = text.left() - 8.0;
+    let right = 1440.0 - h.app.host.presentation().layout.effective_widths(1440.0)[1] - 14.0;
+    let width = (right - left) / 2.0;
+    let point = Pos2::new(left + width / 2.0 - 0.5, text.top() + 23.0);
+    let before = h.app.host.snapshot().arrangement;
+    let clip = before.tracks[0].clips[0].clone();
+    let history = h.app.host.history().undo_count;
+    h.drag(point, point + Vec2::new(0.0, 24.0));
+    let after = h.app.host.snapshot().arrangement;
+    let edited = &after.tracks[0].clips[0];
+    assert_eq!(
+        edited.processing.envelope.gain_db,
+        Some(-6.0),
+        "{after:?}, {:?}",
+        h.app.error
+    );
+    assert_eq!(
+        (edited.position, edited.source_start, edited.source_end),
+        (clip.position, clip.source_start, clip.source_end)
+    );
+    assert_eq!(after.selected_clip_ids, before.selected_clip_ids);
+    assert_eq!(after.cursor, before.cursor);
+    assert_eq!(after.selection, before.selection);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    h.app.processing_action(
+        &Owner::Clip(clip.id.clone()),
+        wavebob::processing::Action::SetEnvelope {
+            envelope: wavebob::processing::Envelope {
+                gain_db: Some(-6.0),
+                fade_in_frames: 480,
+                fade_out_frames: 0,
+            },
+        },
+    );
+    h.frame(vec![]);
+    let fade = Pos2::new(left + 2.0 + (width - 5.0) * 0.1, text.top() + 47.0);
+    h.drag(fade, Pos2::new(left + 2.0 + (width - 5.0) * 0.35, fade.y));
+    let state = h.app.host.processing(Owner::Clip(clip.id)).unwrap();
+    assert!(
+        (state.committed.envelope.fade_in_frames as i64 - 1680).abs() <= 2,
+        "{state:?}, {:?}",
+        h.app.error
+    );
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        document.revision_id
+    );
+}
+
+#[test]
+fn envelope_drag_is_audible_in_manual_output_before_release_and_escape_restores_it() {
+    let (session, mut output) = wavebob::Session::with_manual_output(48000).unwrap();
+    let (mut h, _directory) = audio_harness_with_session(session);
+    let document = h.app.active_document().unwrap();
+    h.app.toggle_playback();
+    output.render_into(&mut [[0.0; 2]; 16]);
+    h.frame(vec![]);
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = Pos2::new(plot.center().x, plot.top() + 6.0);
+    let moved = point + Vec2::new(0.0, 64.0);
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    h.frame(vec![pointer_event(
+        point,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(moved)]);
+    assert_eq!(h.app.host.history().undo_count, 0);
+    let mut frames = [[0.0; 2]; 600];
+    output.render_into(&mut frames);
+    let source = -35.0_f64 * 400.0 / 32768.0;
+    assert!(
+        (frames[599][0] as f64 - source * 10.0_f64.powf(-16.0 / 20.0)).abs() < 1e-6,
+        "{:?}",
+        frames[599]
+    );
+    assert_eq!(frames[599][0], -frames[599][1]);
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    output.render_into(&mut frames);
+    assert!((frames[599][0] as f64 - source).abs() < 1e-6);
+    h.frame(vec![pointer_event(
+        moved,
+        egui::PointerButton::Primary,
+        false,
+    )]);
+    assert_eq!(h.app.host.history().undo_count, 0);
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        document.revision_id
+    );
+}
+
+#[test]
+fn exact_envelope_entry_accepts_gain_limits_and_collisions_use_the_inspector() {
+    use wavebob::processing::{Action, Envelope, Owner};
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id.clone());
+    for value in [60.0, -120.0] {
+        let exact = h.text_rect("Gain and fades…").center();
+        h.click(exact);
+        let texts = text_shapes(&h.frame(vec![]));
+        let label = texts.iter().find(|(_, text)| text == "Gain").unwrap().0;
+        let gain = texts
+            .iter()
+            .find(|(rect, text)| {
+                text.parse::<f64>().is_ok()
+                    && (rect.center().y - label.center().y).abs() < 8.0
+                    && rect.left() > label.right()
+            })
+            .unwrap_or_else(|| panic!("Exact gain value missing: {texts:?}"))
+            .0
+            .center();
+        h.click(gain);
+        h.frame(vec![egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        }]);
+        h.frame(vec![egui::Event::Text(value.to_string())]);
+        h.frame(vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let apply = h.text_rect("Apply envelope").center();
+        h.click(apply);
+        assert_eq!(
+            h.app
+                .host
+                .processing(owner.clone())
+                .unwrap()
+                .committed
+                .envelope
+                .gain_db,
+            Some(value)
+        );
+    }
+    h.app.processing_action(
+        &owner,
+        Action::SetEnvelope {
+            envelope: Envelope {
+                gain_db: Some(0.0),
+                fade_in_frames: 2400,
+                fade_out_frames: 2400,
+            },
+        },
+    );
+    let history = h.app.host.history().undo_count;
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    h.click(Pos2::new(plot.center().x, plot.top() + 6.0));
+    for _ in 0..4 {
+        h.frame(vec![]);
+    }
+    assert!(h.app.envelope_dialog.is_none());
+    assert_eq!(h.app.host.history().undo_count, history);
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .fade_in_frames,
+        2400
+    );
+    let exact = h.text_rect("Gain and fades…").center();
+    h.click(exact);
+    assert!(h.app.envelope_dialog.is_some());
+}
+
+#[test]
+fn a_fade_drag_crosses_a_colliding_gain_handle_and_still_commits_once() {
+    use wavebob::processing::Owner;
+    let (mut h, _dir) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id);
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let y = plot.top() + 6.0;
+    let start = Pos2::new(plot.left() + 1.0, y);
+    let halfway = Pos2::new(plot.center().x, y);
+    let end = Pos2::new(plot.left() + plot.width() * 0.75, y);
+    h.frame(vec![egui::Event::PointerMoved(start)]);
+    h.frame(vec![pointer_event(
+        start,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(halfway)]);
+    h.frame(vec![egui::Event::PointerMoved(end)]);
+    h.frame(vec![pointer_event(
+        end,
+        egui::PointerButton::Primary,
+        false,
+    )]);
+    assert!(
+        (h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .fade_in_frames as i64
+            - 3600)
+            .abs()
+            <= 1
+    );
+    assert!(h.app.envelope_drag.is_none());
+    assert_eq!(h.app.host.history().undo_count, 1);
+}
+
+#[test]
+fn fine_gain_drag_and_one_frame_clip_inspector_keep_envelope_rules() {
+    use wavebob::processing::Owner;
+    let (mut h, _dir) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id.clone());
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = Pos2::new(plot.center().x, plot.top() + 6.0);
+    let end = point + Vec2::new(0.0, 40.0);
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    h.frame(vec![pointer_event(
+        point,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![
+        egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+        egui::Event::PointerMoved(end),
+    ]);
+    h.frame(vec![pointer_event(
+        end,
+        egui::PointerButton::Primary,
+        false,
+    )]);
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(-1.0)
+    );
+    h.app.dispatch(Command::AddTrack(
+        wavebob::arrangement::AddTrackParams::default(),
+    ));
+    let track = h.app.host.snapshot().arrangement.tracks[0].id.clone();
+    h.app.dispatch(Command::InsertClip(
+        wavebob::arrangement::InsertClipParams {
+            track_id: track,
+            document_id: document.id,
+            revision_id: document.revision_id,
+            source_start: 0,
+            source_end: 1,
+            position: 0,
+        },
+    ));
+    h.app.set_mode(ViewMode::Multitrack);
+    h.frame(vec![]);
+    let owner = Owner::Clip(
+        h.app.host.snapshot().arrangement.tracks[0].clips[0]
+            .id
+            .clone(),
+    );
+    let exact = h.text_rect("Gain and fades…").center();
+    h.click(exact);
+    assert!(h.app.envelope_dialog.is_some());
+    let before = h.app.host.history().undo_count;
+    let apply = h.text_rect("Apply envelope").center();
+    h.click(apply);
+    assert_eq!(h.app.host.history().undo_count, before);
+    assert_eq!(h.app.host.processing(owner).unwrap().body_frames, 1);
+}
+
+#[test]
+fn losing_window_focus_cancels_an_unfinished_envelope_gesture() {
+    use wavebob::processing::Owner;
+    let (mut h, _dir) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = Pos2::new(plot.center().x, plot.top() + 6.0);
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    h.frame(vec![pointer_event(
+        point,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(
+        point + Vec2::new(0.0, 40.0),
+    )]);
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview
+            .is_some()
+    );
+    h.input_frame(egui::RawInput {
+        focused: false,
+        ..Default::default()
+    });
+    assert!(h.app.envelope_drag.is_none());
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview
+            .is_none()
+    );
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(0.0)
+    );
+    assert_eq!(h.app.host.history().undo_count, 0);
 }

@@ -77,6 +77,11 @@ impl WaveBob {
             .small()
             .color(MUTED),
         );
+        let exact = content.small_button("Gain and fades…");
+        help.observe(&exact,"Edit exact gain, mute and source-frame fades for this owner, including offscreen or tiny bodies.");
+        if exact.clicked() {
+            self.open_envelope_entry(owner.clone());
+        }
         content.add_space(12.0);
         let footer = 88.0;
         egui::ScrollArea::vertical()

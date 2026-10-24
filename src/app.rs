@@ -14,6 +14,8 @@ mod editing;
 mod effect_controls;
 #[path = "app/effects.rs"]
 mod effects;
+#[path = "app/envelopes.rs"]
+mod envelopes;
 #[path = "app/projecting.rs"]
 mod projecting;
 #[path = "app/saving.rs"]
@@ -48,6 +50,11 @@ pub struct WaveBob {
     browser_edit_path: bool,
     native_editors: std::collections::BTreeMap<String, effects::NativeEditor>,
     stack_drag: Option<String>,
+    envelope_drag: Option<envelopes::Drag>,
+    envelope_dialog: Option<envelopes::Entry>,
+    envelope_click: Option<envelopes::PendingClick>,
+    envelope_focus: Option<(wavebob::processing::Owner, envelopes::Handle)>,
+    envelope_pointer_claimed: bool,
     output_dialog: Option<saving::OutputDialog>,
     save_picker: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
     project_picker: Option<projecting::ProjectPicker>,
@@ -218,6 +225,19 @@ impl WaveBob {
                 | Command::TogglePanels(_)
                 | Command::ActivateDocument(_)
                 | Command::CloseDocument(_)
+                | Command::Undo(_)
+                | Command::Redo(_)
+        ) {
+            self.cancel_envelope_drag();
+            self.envelope_dialog = None;
+        }
+        if matches!(
+            &command,
+            Command::SetMode(_)
+                | Command::SetLayout(_)
+                | Command::TogglePanels(_)
+                | Command::ActivateDocument(_)
+                | Command::CloseDocument(_)
         ) {
             self.gesture = None;
         }
@@ -294,6 +314,8 @@ impl WaveBob {
             || self.dialog.is_some()
             || self.open_requested
             || self.output_dialog.is_some()
+            || self.envelope_dialog.is_some()
+            || self.envelope_keyboard_owns_input(ctx)
             || self.save_picker.is_some()
             || self.project_picker.is_some()
             || self.close_flow.is_some()
@@ -435,10 +457,13 @@ impl WaveBob {
 
     // Independent of eframe::Frame for real egui pointer/key/focus tests.
     fn draw(&mut self, ui: &mut egui::Ui) {
+        self.envelope_pointer_claimed = false;
         self.host.begin_frame(ui.ctx());
+        self.envelope_shortcuts(ui.ctx());
         self.handle_native_close(ui.ctx());
         if !self.host.frozen() && !ui.ctx().input(|input| input.focused) {
             self.cancel_gesture();
+            self.cancel_envelope_drag();
         }
         self.poll_dialog();
         self.file_drops(ui.ctx());
@@ -708,11 +733,14 @@ impl WaveBob {
                 }
             });
         self.file_modals(ui.ctx(), &mut help);
+        self.envelope_modals(ui.ctx());
         self.file_drop_feedback(ui.ctx(), &mut help);
         self.status(ui, status, mode, &help, error.as_deref());
         self.host.set_ui_resources(
             [
                 self.output_dialog.is_some().then_some("output-dialog"),
+                self.envelope_dialog.is_some().then_some("envelope-dialog"),
+                self.envelope_drag.is_some().then_some("envelope-preview"),
                 self.save_picker.is_some().then_some("native-output-picker"),
                 self.project_picker
                     .is_some()

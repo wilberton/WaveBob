@@ -206,6 +206,13 @@ pub struct InsertClipParams {
 }
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct DuplicateClipParams {
+    pub clip_id: String,
+    pub track_id: Option<String>,
+    pub position: u64,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MoveClipParams {
     pub clip_id: String,
     pub track_id: String,

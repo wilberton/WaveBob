@@ -345,6 +345,46 @@ pub fn peaks(painter: &egui::Painter, rect: Rect, values: &[Peak], color: Color3
     );
 }
 
+pub fn peaks_enveloped(
+    painter: &egui::Painter,
+    rect: Rect,
+    values: &[Peak],
+    color: Color32,
+    envelope: &wavebob::processing::Envelope,
+    body_frames: u64,
+    offset: u64,
+) {
+    if envelope == &wavebob::processing::Envelope::unity() {
+        peaks(painter, rect, values, color);
+        return;
+    }
+    let scaled: Vec<_> = values
+        .iter()
+        .map(|peak| {
+            let start = peak.start_frame.saturating_sub(offset);
+            let end = peak.end_frame.saturating_sub(offset).saturating_sub(1);
+            let candidates = [
+                start,
+                end,
+                (body_frames.saturating_sub(1)) / 2,
+                envelope.fade_in_frames.saturating_sub(1),
+                body_frames.saturating_sub(envelope.fade_out_frames),
+            ];
+            let amplitude = candidates
+                .into_iter()
+                .filter(|frame| *frame >= start && *frame <= end)
+                .map(|frame| envelope.amplitude(frame, body_frames))
+                .fold(0.0, f64::max);
+            Peak {
+                min: peak.min * amplitude,
+                max: peak.max * amplitude,
+                ..peak.clone()
+            }
+        })
+        .collect();
+    peaks(painter, rect, &scaled, color);
+}
+
 pub fn main_plot(rect: Rect) -> Rect {
     Rect::from_min_max(
         rect.min + Vec2::new(15.0, 22.0),
@@ -380,11 +420,14 @@ pub fn waveform_canvas(
     };
     grid(&painter, plot);
     if overview {
-        peaks(
+        peaks_enveloped(
             &painter,
             plot,
             &wave.channels[0],
             Color32::from_rgb(105, 132, 166),
+            &document.processing.envelope,
+            document.frames,
+            0,
         );
         let viewport = viewport_box(rect, document.frames, visible);
         painter.rect_filled(
@@ -433,7 +476,15 @@ pub fn waveform_canvas(
                     ),
                 Vec2::new(plot.width(), plot.height() / wave.channels.len() as f32),
             );
-            peaks(&painter, channel_rect, values, WAVE);
+            peaks_enveloped(
+                &painter,
+                channel_rect,
+                values,
+                WAVE,
+                &document.processing.envelope,
+                document.frames,
+                0,
+            );
             painter.hline(
                 channel_rect.x_range(),
                 channel_rect.bottom(),
@@ -453,6 +504,13 @@ pub fn waveform_canvas(
                 MUTED,
             );
         }
+        painter.text(
+            Pos2::new(plot.right() - 6.0, plot.top() + 17.0),
+            egui::Align2::RIGHT_TOP,
+            "Source + envelope",
+            egui::FontId::proportional(10.0),
+            MUTED,
+        );
         let x = |frame: u64| {
             plot.left()
                 + (frame as f64 - wave.start_frame as f64) as f32

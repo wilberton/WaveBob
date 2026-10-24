@@ -556,9 +556,34 @@ impl DesktopHost {
         let window = editor_id
             .and_then(|id| self.presentation.editor_windows.iter().find(|w| w.id == id))
             .cloned();
-        let state = window
+        let snapshot = self.session.snapshot();
+        let root_owner = if editor_id.is_none() {
+            self.session
+                .editor
+                .active_processing_preview()
+                .map(|preview| preview.owner)
+                .or_else(|| match self.presentation.mode {
+                    ViewMode::Waveform => snapshot
+                        .active_document_id
+                        .clone()
+                        .map(crate::processing::Owner::Document),
+                    ViewMode::Multitrack => (snapshot.arrangement.selected_clip_ids.len() == 1)
+                        .then(|| {
+                            crate::processing::Owner::Clip(
+                                snapshot.arrangement.selected_clip_ids[0].clone(),
+                            )
+                        }),
+                })
+        } else {
+            None
+        };
+        let owner = window
             .as_ref()
-            .and_then(|window| self.processing(window.owner.clone()).ok());
+            .map(|window| window.owner.clone())
+            .or(root_owner);
+        let state = owner
+            .as_ref()
+            .and_then(|owner| self.processing(owner.clone()).ok());
         let processing_revision = state.as_ref().map(|s| s.committed.edit_revision_id.clone());
         let processing_identity = state.as_ref().map(|s| {
             crate::projects::checksum(&(s.preview.as_ref().unwrap_or(&s.committed), s.effect_tempo))
@@ -568,7 +593,7 @@ impl DesktopHost {
         pending.in_flight = true;
         let metadata = RenderMetadata {
             editor_id: editor_id.map(str::to_owned),
-            owner: window.as_ref().map(|w| w.owner.clone()),
+            owner,
             instance_id: window.as_ref().map(|w| w.instance_id.clone()),
             processing_revision,
             processing_identity,

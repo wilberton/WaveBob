@@ -17,6 +17,7 @@ struct Buffer {
 }
 #[derive(Debug)]
 struct PreparedClip {
+    owner_id: String,
     start: u64,
     end: u64,
     key: String,
@@ -204,7 +205,8 @@ impl Stream {
             return false;
         }
         for (a, b) in graph.clips.iter().zip(&old.clips) {
-            if a.start != b.start
+            if a.owner_id != b.owner_id
+                || a.start != b.start
                 || a.end != b.end
                 || a.key != b.key
                 || a.stream.is_some() != b.stream.is_some()
@@ -298,7 +300,8 @@ impl Graph {
             && self.clips.iter().zip(&other.clips).all(|(a, b)| {
                 let first = a.stream.as_ref().map(|s| &s.state);
                 let second = b.stream.as_ref().map(|s| &s.state);
-                a.key == b.key
+                a.owner_id == b.owner_id
+                    && a.key == b.key
                     && a.start == b.start
                     && a.end == b.end
                     && first.map_or(&[][..], |s| s.effects.as_slice())
@@ -472,6 +475,7 @@ pub(crate) fn prepare(
             bound += input.audio.peak_level * gain;
         }
         clips.push(PreparedClip {
+            owner_id: input.clip.id.clone(),
             envelopes: envelopes.remove(&input.clip.id).unwrap_or_default(),
             start: input.clip.position,
             end: input.clip.position + input.clip.frames,
