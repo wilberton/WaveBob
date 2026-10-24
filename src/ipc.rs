@@ -518,6 +518,22 @@ mod tests {
 mod unix_deadline_tests {
     use super::*;
     #[test]
+    fn a_complete_buffered_reply_survives_peer_shutdown_before_readback() {
+        let (stream, mut writer) = std::os::unix::net::UnixStream::pair().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let mut stream = Stream::from(interprocess::os::unix::uds_local_socket::Stream::from(
+            stream,
+        ));
+        writer.write_all(&vec![b'x'; 16384]).unwrap();
+        writer.write_all(b"\n").unwrap();
+        writer.shutdown(std::net::Shutdown::Both).unwrap();
+        drop(writer);
+        let reply = read_frame(&mut stream, Instant::now() + Duration::from_millis(500)).unwrap();
+        assert_eq!(reply, vec![b'x'; 16384]);
+    }
+    #[test]
     fn stalled_unix_peer_cannot_block_frame_reads_or_writes_indefinitely() {
         let (stream, _unread_peer) = std::os::unix::net::UnixStream::pair().unwrap();
         let mut stream = Stream::from(interprocess::os::unix::uds_local_socket::Stream::from(
