@@ -82,3 +82,8 @@ wet float WAVs preserve the samples returned by the shipped headless
 The manifest identifies the executable's source commit and exact parameters.
 These files are concrete review assets. The agent has not listened to them;
 the pending required-listening acceptance decision is unchanged.
+
+The user subsequently approved automated acceptance with physical checks recorded
+as unverified. Ticket 30 is complete on the documented automated evidence;
+listening has not been claimed. The pending-decision paragraphs above describe
+the earlier acceptance history.

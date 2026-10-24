@@ -19,6 +19,14 @@ Write WaveBob-owned implementations of all eleven effect algorithms, using Lemon
 Studio's implementation as reference, and recreate the editors with egui. The
 instruments and their internal synthesis effects are excluded.
 
+## Acceptance clarification — 24 October 2026
+
+The user explicitly approved automated acceptance: reference comparisons, manually
+clocked output, scripted native-window checks and CI may satisfy ticket acceptance.
+Physical listening, device and trackpad checks that cannot be performed remain
+explicitly recorded as unverified. This applies to the effect delivery contract
+and the native platform checks; no subjective or physical result is fabricated.
+
 ## Requested behavior and confirmed decisions
 
 - Replace the right-hand Edit & Effects tool selector and Apply workflow with an

@@ -4,7 +4,7 @@
 
 **Blocked by:** 29 — Build the effect stack and native editor framework.
 
-**Status:** in-progress
+**Status:** done
 
 ## Acceptance criteria
 
@@ -14,7 +14,7 @@
 
 - [x] Reference cases sweep input amplitude/polarity and parameter bounds, and compare output/curve values. Live threshold/gain changes remain smooth and callback-safe with unchanged source audio.
 
-- [ ] Complete and record the per-effect delivery contract, including command/manual/offline agreement, isolation/history and an inspected actual editor capture; this is the first complete production effect proving the framework.
+- [x] Complete and record the per-effect delivery contract, including command/manual/offline agreement, isolation/history and an inspected actual editor capture; this is the first complete production effect proving the framework.
 
 ## Specification and references
 
@@ -73,3 +73,12 @@ Representative [dry/default/strong-clip listening assets](../../../docs/verifica
 are now retained, rendered through the shipped headless public commands. Their
 manifest explicitly records that the agent has not auditioned them. This makes
 the pending listening review concrete without treating elapsed time as approval.
+
+## Acceptance resolution — 24 October 2026
+
+The user selected **Use automated acceptance and record the limits**. All recorded
+reference, public-command/manual/offline, native editor capture, callback-safety
+and history/isolation checks establish acceptance. Physical listening remains
+explicitly unverified; review WAVs remain available. This resolves the sole open
+condition and completes ticket 30, unblocking ticket 31. The earlier pending notes
+above are retained as acceptance history.

@@ -691,7 +691,7 @@ impl WaveBob {
                 help.observe(&rewind,if target {"Rewind to absolute start and preserve playing/paused state and selection. Shortcut: Enter or comma."} else {"Open audio or arrange a clip to enable rewind. Shortcut: Enter or comma."});
                 if rewind.clicked() {self.rewind();}
                 if output.output.status==wavebob::transport::OutputStatus::Failed {
-                    let retry=ui.button("Retry output");
+                    let retry=ui.add(egui::Button::new("Retry").min_size(Vec2::new(46.0,28.0)));
                     help.observe(&retry,"Retry audio output after connecting or restoring a device.");
                     if retry.clicked() {self.dispatch(Command::RetryOutput(EmptyParams{}));}
                 } else {

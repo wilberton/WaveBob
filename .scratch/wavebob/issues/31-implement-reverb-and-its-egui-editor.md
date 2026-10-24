@@ -4,7 +4,7 @@
 
 **Blocked by:** 30 — Implement Soft Clipper and its egui editor.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Acceptance criteria
 

@@ -66,3 +66,33 @@ harness now exposes child stderr on failure to make the latter diagnosable.
 The artifact uploader explicitly includes the selected hidden-directory evidence
 paths; it does not upload runtime instance/authentication records. Native GUI
 acceptance is still pending those reruns.
+
+### Native Linux shipped workflows
+
+The [Linux release job](https://github.com/wilberton/WaveBob/actions/runs/40116617784/job/120939112485)
+passed shipped GUI/headless/MCP WAV/MP3 workflows on both X11 (Xvfb) and Wayland
+(headless Weston). The retained native artifact's SHA-256 is
+`6290a488cf5ef5f65145f0671026d1e54c26176146128ab45e0d8a9777a026c6`.
+Its source commit is `028377fc4af874ff684d58718ff58da19e673f67`.
+The source-complete Linux kit artifact is available in that run.
+
+The actual [X11 waveform](linux-x11-waveform.png),
+[X11 arrangement](linux-x11-multitrack.png),
+[Wayland waveform](linux-wayland-waveform.png) and
+[Wayland arrangement](linux-wayland-multitrack.png) captures were inspected.
+The device-free CI host reports unavailable audio output while editing/export and
+capture remain operational. That error state exposed timing text clipped by the
+wide Retry output button; the retry control now retains the Play button's width.
+All 50 GUI application tests pass after that layout correction.
+
+[X11 results](linux-x11-smoke.json) and [Wayland results](linux-wayland-smoke.json)
+record byte-identical per-host direct/headless/MCP exports, source-free project
+reopen and clean GUI quit. Physical audio and gestures remain unverified under
+the user's automated-acceptance decision.
+
+Windows hosted CI lacks OpenGL 2.0 support. The next run supplies an installed
+[MSYS2 Mesa runtime](https://packages.msys2.org/packages/mingw-w64-x86_64-mesa)
+through the [MSYS2 setup action](https://github.com/msys2/setup-msys2).
+The extraction records renderer DLL hashes; package ZIP contents remain as built.
+Mesa's [documented software-renderer settings](https://docs.mesa3d.org/envvars.html#gallium-driver)
+select llvmpipe. Native macOS workflow diagnostics remain in progress.
