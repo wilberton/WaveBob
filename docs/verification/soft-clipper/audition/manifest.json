@@ -1,0 +1,42 @@
+{
+  "source": "dry-stereo.wav",
+  "source_seed": 7401,
+  "frames": 144000,
+  "sample_rate": 48000,
+  "source_commit": "efb1dddbb3d2315e82228928d1c4896fb5e3437d",
+  "renders": [
+    {
+      "file": "default.wav",
+      "threshold": 100,
+      "post": 128,
+      "metadata": {
+        "source_body_frames": 144000,
+        "sample_rate": 48000,
+        "channels": 2,
+        "latency_frames": 0,
+        "tail_frames": 0,
+        "tail_capped": false,
+        "render_identity": "1c6bb27e9c434576b39aaf2688dc7893016e4ab547135667d9fa07ce5ec08f4e",
+        "audio_revision_id": "8ca6fc18-5e65-41af-9f45-959e33dc26f6"
+      },
+      "peak": 0.8262287378311157
+    },
+    {
+      "file": "threshold-32.wav",
+      "threshold": 32,
+      "post": 128,
+      "metadata": {
+        "source_body_frames": 144000,
+        "sample_rate": 48000,
+        "channels": 2,
+        "latency_frames": 0,
+        "tail_frames": 0,
+        "tail_capped": false,
+        "render_identity": "b7902428c30edeb248ed8d0f0a7810d69c7d1c6718bbfc2747e5e2a0751f0e84",
+        "audio_revision_id": "3016b2bd-582f-46a8-87f5-b34796c329ae"
+      },
+      "peak": 0.6546352505683899
+    }
+  ],
+  "auditioned_by_agent": false
+}

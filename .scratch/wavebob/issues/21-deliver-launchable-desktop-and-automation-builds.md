@@ -70,3 +70,19 @@ current live-processing limitations from the older baseline acceptance.
 Remote read access was verified noninteractively with `git ls-remote origin`;
 `main` was `8742c8bb46bdcb9dba1e17aa2936191a3bb33c7f` at that check.
 This is connectivity evidence only, not a CI or native platform verification.
+
+## Active CI and current Windows kit
+
+The committed `codex/live-processing` branch has now been pushed specifically to
+run the required CI; remote main remains unchanged. The initial native release
+run reproduced the older macOS IPC timeout and produced the Linux artifact.
+A clean current Windows source-complete kit passed shipped direct/headless/MCP
+and GUI WAV/MP3 workflows, native audition, captures and clean quit. Its exact
+commit/hash and inspected captures are retained in
+[current release verification](../../../docs/verification/live-processing-release/README.md).
+
+Unix IPC diagnosis and native GUI CI verification are ongoing. The workflow now
+includes actual shipped GUI captures on Windows/macOS and Linux X11/Wayland.
+No macOS/Linux GUI success, subjective listening, physical gesture or clean-machine
+result is claimed before execution. Earlier no-push/no-CI notes above describe
+historical checks and are superseded by this active execution note.

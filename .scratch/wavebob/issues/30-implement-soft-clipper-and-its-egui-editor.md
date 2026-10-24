@@ -68,3 +68,8 @@ the original one-second input after debug instrumentation cleanup; retained PNGs
 have normal opacity and capture metadata sidecars. Ticket 30 stays in-progress
 only for the explicitly pending listening-acceptance decision. Ticket 41 is an
 independent next unblocked implementation while 31 remains blocked by 30.
+
+Representative [dry/default/strong-clip listening assets](../../../docs/verification/soft-clipper/README.md#listening-review-assets)
+are now retained, rendered through the shipped headless public commands. Their
+manifest explicitly records that the agent has not auditioned them. This makes
+the pending listening review concrete without treating elapsed time as approval.

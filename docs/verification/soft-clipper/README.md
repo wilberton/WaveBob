@@ -70,3 +70,15 @@ this directory to retain the actual viewport images.
 No human listening result is claimed. The acceptance interpretation for physical
 listening/device checks is pending the user's response; objective results above
 are measured, and the captured native editor is visually inspected.
+
+## Listening review assets
+
+Short stereo comparisons are retained in [audition/](audition/manifest.json):
+[dry source](audition/dry-stereo.wav), [default controls](audition/default.wav)
+and [threshold 32](audition/threshold-32.wav). They contain three seconds of
+independent stereo tones and seeded decaying transients. The dry PCM is 16-bit;
+wet float WAVs preserve the samples returned by the shipped headless
+`processing.render` / `processing.samples` commands, with no level correction.
+The manifest identifies the executable's source commit and exact parameters.
+These files are concrete review assets. The agent has not listened to them;
+the pending required-listening acceptance decision is unchanged.
