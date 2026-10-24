@@ -162,6 +162,7 @@ impl Editor {
             }
         }
         retained.extend(self.arrangement.retained_revisions().cloned());
+        retained.extend(self.rendered.keys().cloned());
         self.revisions.retain(|id, _| retained.contains(id));
     }
     pub(super) fn apply_effect(

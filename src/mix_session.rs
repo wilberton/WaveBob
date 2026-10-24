@@ -121,7 +121,7 @@ impl Session {
             || explicit.is_some()
             || self
                 .playback
-                .needs_refresh(&document, self.snapshot.loop_enabled)
+                .needs_refresh(&document, self.snapshot.loop_enabled, None)
         {
             let position = if self.pending_mix_play {
                 Some(document.cursor)

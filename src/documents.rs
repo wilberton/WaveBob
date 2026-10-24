@@ -14,6 +14,7 @@ mod editing;
 mod mixing;
 mod processing;
 mod projecting;
+mod rendering;
 mod saving;
 
 fn tab_open_default() -> bool {
@@ -89,6 +90,7 @@ pub enum JobOutput {
     MixPrepared(crate::mixing::MixPrepared),
     ProjectSaved(crate::projects::ProjectSummary),
     ProjectOpened(crate::projects::ProjectSummary),
+    ProcessingRendered(crate::rendering::RenderMetadata),
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Peak {
@@ -177,6 +179,10 @@ pub struct WaveformParams {
 }
 
 enum Event {
+    ProcessingRendered(
+        String,
+        Result<(audio::Audio, crate::rendering::RenderMetadata), CommandError>,
+    ),
     Progress(String, u8),
     Finished(String, Result<audio::Audio, CommandError>),
     Edited(String, Result<Option<audio::Audio>, CommandError>),
@@ -216,6 +222,8 @@ pub(crate) struct Editor {
     pending_projects: BTreeMap<String, projecting::PendingProject>,
     loaded_loop: Option<bool>,
     preview: Option<processing::Preview>,
+    pending_renders: BTreeMap<String, rendering::PendingRender>,
+    rendered: BTreeMap<String, crate::rendering::RenderMetadata>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -241,6 +249,8 @@ impl Default for Editor {
             pending_projects: BTreeMap::new(),
             loaded_loop: None,
             preview: None,
+            pending_renders: BTreeMap::new(),
+            rendered: BTreeMap::new(),
         }
     }
 }
@@ -327,6 +337,7 @@ impl Editor {
     pub fn poll(&mut self, revision: &mut u64) {
         while let Ok(event) = self.receiver.try_recv() {
             match event {
+                Event::ProcessingRendered(id, result) => self.finish_render(id, result),
                 Event::Edited(id, result) => self.finish_edit(id, result, revision),
                 Event::ClipProcessed(id, result) => self.finish_clip(id, result, revision),
                 Event::MixPrepared(id, result) => self.finish_mix(id, result),
@@ -450,6 +461,8 @@ impl Editor {
         revision: &mut u64,
     ) -> Result<CommandResult, CommandError> {
         match command {
+            Command::RenderProcessing(params) => self.render_owner(params),
+            Command::ReadRenderedSamples(params) => self.rendered_samples(params),
             command @ (Command::GetProcessing(_)
             | Command::EditProcessing(_)
             | Command::BeginProcessingPreview(_)

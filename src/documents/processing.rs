@@ -30,6 +30,18 @@ impl Editor {
             }
         }
     }
+    pub fn audible_audio(
+        &self,
+        id: &str,
+    ) -> Result<(DocumentInfo, Arc<audio::Audio>), CommandError> {
+        let (mut document, audio) = self.playback_audio(id)?;
+        let snapshot = self.processing_snapshot(Owner::Document(id.into()))?;
+        document.processing = snapshot.preview.unwrap_or(snapshot.committed);
+        Ok((document, audio))
+    }
+    pub(super) fn processing_read(&self, owner: Owner) -> Result<Snapshot, CommandError> {
+        self.processing_snapshot(owner)
+    }
     fn processing_snapshot(&self, owner: Owner) -> Result<Snapshot, CommandError> {
         let (committed, source, frames) = self.owner_state(&owner)?;
         let preview = self.preview.as_ref().filter(|p| {

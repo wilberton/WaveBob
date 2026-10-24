@@ -186,7 +186,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 69);
+        assert_eq!(tools.len(), 71);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools

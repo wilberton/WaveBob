@@ -14,13 +14,16 @@ fn ok(s: &mut Session, command: &str, params: Value) -> Value {
     r["result"].clone()
 }
 fn fixture() -> (Session, tempfile::TempDir, Value) {
+    fixture_session(Session::default(), 48000)
+}
+fn fixture_session(mut s: Session, rate: u32) -> (Session, tempfile::TempDir, Value) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source.wav");
     let mut writer = hound::WavWriter::create(
         &path,
         hound::WavSpec {
             channels: 1,
-            sample_rate: 48000,
+            sample_rate: rate,
             bits_per_sample: 32,
             sample_format: hound::SampleFormat::Float,
         },
@@ -30,7 +33,6 @@ fn fixture() -> (Session, tempfile::TempDir, Value) {
         writer.write_sample(0.5_f32).unwrap();
     }
     writer.finalize().unwrap();
-    let mut s = Session::default();
     let job = ok(&mut s, "documents.open", json!({"path":path}));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
@@ -281,4 +283,71 @@ fn replaced_and_concurrently_cancelled_previews_cannot_publish() {
         send(&mut s, "effects.apply", json!({}))["error"]["code"],
         "unknown_command"
     );
+}
+
+fn wait_job(s: &mut Session, id: &Value) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let job = ok(s, "jobs.get", json!({"job_id":id}));
+        if job["status"] != "running" {
+            assert_eq!(job["status"], "succeeded", "{job}");
+            return job;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+#[test]
+fn offline_envelopes_and_manual_streaming_agree_across_blocks_and_rates() {
+    for rate in [44100, 48000, 96000] {
+        for block in [1, 7, 64] {
+            let (s, mut output) = Session::with_manual_output(rate).unwrap();
+            let (mut s, _dir, doc) = fixture_session(s, rate);
+            let owner = owner(&doc);
+            let state = get(&mut s, &owner);
+            ok(
+                &mut s,
+                "processing.edit",
+                json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"],"change":envelope(-6.0)}),
+            );
+            let job = ok(&mut s, "processing.render", json!({"owner":owner}));
+            let rendered = wait_job(&mut s, &job["id"]);
+            let metadata = &rendered["output"]["details"];
+            assert_eq!(metadata["source_body_frames"], 32);
+            assert_eq!(metadata["tail_frames"], 0);
+            let expected = ok(
+                &mut s,
+                "processing.samples",
+                json!({"audio_revision_id":metadata["audio_revision_id"],"start_frame":0,"frames":32}),
+            );
+            ok(&mut s, "transport.play", json!({"document_id":doc["id"]}));
+            let mut actual = Vec::new();
+            while actual.len() < 32 {
+                let mut frames = vec![[0.0; 2]; block.min(32 - actual.len())];
+                output.render_into(&mut frames);
+                actual.extend(frames);
+                s.poll_jobs();
+            }
+            for (n, frame) in actual.iter().enumerate() {
+                assert_eq!(
+                    frame[0] as f64,
+                    expected["channels"][0][n].as_f64().unwrap(),
+                    "rate {rate}, block {block}, frame {n}"
+                );
+                assert_eq!(frame[0], frame[1]);
+            }
+            let source = ok(
+                &mut s,
+                "documents.samples",
+                json!({"document_id":doc["id"],"frames":32}),
+            );
+            assert!(
+                source["channels"][0]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|x| x == 0.5)
+            );
+        }
+    }
 }

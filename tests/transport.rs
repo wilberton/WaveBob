@@ -40,6 +40,78 @@ fn send(session: &mut Session, name: &str, params: Value) -> Value {
     ))
     .unwrap()
 }
+
+#[test]
+fn live_envelope_preview_cancel_and_topology_transitions_are_callback_safe() {
+    let (mut session, mut output, _directory, id) = fixture(48000, 1, &[16384; 4096]);
+    ok(send(
+        &mut session,
+        "transport.loop.set",
+        json!({"enabled":true}),
+    ));
+    ok(send(
+        &mut session,
+        "transport.play",
+        json!({"document_id":id}),
+    ));
+    output.render_into(&mut [[0.0; 2]; 64]);
+    let owner = json!({"kind":"document","id":id});
+    let processing = ok(send(&mut session, "processing.get", json!({"owner":owner})));
+    let preview = ok(send(
+        &mut session,
+        "processing.preview.begin",
+        json!({"owner":owner,"expected_edit_revision":processing["committed"]["edit_revision_id"]}),
+    ));
+    ok(send(
+        &mut session,
+        "processing.preview.update",
+        json!({"preview_id":preview["preview_id"],"change":{"action":"set_envelope","envelope":{"gain_db":-6.020599913279624,"fade_in_frames":0,"fade_out_frames":0}}}),
+    ));
+    let mut frames = [[0.0; 2]; 512];
+    ALLOCS.set(0);
+    FREES.set(0);
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    assert_eq!(ALLOCS.get(), 0);
+    assert_eq!(FREES.get(), 0);
+    assert_eq!(frames[0], [0.5; 2]);
+    assert_eq!(frames[511], [0.25; 2]);
+    assert!(frames.windows(2).all(|p| (p[0][0] - p[1][0]).abs() < 0.001));
+    let transport = state(&mut session);
+    assert_eq!(transport["processing"]["pending"], false);
+    assert_eq!(
+        transport["processing"]["applied_generation"],
+        transport["processing"]["requested_generation"]
+    );
+    ok(send(
+        &mut session,
+        "processing.preview.cancel",
+        json!({"preview_id":preview["preview_id"]}),
+    ));
+    output.render_into(&mut frames);
+    assert_eq!(frames[511], [0.5; 2]);
+    assert_eq!(
+        ok(send(&mut session, "history.get", json!({})))["undo_count"],
+        0
+    );
+    let revision=ok(send(&mut session,"processing.get",json!({"owner":owner})))["committed"]["edit_revision_id"].clone();
+    ok(send(
+        &mut session,
+        "processing.edit",
+        json!({"owner":owner,"expected_edit_revision":revision,"change":{"action":"set_envelope","envelope":{"gain_db":0.0,"fade_in_frames":2048,"fade_out_frames":0}}}),
+    ));
+    let mut frames = [[0.0; 2]; 1024];
+    ALLOCS.set(0);
+    FREES.set(0);
+    CHECK.set(true);
+    output.render_into(&mut frames);
+    CHECK.set(false);
+    assert_eq!(ALLOCS.get(), 0);
+    assert_eq!(FREES.get(), 0);
+    assert_eq!(frames[0], [0.5; 2]);
+    assert!(frames.iter().any(|f| f[0] < 0.45));
+}
 fn ok(value: Value) -> Value {
     assert_eq!(value["status"], "ok", "{value}");
     value["result"].clone()
@@ -637,4 +709,30 @@ fn rational_clock_reaches_exact_end_without_drift() {
     let state = state(&mut session);
     assert_eq!(state["applied"]["frame"], 441);
     assert_eq!(state["applied"]["playing"], false);
+}
+
+#[test]
+fn pause_ramps_output_without_consuming_streaming_position() {
+    let (mut session, mut output, _directory, id) = fixture(48000, 1, &[16384; 4096]);
+    ok(send(
+        &mut session,
+        "transport.play",
+        json!({"document_id":id}),
+    ));
+    output.render_into(&mut [[0.0; 2]; 64]);
+    ok(send(&mut session, "transport.pause", json!({})));
+    let mut frames = [[0.0; 2]; 64];
+    output.render_into(&mut frames);
+    assert!(frames[0][0] > 0.4 && frames[0][0] < 0.5);
+    assert_eq!(frames[63], [0.0; 2]);
+    assert!(frames.windows(2).all(|p| p[1][0] <= p[0][0]));
+    assert_eq!(state(&mut session)["applied"]["frame"], 64);
+    ok(send(
+        &mut session,
+        "transport.play",
+        json!({"document_id":id}),
+    ));
+    output.render_into(&mut frames);
+    assert_eq!(frames[0], [0.5; 2]);
+    assert_eq!(state(&mut session)["applied"]["frame"], 128);
 }

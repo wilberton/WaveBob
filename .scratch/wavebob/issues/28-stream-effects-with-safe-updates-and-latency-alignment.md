@@ -4,7 +4,7 @@
 
 **Blocked by:** 27 — Model live processing state and reference contracts; 08 — Waveform playback, seeking and loop transport; 16 — Hear and inspect a multitrack mix.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Acceptance criteria
 
@@ -42,3 +42,26 @@ Record commands, reference cases/tolerances, actual results and relevant capture
 paths here when implementing. This publication has run no DSP or application
 verification and leaves every acceptance criterion unchecked.
 
+
+
+## Implementation checkpoint � 24 October 2026
+
+Streaming source-rate chains, envelope playback, a shared asynchronous offline
+render/query path, latency-aware dry comparison, deterministic tail termination,
+coalescing preparation, generation/error queries and callback resource retirement
+are implemented. A 256 MiB shared prepared-state budget complements the per-chain
+64 MiB / one-second latency limits. See [renderer contract](../../../docs/processing-renderer.md).
+
+Focused verification passes: nine library tests, five public processing tests and
+12 manual transport tests. Public rendered PCM and live envelope output agree
+exactly at 44.1/48/96 kHz with 1/7/64-frame blocks. Callback instrumentation records
+zero allocations/frees for preview gain, cancel and fade topology transitions.
+Test-only probes verify latency compensation (including intentional delay), deterministic
+reset/state continuity across loops, continuous-target state transfer, -100 dBFS
+hold, silent paths, the 60-second cap/taper, nonfinite output and resource rejection.
+One coalescing-worker test verifies that 100 superseded/unavailable preparations
+leave the previous audible graph intact and recover on a valid update. All-target
+Clippy passes with warnings denied. No production effect is enabled by these tests.
+
+The ticket remains in-progress while final integration/verification is completed;
+its acceptance boxes are intentionally not claimed from this checkpoint alone.

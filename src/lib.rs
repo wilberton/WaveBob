@@ -20,6 +20,7 @@ pub mod presentation;
 pub mod processing;
 pub mod projects;
 pub mod protocol;
+pub mod rendering;
 pub mod transport;
 
 pub use commands::{Capabilities, Command, CommandDescriptor, EmptyParams, LoopParams};
@@ -483,7 +484,7 @@ impl Session {
     }
     fn play_document(&mut self, id: &str, toggle: bool) -> Result<CommandResult, CommandError> {
         self.playback.ready()?;
-        let (document, audio) = self.editor.playback_audio(id)?;
+        let (document, audio) = self.editor.audible_audio(id)?;
         if document.frames == 0 {
             return Err(CommandError::new(
                 ErrorCode::InvalidParams,
@@ -499,7 +500,12 @@ impl Session {
         }
         let revision = self.next_revision()?;
         self.browser.stop();
-        let seek = if document.cursor >= document.frames {
+        let seek = if document.cursor >= document.frames
+            && state.applied.document_id.as_deref() == Some(id)
+            && state.processing.tail_active
+        {
+            None
+        } else if document.cursor >= document.frames {
             Some(0)
         } else if state.applied.document_id.as_deref() == Some(id)
             && state.applied.audio_revision_id.as_deref() == Some(&document.revision_id)
@@ -510,8 +516,14 @@ impl Session {
         } else {
             Some(document.cursor)
         };
-        self.playback
-            .request(&document, audio, self.snapshot.loop_enabled, true, seek)?;
+        self.playback.request_processed(
+            &document,
+            audio,
+            self.editor.arrangement().effect_tempo,
+            self.snapshot.loop_enabled,
+            true,
+            seek,
+        )?;
         self.pending_mix_play = false;
         self.pending_mix_seek = None;
         self.editor.activate_for_transport(id);
@@ -598,7 +610,7 @@ impl Session {
             if Some(id.as_str()) == self.browser.source_id() {
                 return;
             }
-            match self.editor.playback_audio(&id) {
+            match self.editor.audible_audio(&id) {
                 Ok((document, audio)) => {
                     let state = self.playback.snapshot();
                     let explicit = seek
@@ -608,15 +620,18 @@ impl Session {
                     let revision_changed =
                         state.requested.audio_revision_id.as_ref() != Some(&document.revision_id);
                     if explicit.is_some()
-                        || self
-                            .playback
-                            .needs_refresh(&document, self.snapshot.loop_enabled)
+                        || self.playback.needs_refresh(
+                            &document,
+                            self.snapshot.loop_enabled,
+                            Some(self.editor.arrangement().effect_tempo),
+                        )
                     {
                         let position =
                             explicit.or_else(|| revision_changed.then_some(document.cursor));
-                        let _ = self.playback.request(
+                        let _ = self.playback.request_processed(
                             &document,
                             audio,
+                            self.editor.arrangement().effect_tempo,
                             self.snapshot.loop_enabled,
                             state.requested.playing,
                             position,

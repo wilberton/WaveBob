@@ -94,6 +94,8 @@ macro_rules! command_registry {
 }
 
 command_registry! {
+    RenderProcessing(crate::rendering::RenderParams) => ("processing.render", "Render committed owner audio and bounded tails asynchronously without a device.", true, false, false, JobInfo),
+    ReadRenderedSamples(crate::rendering::SamplesParams) => ("processing.samples", "Read a bounded interval of a completed processing render.", false, false, false, SamplesData),
     GetEffectCatalogue(EmptyParams) => ("processing.catalogue", "List built-in processors, availability and typed parameter metadata.", false, false, false, Vec<crate::processing::EffectInfo>),
     GetProcessing(crate::processing::OwnerParams) => ("processing.get", "Inspect committed and transient owner processing and render identity.", false, false, false, crate::processing::Snapshot),
     EditProcessing(crate::processing::EditParams) => ("processing.edit", "Commit one validated owner envelope or stack change.", true, false, false, crate::processing::Snapshot),
