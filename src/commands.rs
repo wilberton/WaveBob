@@ -94,6 +94,9 @@ macro_rules! command_registry {
 }
 
 command_registry! {
+    TrimClip(crate::arrangement::TrimClipParams) => ("clips.trim", "Trim a clip's pinned source interval and rebuild its instance processing as one background edit.", true, false, false, JobInfo),
+    ApplyClipEffect(crate::arrangement::ClipEffectParams) => ("clips.effects.apply", "Apply shared DSP only to one pinned clip instance as one cancellable background edit.", true, false, false, JobInfo),
+    ReadClipSamples(crate::arrangement::ClipSamplesParams) => ("clips.samples", "Inspect a bounded interval of a clip's processed source-rate audio.", false, false, false, SamplesData),
     GetArrangement(EmptyParams) => ("arrangement.get", "Inspect tracks, pinned clips and exact project-frame navigation.", false, false, false, crate::arrangement::Arrangement),
     AddTrack(crate::arrangement::AddTrackParams) => ("tracks.add", "Insert a named track as one undoable arrangement edit.", true, false, false, crate::arrangement::Arrangement),
     UpdateTrack(crate::arrangement::UpdateTrackParams) => ("tracks.update", "Rename, reorder or change track controls as one undoable edit.", true, false, false, crate::arrangement::Arrangement),

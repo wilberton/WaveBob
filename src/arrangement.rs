@@ -53,7 +53,9 @@ impl Arrangement {
         self.tracks
             .iter()
             .flat_map(|track| &track.clips)
-            .map(|clip| &clip.revision_id)
+            .flat_map(|clip| {
+                std::iter::once(&clip.revision_id).chain(clip.processed_revision_id.iter())
+            })
     }
     pub(crate) fn validate(&self) -> Result<(), CommandError> {
         if self.tracks.len() > 256
@@ -101,6 +103,10 @@ pub struct Clip {
     pub name: String,
     pub document_id: String,
     pub revision_id: String,
+    pub edit_revision_id: String,
+    pub processed_revision_id: Option<String>,
+    pub effects: Vec<crate::effects::Effect>,
+    pub source_frames: u64,
     pub source_start: u64,
     pub source_end: u64,
     pub source_rate: u32,
@@ -108,6 +114,36 @@ pub struct Clip {
     pub position: u64,
     /// Duration rounded once to the nearest project frame, minimum one frame.
     pub frames: u64,
+}
+impl Clip {
+    /// Preserve the opposite edge in project time, using nearest-frame rounding.
+    pub fn trimmed(&self, start: u64, end: u64, project_rate: u32) -> Result<Self, CommandError> {
+        if start >= end || end > self.source_frames || self.source_rate == 0 || project_rate == 0 {
+            return Err(invalid("Clip source interval is out of range"));
+        }
+        let delta = start as i128 - self.source_start as i128;
+        let shift = (delta.abs() * project_rate as i128 + self.source_rate as i128 / 2)
+            / self.source_rate as i128
+            * delta.signum();
+        let position = self.position as i128 + shift;
+        if position < 0 || position > MAX_TIMELINE_FRAME as i128 {
+            return Err(invalid("Trimming the left edge would leave the timeline"));
+        }
+        let mut clip = self.clone();
+        clip.position = position as u64;
+        clip.source_start = start;
+        clip.source_end = end;
+        clip.frames =
+            crate::audio::resample::frame_count(end - start, self.source_rate, project_rate);
+        if clip
+            .position
+            .checked_add(clip.frames)
+            .is_none_or(|end| end > MAX_TIMELINE_FRAME)
+        {
+            return Err(invalid("Clip exceeds the timeline limit"));
+        }
+        Ok(clip)
+    }
 }
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -158,6 +194,29 @@ pub struct ClipParams {
 pub struct ClipWaveformParams {
     pub clip_id: String,
     pub bins: usize,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrimClipParams {
+    pub clip_id: String,
+    pub edit_revision_id: String,
+    pub source_start: u64,
+    pub source_end: u64,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClipEffectParams {
+    pub clip_id: String,
+    pub edit_revision_id: String,
+    pub effect: crate::effects::Effect,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClipSamplesParams {
+    pub clip_id: String,
+    #[serde(default)]
+    pub start_frame: u64,
+    pub frames: u32,
 }
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

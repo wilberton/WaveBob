@@ -12,6 +12,12 @@ pub(super) enum Gesture {
         offset: u64,
         revision: u64,
     },
+    Trim {
+        clip: Clip,
+        left: bool,
+        anchor: u64,
+        revision: u64,
+    },
     Select {
         anchor: u64,
         revision: u64,
@@ -22,6 +28,11 @@ pub(super) struct TrackDraft {
     name: String,
     gain: f64,
     pan: f64,
+}
+pub(super) struct ClipTrimDraft {
+    pub revision: String,
+    pub start: u64,
+    pub end: u64,
 }
 fn frame_at(pos: Pos2, lane: Rect, view: &FrameRange) -> u64 {
     (view.start as f64
@@ -78,6 +89,7 @@ impl WaveBob {
             let revision = match gesture {
                 Gesture::Insert { revision, .. }
                 | Gesture::Move { revision, .. }
+                | Gesture::Trim { revision, .. }
                 | Gesture::Select { revision, .. } => *revision,
             };
             if revision != snapshot.revision && !frozen {
@@ -214,7 +226,7 @@ impl WaveBob {
                     let painter=ui.painter_at(lane);
                     painter.rect_filled(rect,3.0,color.gamma_multiply(if selected{0.24}else{0.14}));
                     painter.rect_stroke(rect,3.0,Stroke::new(if selected{2.0}else{1.0},color),egui::StrokeKind::Inside);
-                    if self.clip_waves.get(&clip.id).is_none_or(|wave|wave.revision_id!=clip.revision_id||wave.start_frame!=clip.source_start||wave.end_frame!=clip.source_end) {
+                    if self.clip_waves.get(&clip.id).is_none_or(|wave|wave.revision_id!=clip.edit_revision_id) {
                         if remaining_waveforms>0 {
                         remaining_waveforms-=1;
                         let result=self.host.execute(Request::new("clip-peaks",Command::GetClipWaveform(ClipWaveformParams{clip_id:clip.id.clone(),bins:512})));
@@ -234,6 +246,15 @@ impl WaveBob {
                         self.navigate_arrangement(clip.position,None,selected_ids);
                     }
                     if response.drag_started()&&!frozen&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {self.arrangement_gesture=Some(Gesture::Move{clip:clip.clone(),offset:frame_at(pos,lane,&view).saturating_sub(clip.position),revision:snapshot.revision});}
+                    if rect.width()>16.0 {
+                        for left in [true,false] {
+                            let edge=if left {Rect::from_min_max(rect.min,Pos2::new(rect.left()+6.0,rect.bottom()))}else{Rect::from_min_max(Pos2::new(rect.right()-6.0,rect.top()),rect.max)}.intersect(visible);
+                            let handle=ui.interact(edge,ui.scope_id().with((&clip.id,left)),Sense::drag());
+                            if handle.hovered()||handle.dragged(){ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);}
+                            help.observe(&handle,"Drag this edge to trim the pinned source interval. Release commits one edit; Escape cancels.");
+                            if handle.drag_started()&&!frozen&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {self.arrangement_gesture=Some(Gesture::Trim{clip:clip.clone(),left,anchor:frame_at(pos,lane,&view),revision:snapshot.revision});}
+                        }
+                    }
                 }
                 if let Some(selection)=&arrangement.selection {
                     let x=|frame:u64|lane.left()+(frame as f64-view.start as f64) as f32/(view.end-view.start) as f32*lane.width();
@@ -276,6 +297,10 @@ impl WaveBob {
                         name: document.name.clone(),
                         document_id: document.id.clone(),
                         revision_id: document.revision_id.clone(),
+                        edit_revision_id: String::new(),
+                        processed_revision_id: None,
+                        effects: Vec::new(),
+                        source_frames: document.frames,
                         source_start: 0,
                         source_end: document.frames,
                         source_rate: document.sample_rate,
@@ -340,6 +365,51 @@ impl WaveBob {
                         revision,
                     ))
                 }
+                Gesture::Trim {
+                    mut clip,
+                    left,
+                    anchor,
+                    revision,
+                } => lane
+                    .filter(|(id, _)| {
+                        arrangement
+                            .clip(&clip.id)
+                            .is_some_and(|(track, _)| &track.id == id)
+                    })
+                    .and_then(|(_, rect)| {
+                        let delta = frame_at(pos, *rect, &view) as i128 - anchor as i128;
+                        let shift = (delta.abs() * clip.source_rate as i128
+                            + arrangement.sample_rate as i128 / 2)
+                            / arrangement.sample_rate as i128
+                            * delta.signum();
+                        let mut start = clip.source_start;
+                        let mut end = clip.source_end;
+                        if left {
+                            let min = clip.source_start.saturating_sub(
+                                (clip.position as u128 * clip.source_rate as u128
+                                    / arrangement.sample_rate as u128)
+                                    as u64,
+                            );
+                            start = (clip.source_start as i128 + shift)
+                                .clamp(min as i128, clip.source_end as i128 - 1)
+                                as u64;
+                        } else {
+                            end = (clip.source_end as i128 + shift)
+                                .clamp(clip.source_start as i128 + 1, clip.source_frames as i128)
+                                as u64;
+                        }
+                        clip = clip.trimmed(start, end, arrangement.sample_rate).ok()?;
+                        paint_preview(ui, *rect, &view, &clip);
+                        Some((
+                            Command::TrimClip(TrimClipParams {
+                                clip_id: clip.id,
+                                edit_revision_id: clip.edit_revision_id,
+                                source_start: clip.source_start,
+                                source_end: clip.source_end,
+                            }),
+                            revision,
+                        ))
+                    }),
             };
             if released {
                 self.arrangement_gesture = None;

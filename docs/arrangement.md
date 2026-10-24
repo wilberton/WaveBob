@@ -32,6 +32,29 @@ drag it for a time selection. Ctrl/Cmd-click toggles selected clips. Rename trac
 in their header and right-click the track number to reorder or remove a track.
 Track slider/knob releases commit one change. Audible mixing arrives in ticket 16.
 
+`clips.trim` takes clip_id, edit_revision_id, source_start and source_end, and
+returns a job. Bounds address the original pinned revision. Moving the left
+source edge shifts timeline position by the same duration, rounded to the nearest
+project frame; negative positions are rejected. The right edge changes duration.
+Drag edges in the GUI or use the exact source frame fields beneath the effects.
+
+`clips.effects.apply` takes clip_id, edit_revision_id and an effect, returning a
+job. It uses the same gain/fade/reverse/reverb DSP as waveform edits. Each clip
+retains its ordered processing steps (up to 32) and a prepared immutable result.
+Trimming rebuilds those steps over the new interval; reverb state resets at its
+start and the tail ends at its boundary. The original source revision stays pinned.
+Other clips and open documents remain unchanged. Playback/export use that same
+prepared result when mixing is available.
+
+Completed clip jobs return `output.kind: clip_edit` and the clip in `details`.
+`clips.samples` inspects up to 4096 processed source-rate frames, relative to the
+clip start. Its revision_id is the clip's edit_revision_id, independent from the
+pinned source revision_id and optional processed_revision_id. Clip mutation or
+removal during processing rejects the stale result; cancellation never publishes.
+No-op processing adds no history. Peaks/processed audio stay retained by undo/redo.
+The right panel enables Apply only for exactly one selected clip; parameter
+changes alone do not edit audio.
+
 `presentation.timeline.set` sets start_frame/end_frame of the visible interval.
 Fit and +/- buttons, Ctrl/Cmd-wheel or pinch zoom, and horizontal/Shift-wheel pan
 change only presentation state. The status bar shows exact selection duration,

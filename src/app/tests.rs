@@ -34,7 +34,7 @@ fn arrangement_library_drop_moves_once_and_invalid_or_escape_drops_cancel() {
     let clip = arr.tracks[0].clips[0].clone();
     let clip_text = text_shapes(&h.frame(vec![]))
         .into_iter()
-        .find(|(rect, text)| text == "Gestures.wav" && rect.left() > 400.0)
+        .find(|(rect, text)| text == "Gestures.wav" && rect.left() > 400.0 && rect.right() < 1240.0)
         .unwrap()
         .0;
     let from = clip_text.left_center() + Vec2::new(10.0, 25.0);
@@ -48,7 +48,7 @@ fn arrangement_library_drop_moves_once_and_invalid_or_escape_drops_cancel() {
     assert_eq!(h.app.host.history().undo_count, history + 2);
     let clip_text = text_shapes(&h.frame(vec![]))
         .into_iter()
-        .find(|(rect, text)| text == "Gestures.wav" && rect.left() > 400.0)
+        .find(|(rect, text)| text == "Gestures.wav" && rect.left() > 400.0 && rect.right() < 1240.0)
         .unwrap()
         .0;
     let from = clip_text.left_center() + Vec2::new(10.0, 25.0);
@@ -80,6 +80,123 @@ fn arrangement_library_drop_moves_once_and_invalid_or_escape_drops_cancel() {
         modifiers: egui::Modifiers::NONE,
     }]);
     assert_eq!(h.app.host.snapshot(), before);
+}
+
+#[test]
+fn clip_edge_trim_and_single_clip_effect_target_use_shared_jobs() {
+    use wavebob::arrangement::*;
+    let (mut h, _directory) = audio_harness();
+    let doc = h.app.active_document().unwrap();
+    h.app.dispatch(Command::AddTrack(AddTrackParams::default()));
+    let track = h.app.host.snapshot().arrangement.tracks[0].id.clone();
+    h.app.dispatch(Command::InsertClip(InsertClipParams {
+        track_id: track,
+        document_id: doc.id.clone(),
+        revision_id: doc.revision_id.clone(),
+        source_start: 0,
+        source_end: doc.frames,
+        position: 0,
+    }));
+    h.app.set_mode(ViewMode::Multitrack);
+    h.app
+        .dispatch(Command::SetTimelineViewport(TimelineViewportParams {
+            start_frame: 0,
+            end_frame: doc.frames * 2,
+            expected_presentation_revision: None,
+        }));
+    let output = h.frame(vec![]);
+    let text = text_shapes(&output)
+        .into_iter()
+        .find(|(r, t)| t == "Gestures.wav" && r.left() > 400.0 && r.right() < 1240.0)
+        .unwrap()
+        .0;
+    assert!(
+        text_shapes(&output)
+            .iter()
+            .any(|(_, text)| text == "Selected clip")
+    );
+    let timeline_left = text.left() - 8.0;
+    let right = h.app.host.presentation().layout.effective_widths(1440.0)[1];
+    let timeline_right = 1440.0 - right - 14.0;
+    let edge = Pos2::new(
+        timeline_left + (timeline_right - timeline_left) / 2.0 - 2.0,
+        text.top() + 45.0,
+    );
+    let history = h.app.host.history().undo_count;
+    h.drag(
+        edge,
+        edge - Vec2::new((timeline_right - timeline_left) / 4.0, 0.0),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h
+        .app
+        .host
+        .snapshot()
+        .jobs
+        .iter()
+        .any(|j| j.status == JobStatus::Running)
+    {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    let clip = h.app.host.snapshot().arrangement.tracks[0].clips[0].clone();
+    assert!(
+        clip.source_end < doc.frames && clip.source_end > doc.frames / 3,
+        "{:?}",
+        h.app.error
+    );
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    let fade = h.text_rect("Fade out").center();
+    h.click(fade);
+    let apply = h.text_rect("Apply").center();
+    h.click(apply);
+    while h
+        .app
+        .host
+        .snapshot()
+        .jobs
+        .iter()
+        .any(|j| j.status == JobStatus::Running)
+    {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frame(vec![]);
+    }
+    assert_eq!(
+        h.app.host.snapshot().arrangement.tracks[0].clips[0].effects,
+        vec![wavebob::effects::Effect::FadeOut]
+    );
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        doc.revision_id
+    );
+    h.app.navigate_arrangement(0, None, Vec::new());
+    h.frame(vec![]);
+    let history = h.app.host.history().undo_count;
+    let apply = h.text_rect("Apply").center();
+    h.click(apply);
+    assert_eq!(h.app.host.history().undo_count, history);
+    let arrangement = h.app.host.snapshot().arrangement;
+    h.app.dispatch(Command::InsertClip(InsertClipParams {
+        track_id: arrangement.tracks[0].id.clone(),
+        document_id: doc.id,
+        revision_id: doc.revision_id,
+        source_start: 0,
+        source_end: doc.frames,
+        position: doc.frames * 3,
+    }));
+    let selected = h.app.host.snapshot().arrangement.tracks[0]
+        .clips
+        .iter()
+        .map(|clip| clip.id.clone())
+        .collect();
+    h.app.navigate_arrangement(0, None, selected);
+    h.frame(vec![]);
+    let history = h.app.host.history().undo_count;
+    let apply = h.text_rect("Apply").center();
+    h.click(apply);
+    assert_eq!(h.app.host.history().undo_count, history);
 }
 impl Harness {
     fn new() -> Self {

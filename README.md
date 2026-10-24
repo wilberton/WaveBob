@@ -11,6 +11,8 @@ Selection/whole-sample [gain, fades, reverse and reverb](docs/editing.md) suppor
 [WAV/MP3 save and export](docs/export.md) use atomic jobs and protect dirty work on close.
 [Editable tracks and pinned clips](docs/arrangement.md) support drag placement,
 track naming/order, precise timeline selection and shared undo/redo.
+Clip edges and exact source bounds trim individual instances; the effects panel
+processes one selected clip without altering its source or other instances.
 Native sample playback supports pause, seek and selection/whole-sample loops;
 see [transport controls and commands](docs/transport.md).
 Precise cursor/selection controls and overview/mouse/trackpad zoom and pan are
@@ -89,7 +91,7 @@ waveform and arrangement captures at wide, compact, narrow and 150% scale.
 The approved [editor specification](.scratch/wavebob/spec.md) and
 [22 implementation tickets](.scratch/wavebob/README.md) are published in the local
 Markdown tracker. Each ticket has acceptance criteria, explicit blockers and its
-current execution status. Tickets 01–14 and 22 are complete; derive subsequent
+current execution status. Tickets 01–15 and 22 are complete; derive subsequent
 availability from the individual tickets. The tracker conventions are in
 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 

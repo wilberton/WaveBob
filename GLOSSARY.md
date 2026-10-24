@@ -56,6 +56,14 @@ Removing it and its clips is one history entry.
 source interval, positioned on a track in project frames. Closing or editing the
 source document leaves the instance intact.
 
+**Clip edit revision**: The immutable identity of a clip's placement, trim and
+instance processing state. A background edit may publish only against that exact
+identity. The pinned source audio revision remains separate.
+
+**Clip processing**: Ordered instance-only DSP applied over the clip's source
+interval, with an immutable prepared result. Trimming rebuilds the processing
+over the new bounds; reverb resets at the start and ends at the clip boundary.
+
 **Project frame**: An integer arrangement time boundary at the project sample
 rate, initially 48 kHz. Source-to-project duration conversion rounds once to the
 nearest frame, with a minimum of one for a nonempty source interval.

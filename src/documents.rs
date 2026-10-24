@@ -9,6 +9,7 @@ use std::sync::{
     mpsc,
 };
 mod arranging;
+mod clip_processing;
 mod editing;
 mod saving;
 
@@ -69,10 +70,11 @@ pub struct JobInfo {
     #[serde(default)]
     pub output: Option<JobOutput>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", content = "details", rename_all = "snake_case")]
 pub enum JobOutput {
     AudioExport(crate::exports::ExportSummary),
+    ClipEdit(crate::arrangement::Clip),
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Peak {
@@ -164,6 +166,7 @@ enum Event {
     Progress(String, u8),
     Finished(String, Result<audio::Audio, CommandError>),
     Edited(String, Result<Option<audio::Audio>, CommandError>),
+    ClipProcessed(String, Result<audio::Audio, CommandError>),
     OutputPrepared(String, mpsc::SyncSender<bool>),
     OutputFinished(String, Result<crate::exports::ExportSummary, CommandError>),
 }
@@ -181,6 +184,7 @@ pub(crate) struct Editor {
     clipboard: Option<editing::Clipboard>,
     pending_outputs: BTreeMap<String, saving::PendingOutput>,
     arrangement: crate::arrangement::Arrangement,
+    pending_clips: BTreeMap<String, clip_processing::PendingClip>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -198,6 +202,7 @@ impl Default for Editor {
             clipboard: None,
             pending_outputs: BTreeMap::new(),
             arrangement: crate::arrangement::Arrangement::default(),
+            pending_clips: BTreeMap::new(),
         }
     }
 }
@@ -278,6 +283,7 @@ impl Editor {
         while let Ok(event) = self.receiver.try_recv() {
             match event {
                 Event::Edited(id, result) => self.finish_edit(id, result, revision),
+                Event::ClipProcessed(id, result) => self.finish_clip(id, result, revision),
                 Event::OutputPrepared(id, permit) => self.approve_output(id, permit, *revision),
                 Event::OutputFinished(id, result) => self.finish_output(id, result, revision),
                 Event::Progress(id, percent) => {
@@ -370,6 +376,9 @@ impl Editor {
         revision: &mut u64,
     ) -> Result<CommandResult, CommandError> {
         match command {
+            Command::TrimClip(params) => self.trim_clip(params),
+            Command::ApplyClipEffect(params) => self.process_clip(params),
+            Command::ReadClipSamples(params) => self.clip_samples(params),
             command @ (Command::GetArrangement(_)
             | Command::AddTrack(_)
             | Command::UpdateTrack(_)

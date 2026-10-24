@@ -41,6 +41,7 @@ pub struct WaveBob {
     arrangement_gesture: Option<arranging::Gesture>,
     clip_waves: std::collections::BTreeMap<String, WaveformData>,
     track_drafts: std::collections::BTreeMap<String, arranging::TrackDraft>,
+    clip_trim_draft: Option<arranging::ClipTrimDraft>,
 }
 
 #[derive(Default)]

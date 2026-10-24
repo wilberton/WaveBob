@@ -183,7 +183,7 @@ async fn stdio_contract_matches_direct_and_headless_on_both_protocol_eras() {
     for version in [ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28] {
         let client = connect(version, &[]).await;
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 46);
+        assert_eq!(tools.len(), 49);
         let catalogue = response(&call(&client, "session.capabilities", json!({})).await);
         for descriptor in catalogue["result"]["commands"].as_array().unwrap() {
             let tool = tools
@@ -562,6 +562,141 @@ mod live {
             ],
         )
         .await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native GUI renderer"]
+    async fn independent_clip_processing_trim_and_capture_through_mcp() {
+        let runtime = tempfile::tempdir().unwrap();
+        let _gui = Gui::start(runtime.path(), "clip-effects-check");
+        let client = named_client(runtime.path(), "clip-effects-check").await;
+        let path = runtime.path().join("Piano texture.wav");
+        let mut writer = hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: 48_000,
+                bits_per_sample: 24,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for frame in 0..96_000 {
+            let t = frame as f64 / 48_000.0;
+            for channel in 0..2 {
+                let value = (t * (220.0 + channel as f64 * 55.0) * std::f64::consts::TAU).sin()
+                    * (0.1 + 0.15 * (t * 7.3).sin().abs());
+                writer.write_sample((value * 8388607.0) as i32).unwrap();
+            }
+        }
+        writer.finalize().unwrap();
+        let started =
+            response(&call(&client, "documents.open", json!({"params":{"path":path}})).await);
+        let doc = finish_mcp_job(&client, started).await;
+        let arr =
+            response(&call(&client, "tracks.add", json!({"params":{"name":"Texture"}})).await);
+        let track = &arr["result"]["tracks"][0]["id"];
+        for position in [0, 144_000] {
+            let inserted=response(&call(&client,"clips.insert",json!({"params":{"track_id":track,"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":0,"source_end":doc["frames"],"position":position}})).await);
+            assert_eq!(inserted["status"], "ok");
+        }
+        let arr = response(&call(&client, "arrangement.get", json!({})).await);
+        let first = arr["result"]["tracks"][0]["clips"][0].clone();
+        let second = arr["result"]["tracks"][0]["clips"][1].clone();
+        let original = response(
+            &call(
+                &client,
+                "clips.samples",
+                json!({"params":{"clip_id":second["id"],"frames":256}}),
+            )
+            .await,
+        )["result"]["channels"]
+            .clone();
+        let effect=response(&call(&client,"clips.effects.apply",json!({"params":{"clip_id":first["id"],"edit_revision_id":first["edit_revision_id"],"effect":{"kind":"gain","db":-6.0}}})).await);
+        let edited = finish_mcp_output(&client, effect).await;
+        let trim=response(&call(&client,"clips.trim",json!({"params":{"clip_id":first["id"],"edit_revision_id":edited["edit_revision_id"],"source_start":24000,"source_end":72000}})).await);
+        let trimmed = finish_mcp_output(&client, trim).await;
+        assert_eq!(trimmed["frames"], 48000);
+        assert_eq!(trimmed["revision_id"], doc["revision_id"]);
+        assert_eq!(
+            response(
+                &call(
+                    &client,
+                    "clips.samples",
+                    json!({"params":{"clip_id":second["id"],"frames":256}})
+                )
+                .await
+            )["result"]["channels"],
+            original
+        );
+        assert_eq!(
+            response(
+                &call(
+                    &client,
+                    "documents.samples",
+                    json!({"params":{"document_id":doc["id"],"frames":256}})
+                )
+                .await
+            )["result"]["channels"],
+            original
+        );
+        response(
+            &call(
+                &client,
+                "presentation.set_mode",
+                json!({"params":{"mode":"multitrack"}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "arrangement.navigate",
+                json!({"params":{"cursor":48000,"selected_clip_ids":[first["id"]]}}),
+            )
+            .await,
+        );
+        response(
+            &call(
+                &client,
+                "presentation.timeline.set",
+                json!({"params":{"start_frame":0,"end_frame":288000}}),
+            )
+            .await,
+        );
+        let captured = call(
+            &client,
+            "capture.png",
+            json!({"params":{"path":runtime.path().join("clip-effects.png")}}),
+        )
+        .await;
+        let metadata = response(&captured);
+        assert_eq!(metadata["status"], "ok");
+        let image = captured
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        if let Some(directory) = std::env::var_os("WAVEBOB_TEST_ARTIFACT_DIR") {
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                Path::new(&directory).join("clip-effects.png"),
+                BASE64_STANDARD.decode(&image.data).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                Path::new(&directory).join("clip-effects.json"),
+                serde_json::to_vec_pretty(
+                    &json!({"clip":trimmed,"other_clip":second,"capture":metadata}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        client.cancel().await.unwrap();
     }
 
     #[tokio::test]
@@ -2126,7 +2261,7 @@ mod live {
         let direct = ipc::Client::attach(runtime.path(), first_id).unwrap();
         let other = ipc::Client::attach(runtime.path(), second_id).unwrap();
         let tools = client.list_all_tools().await.unwrap();
-        assert_eq!(tools.len(), 61);
+        assert_eq!(tools.len(), 64);
         for tool in &tools {
             let schema = Value::Object((*tool.input_schema).clone());
             assert_local_refs(&schema, &schema);

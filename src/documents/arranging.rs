@@ -18,13 +18,13 @@ impl Editor {
             if !(1..=2048).contains(&params.bins) {
                 return Err(invalid("Waveform bins must be 1..2048"));
             }
-            let audio = &self.revisions[&clip.revision_id];
+            let (_, audio, range) = self.clip_audio(&clip.id)?;
             return Ok(CommandResult::Waveform(WaveformData {
                 document_id: clip.document_id.clone(),
-                revision_id: clip.revision_id.clone(),
-                start_frame: clip.source_start,
-                end_frame: clip.source_end,
-                channels: audio.waveform(clip.source_start, clip.source_end, params.bins),
+                revision_id: clip.edit_revision_id.clone(),
+                start_frame: range.start,
+                end_frame: range.end,
+                channels: audio.waveform(range.start, range.end, params.bins),
             }));
         }
         let mut next = self.arrangement.clone();
@@ -120,6 +120,10 @@ impl Editor {
                     name: doc.name.clone(),
                     document_id: doc.id.clone(),
                     revision_id: doc.revision_id.clone(),
+                    edit_revision_id: uuid::Uuid::new_v4().to_string(),
+                    processed_revision_id: None,
+                    effects: Vec::new(),
+                    source_frames: audio.frames(),
                     source_start: params.source_start,
                     source_end: params.source_end,
                     source_rate: audio.rate,
@@ -137,6 +141,9 @@ impl Editor {
                     .ok_or_else(|| not_found("clip"))?;
                 let origin = track.id.clone();
                 let mut clip = clip.clone();
+                if clip.position != params.position || origin != params.track_id {
+                    clip.edit_revision_id = uuid::Uuid::new_v4().to_string();
+                }
                 clip.position = params.position;
                 if !next.tracks.iter().any(|t| t.id == params.track_id) {
                     return Err(not_found("track"));

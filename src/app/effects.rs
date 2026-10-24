@@ -25,6 +25,17 @@ impl ReverbControls {
 }
 
 impl WaveBob {
+    pub(super) fn selected_clip(&self) -> Option<wavebob::arrangement::Clip> {
+        if self.host.presentation().mode != ViewMode::Multitrack {
+            return None;
+        }
+        let arr = self.host.snapshot().arrangement;
+        if arr.selected_clip_ids.len() != 1 {
+            return None;
+        }
+        arr.clip(&arr.selected_clip_ids[0])
+            .map(|(_, clip)| clip.clone())
+    }
     fn effect_target(&self) -> Option<EditTarget> {
         if self.host.presentation().mode != ViewMode::Waveform {
             return None;
@@ -93,13 +104,17 @@ impl WaveBob {
         let width = content.available_width();
         content.label("Target");
         let target = self.effect_target();
-        let enabled = target.is_some() && self.gesture.is_none();
+        let clip = self.selected_clip();
+        let enabled = (target.is_some() || clip.is_some())
+            && self.gesture.is_none()
+            && self.arrangement_gesture.is_none();
         let label = match &target {
             Some(EditTarget::Range { .. }) => "Selection",
             Some(EditTarget::Whole { .. }) => "Whole sample",
+            None if clip.is_some() => "Selected clip",
             None => "No editing target",
         };
-        help.observe(&content.add_enabled(false,centered_button(label).min_size(Vec2::new(width,26.0))),"Effects apply to the selection, or the whole sample when no selection exists. Arrangement clip processing arrives in ticket 15.");
+        help.observe(&content.add_enabled(false,centered_button(label).min_size(Vec2::new(width,26.0))),"Waveform effects target the selection or whole sample. Arrangement effects require exactly one selected clip and affect only that instance.");
         content.add_space(14.0);
         let (gain_row, _) = content.allocate_exact_size(Vec2::new(width, 18.0), Sense::hover());
         content.painter().text(
@@ -183,10 +198,20 @@ impl WaveBob {
             if enabled {
                 "Apply the selected effect as one undoable background edit."
             } else {
-                "Open a nonempty sample and finish any selection gesture to enable Apply."
+                "Select exactly one arrangement clip, or open a nonempty waveform sample. Finish the current gesture to enable Apply."
             },
         );
         if response.clicked()
+            && let Some(clip) = &clip
+        {
+            self.dispatch(Command::ApplyClipEffect(
+                wavebob::arrangement::ClipEffectParams {
+                    clip_id: clip.id.clone(),
+                    edit_revision_id: clip.edit_revision_id.clone(),
+                    effect: self.effect.clone(),
+                },
+            ));
+        } else if response.clicked()
             && let Some(target) = target
         {
             self.dispatch(Command::ApplyEffect(ApplyEffectParams {
@@ -230,6 +255,70 @@ impl WaveBob {
                 }
             }
         });
+        if let Some(clip) = clip {
+            content.add_space(16.0);
+            content.separator();
+            content.label(RichText::new("Clip source interval").strong().small());
+            content
+                .add(egui::Label::new(RichText::new(&clip.name).small().color(MUTED)).truncate());
+            let draft =
+                self.clip_trim_draft
+                    .get_or_insert_with(|| super::arranging::ClipTrimDraft {
+                        revision: clip.edit_revision_id.clone(),
+                        start: clip.source_start,
+                        end: clip.source_end,
+                    });
+            if draft.revision != clip.edit_revision_id {
+                draft.revision = clip.edit_revision_id.clone();
+                draft.start = clip.source_start;
+                draft.end = clip.source_end;
+            }
+            content.horizontal(|ui| {
+                ui.label("Start");
+                let response =
+                    ui.add(egui::DragValue::new(&mut draft.start).range(0..=clip.source_frames));
+                help.observe(
+                    &response,
+                    "Exact source frame at the clip's left edge. Press Trim to apply.",
+                );
+            });
+            content.horizontal(|ui| {
+                ui.label("End");
+                let response =
+                    ui.add(egui::DragValue::new(&mut draft.end).range(0..=clip.source_frames));
+                help.observe(
+                    &response,
+                    "Exclusive source frame at the clip's right edge. Press Trim to apply.",
+                );
+            });
+            let interval = (draft.start, draft.end);
+            let response = content.add_enabled(
+                self.arrangement_gesture.is_none(),
+                centered_button("Trim clip").min_size(Vec2::new(width, 26.0)),
+            );
+            help.observe(&response,"Apply exact source bounds and rebuild this clip's effects. Other instances and the original waveform remain unchanged.");
+            if response.clicked() {
+                self.dispatch(Command::TrimClip(wavebob::arrangement::TrimClipParams {
+                    clip_id: clip.id,
+                    edit_revision_id: clip.edit_revision_id,
+                    source_start: interval.0,
+                    source_end: interval.1,
+                }));
+            }
+            content.label(
+                RichText::new(format!(
+                    "Processing: {} {}",
+                    clip.effects.len(),
+                    if clip.effects.len() == 1 {
+                        "step"
+                    } else {
+                        "steps"
+                    }
+                ))
+                .small()
+                .color(MUTED),
+            );
+        }
         if let Some(document) = self.active_document()
             && document.overloaded_samples > 0
         {
