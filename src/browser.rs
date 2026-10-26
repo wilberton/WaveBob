@@ -149,7 +149,7 @@ impl Browser {
         if !supported(Path::new(&path)) {
             return Err(CommandError::new(
                 ErrorCode::UnsupportedFormat,
-                "Audition supports WAV and MP3 files",
+                "Audition supports WAV, MP3 and Ogg Vorbis files",
             ));
         }
         if self.decoders.load(Ordering::Acquire) >= 2 {
@@ -213,6 +213,12 @@ impl Browser {
         let id = self.state.audition.id.clone()?;
         Some((
             DocumentInfo {
+                processing: crate::processing::Processing::default(),
+                saved_processing: crate::processing::Processing::default(),
+                saved_effect_tempo: 120.0,
+                saved_render_identity: None,
+                save_channels: None,
+                tab_open: true,
                 id: id.clone(),
                 revision_id: id,
                 path: self.state.audition.path.clone()?,
@@ -280,9 +286,11 @@ fn invalid(message: &str) -> CommandError {
     CommandError::new(ErrorCode::InvalidParams, message)
 }
 pub(crate) fn supported(path: &Path) -> bool {
-    path.extension()
-        .and_then(|s| s.to_str())
-        .is_some_and(|s| s.eq_ignore_ascii_case("wav") || s.eq_ignore_ascii_case("mp3"))
+    path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
+        ["wav", "mp3", "ogg"]
+            .iter()
+            .any(|ext| s.eq_ignore_ascii_case(ext))
+    })
 }
 fn list(path: &Path) -> Result<Listing, CommandError> {
     let io = |error| {

@@ -7,6 +7,7 @@ pub const MAX_TIMELINE_FRAME: u64 = 48_000 * 60 * 60 * 24;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Arrangement {
+    pub effect_tempo: f64,
     pub id: String,
     pub revision_id: String,
     pub master_gain_db: f64,
@@ -23,6 +24,7 @@ impl Default for Arrangement {
     fn default() -> Self {
         let revision_id = uuid::Uuid::new_v4().to_string();
         Self {
+            effect_tempo: 120.0,
             id: uuid::Uuid::new_v4().to_string(),
             master_gain_db: 0.0,
             next_clip_order: 0,
@@ -46,6 +48,16 @@ impl Arrangement {
             .max()
             .unwrap_or(0)
     }
+    pub fn audible_frames(&self) -> u64 {
+        let solo = self.tracks.iter().any(|t| t.solo);
+        self.tracks
+            .iter()
+            .filter(|t| !t.mute && (!solo || t.solo))
+            .flat_map(|t| &t.clips)
+            .map(|c| c.position + c.frames + c.tail_frames)
+            .max()
+            .unwrap_or(0)
+    }
     pub fn clip(&self, id: &str) -> Option<(&Track, &Clip)> {
         self.tracks.iter().find_map(|track| {
             track
@@ -60,7 +72,9 @@ impl Arrangement {
             .iter()
             .flat_map(|track| &track.clips)
             .flat_map(|clip| {
-                std::iter::once(&clip.revision_id).chain(clip.processed_revision_id.iter())
+                std::iter::once(&clip.revision_id)
+                    .chain(clip.processed_revision_id.iter())
+                    .chain(clip.bounce.iter().map(|b| &b.audio_revision_id))
             })
     }
     pub(crate) fn validate(&self) -> Result<(), CommandError> {
@@ -113,6 +127,23 @@ pub struct Track {
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Clip {
+    /// Original requested bounds retained while a linked source is temporarily shorter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_range_intent: Option<FrameRange>,
+    /// Original envelope retained while source-derived geometry clamps its fades.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_intent: Option<crate::processing::Envelope>,
+    #[serde(default)]
+    pub bounce: Option<crate::bounces::Reference>,
+    #[serde(default)]
+    pub tail_frames: u64,
+    #[serde(default)]
+    pub tail_capped: bool,
+    pub processing: crate::processing::Processing,
+    #[serde(default)]
+    pub linked: bool,
+    #[serde(default)]
+    pub full_document: bool,
     pub id: String,
     pub name: String,
     pub document_id: String,
@@ -131,6 +162,32 @@ pub struct Clip {
     pub frames: u64,
 }
 impl Clip {
+    pub(crate) fn merge_envelope_intent(&mut self, next: &crate::processing::Envelope) {
+        if let Some(mut intent) = self.envelope_intent.clone() {
+            let old = &self.processing.envelope;
+            if next.gain_db != old.gain_db {
+                intent.gain_db = next.gain_db;
+            }
+            if next.fade_in_frames != old.fade_in_frames {
+                intent.fade_in_frames = next.fade_in_frames;
+            }
+            if next.fade_out_frames != old.fade_out_frames {
+                intent.fade_out_frames = next.fade_out_frames;
+            }
+            self.envelope_intent = (intent != *next).then_some(intent);
+        }
+    }
+    pub(crate) fn clamp_source_envelope(&mut self, body: u64) {
+        let intent = self
+            .envelope_intent
+            .clone()
+            .unwrap_or_else(|| self.processing.envelope.clone());
+        let mut effective = intent.clone();
+        effective.fade_in_frames = effective.fade_in_frames.min(body);
+        effective.fade_out_frames = effective.fade_out_frames.min(body);
+        self.envelope_intent = (intent != effective).then_some(intent);
+        self.processing.envelope = effective;
+    }
     /// Preserve the opposite edge in project time, using nearest-frame rounding.
     pub fn trimmed(&self, start: u64, end: u64, project_rate: u32) -> Result<Self, CommandError> {
         if start >= end || end > self.source_frames || self.source_rate == 0 || project_rate == 0 {
@@ -146,6 +203,13 @@ impl Clip {
         }
         let mut clip = self.clone();
         clip.position = position as u64;
+        clip.full_document = false;
+        clip.source_range_intent = None;
+        clip.envelope_intent = None;
+        clip.processing.envelope.fade_in_frames =
+            clip.processing.envelope.fade_in_frames.min(end - start);
+        clip.processing.envelope.fade_out_frames =
+            clip.processing.envelope.fade_out_frames.min(end - start);
         clip.source_start = start;
         clip.source_end = end;
         clip.frames =
@@ -190,6 +254,13 @@ pub struct InsertClipParams {
     pub revision_id: String,
     pub source_start: u64,
     pub source_end: u64,
+    pub position: u64,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DuplicateClipParams {
+    pub clip_id: String,
+    pub track_id: Option<String>,
     pub position: u64,
 }
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -274,10 +345,18 @@ impl CrossfadeRegion {
         match self.kind {
             CrossfadeKind::Staggered if frame == self.start => [1.0, 0.0],
             CrossfadeKind::Staggered if frame + 1 == self.end => [0.0, 1.0],
-            CrossfadeKind::Staggered => [
-                (t * std::f64::consts::FRAC_PI_2).cos(),
-                (t * std::f64::consts::FRAC_PI_2).sin(),
-            ],
+            CrossfadeKind::Staggered => {
+                if frame == self.start {
+                    [1.0, 0.0]
+                } else if frame + 1 == self.end {
+                    [0.0, 1.0]
+                } else {
+                    [
+                        (t * std::f64::consts::FRAC_PI_2).cos(),
+                        (t * std::f64::consts::FRAC_PI_2).sin(),
+                    ]
+                }
+            }
             CrossfadeKind::Contained => {
                 let (outer, inner) = if frame == self.start || frame + 1 == self.end {
                     (1.0, 0.0)

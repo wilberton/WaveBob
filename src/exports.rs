@@ -144,6 +144,8 @@ pub struct ExportParams {
     #[serde(default)]
     pub format: ExportFormat,
     pub sample_rate: Option<u32>,
+    /// Omit to preserve processed channels; 1 averages stereo, 2 duplicates mono.
+    pub channels: Option<u16>,
     #[serde(default)]
     pub overwrite: bool,
     #[serde(default)]
@@ -157,6 +159,8 @@ pub struct SaveParams {
     pub path: Option<String>,
     pub format: Option<SaveFormat>,
     pub sample_rate: Option<u32>,
+    /// Omit to preserve processed channels; 1 averages stereo, 2 duplicates mono.
+    pub channels: Option<u16>,
     #[serde(default)]
     pub overwrite: bool,
     #[serde(default)]
@@ -165,6 +169,9 @@ pub struct SaveParams {
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MixExportParams {
+    /// Extend the requested body end to the current contributing tail end.
+    #[serde(default)]
+    pub include_tail: bool,
     pub revision_id: String,
     pub start_frame: u64,
     pub end_frame: u64,
@@ -172,6 +179,8 @@ pub struct MixExportParams {
     #[serde(default)]
     pub format: ExportFormat,
     pub sample_rate: Option<u32>,
+    /// Omit to preserve processed channels; 1 averages stereo, 2 duplicates mono.
+    pub channels: Option<u16>,
     #[serde(default)]
     pub overwrite: bool,
     #[serde(default)]
@@ -181,6 +190,8 @@ pub struct MixExportParams {
 pub struct ExportSummary {
     pub path: String,
     pub source_revision_id: String,
+    pub render_identity: String,
+    pub render_metadata: Option<crate::rendering::RenderMetadata>,
     pub format: ExportFormat,
     pub source_rate: u32,
     pub sample_rate: u32,
@@ -229,6 +240,9 @@ pub(crate) struct OutputRequest {
     pub revision_id: String,
     pub format: ExportFormat,
     pub rate: u32,
+    pub channels: Option<u16>,
+    pub render_identity: String,
+    pub render_metadata: Option<crate::rendering::RenderMetadata>,
     pub overwrite: bool,
     pub overload: OverloadPolicy,
     pub protected_source: Option<String>,
@@ -248,14 +262,15 @@ pub(crate) fn prepare(
         ));
     }
     let rate = request.rate;
+    let channels = output_channels(request.channels, audio.channels)?;
     prepare_from(
         audio.rate,
-        audio.channels,
+        channels,
         range.clone(),
         request,
         cancel,
         progress,
-        |progress| audio::resample::convert(audio, &range, rate, audio.channels, cancel, progress),
+        |progress| audio::resample::convert(audio, &range, rate, channels, cancel, progress),
     )
 }
 pub(crate) fn prepare_mix(
@@ -271,22 +286,61 @@ pub(crate) fn prepare_mix(
         ));
     }
     let rate = request.rate;
+    let channels = output_channels(request.channels, 2)?;
+    if graph.streaming() && range.end - range.start > 64 * 1024 * 1024 {
+        return Err(CommandError::new(
+            ErrorCode::ResourceLimit,
+            "Streaming mix export exceeds the 512 MiB PCM interval limit",
+        ));
+    }
     prepare_from(
         graph.rate,
-        2,
+        channels,
         range.clone(),
         request,
         cancel,
         progress,
         |progress| {
+            let rendered = if graph.streaming() {
+                let mut stream = audio::mix::Stream::prepare(graph, range.start, None, || {
+                    cancel.load(Ordering::Acquire)
+                })?;
+                let mut pcm = Vec::with_capacity((range.end - range.start) as usize);
+                for frame in range.start..range.end {
+                    if frame.is_multiple_of(1024) && cancel.load(Ordering::Acquire) {
+                        return Err(CommandError::new(
+                            ErrorCode::Cancelled,
+                            "Mix export cancelled",
+                        ));
+                    }
+                    pcm.push(stream.values[0]);
+                    stream.advance(graph, 1);
+                }
+                Some(pcm)
+            } else {
+                None
+            };
             audio::resample::convert_from(
                 range.end - range.start,
                 graph.rate,
                 rate,
-                2,
+                channels,
                 cancel,
                 progress,
-                |frame| graph.frame(range.start + frame).map(|value| value as f64),
+                |frame| {
+                    let value = rendered
+                        .as_ref()
+                        .map_or_else(
+                            || graph.frame(range.start + frame),
+                            |pcm| pcm[frame as usize],
+                        )
+                        .map(f64::from);
+                    if channels == 1 {
+                        [(value[0] + value[1]) * 0.5; 2]
+                    } else {
+                        value
+                    }
+                },
             )
         },
     )
@@ -425,6 +479,8 @@ fn prepare_from(
         summary: ExportSummary {
             path,
             source_revision_id: request.revision_id,
+            render_identity: request.render_identity,
+            render_metadata: request.render_metadata,
             lossy: request.format.lossy(),
             format: request.format,
             source_rate,
@@ -509,4 +565,12 @@ pub(crate) fn check_cancel(cancel: &AtomicBool) -> Result<(), CommandError> {
     } else {
         Ok(())
     }
+}
+
+fn output_channels(requested: Option<u16>, current: u16) -> Result<u16, CommandError> {
+    let channels = requested.unwrap_or(current);
+    if !(1..=2).contains(&channels) {
+        return Err(invalid("Output channels must be 1 (mono) or 2 (stereo)"));
+    }
+    Ok(channels)
 }

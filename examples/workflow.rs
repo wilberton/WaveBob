@@ -1,4 +1,6 @@
 //! Repeatable public-command workflow. See docs/automation.md.
+#[path = "support/live_effects_workflow.rs"]
+mod live_effects_workflow;
 #[path = "support/workflow.rs"]
 mod workflow;
 
@@ -20,13 +22,27 @@ async fn main() {
         value("--runtime-dir").as_deref(),
     )
     .await;
-    let mut summary = workflow::run(
-        &mut adapter,
-        std::path::Path::new(&output),
-        args.iter().any(|arg| arg == "--audition"),
-    )
-    .await;
+    let mut summary = if args.iter().any(|arg| arg == "--live-effects") {
+        assert!(
+            !std::path::Path::new(&output).exists(),
+            "Use a new output directory"
+        );
+        live_effects_workflow::run(
+            &mut adapter,
+            std::path::Path::new(&output),
+            value("--attach").is_some(),
+        )
+        .await
+    } else {
+        workflow::run(
+            &mut adapter,
+            std::path::Path::new(&output),
+            args.iter().any(|arg| arg == "--audition"),
+        )
+        .await
+    };
     summary.as_object_mut().unwrap().remove("mixed_pcm");
+    summary.as_object_mut().unwrap().remove("samples");
     println!("{}", serde_json::to_string_pretty(&summary).unwrap());
     adapter.shutdown().await;
 }

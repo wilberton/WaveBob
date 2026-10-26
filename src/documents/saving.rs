@@ -7,7 +7,10 @@ pub(super) struct PendingOutput {
     document_id: String,
     base_revision: String,
     save: bool,
-    allow_stale: bool,
+    mix: bool,
+    render_identity: String,
+    processing: crate::processing::Processing,
+    tempo: f64,
     pub committing: bool,
     error: Option<CommandError>,
     pub worker: Option<std::thread::JoinHandle<()>>,
@@ -16,7 +19,10 @@ pub(super) struct OutputIdentity {
     pub document_id: String,
     pub base_revision: String,
     pub save: bool,
-    pub allow_stale: bool,
+    pub mix: bool,
+    pub render_identity: String,
+    pub processing: crate::processing::Processing,
+    pub tempo: f64,
 }
 impl Editor {
     pub(super) fn export_audio(
@@ -27,6 +33,15 @@ impl Editor {
     }
     pub(super) fn save_audio(&mut self, params: SaveParams) -> Result<CommandResult, CommandError> {
         let document = self.document(&params.document_id)?;
+        if document.encoding == "ogg_vorbis"
+            && document.save_format.is_none()
+            && params.path.is_none()
+        {
+            return Err(CommandError::new(
+                ErrorCode::InvalidParams,
+                "Saving Ogg audio requires an explicit WAV or MP3 Save As destination and encoding settings",
+            ));
+        }
         if params.path.is_none()
             && self.project_info().path.is_some()
             && std::path::Path::new(&document.path).is_relative()
@@ -43,7 +58,22 @@ impl Editor {
                 None
             }
         });
-        let format=params.format.clone().map(ExportFormat::from).or_else(||document.save_format.clone()).or_else(||ExportFormat::source_wav(&document.encoding)).ok_or_else(||CommandError::new(ErrorCode::InvalidParams,"Saving an MP3 requires explicit MP3 encoding settings; lossless WAV Save As is also available"))?;
+        let channels = params.channels.or_else(|| {
+            if params.format.is_none() {
+                document.save_channels
+            } else {
+                None
+            }
+        });
+        let format = params.format.clone().map(ExportFormat::from)
+            .or_else(|| document.save_format.clone())
+            .or_else(|| ExportFormat::source_wav(&document.encoding))
+            .ok_or_else(|| CommandError::new(ErrorCode::InvalidParams,
+                if document.encoding == "ogg_vorbis" {
+                    "Saving Ogg audio requires explicit WAV or MP3 encoding settings"
+                } else {
+                    "Saving an MP3 requires explicit MP3 encoding settings; lossless WAV Save As is also available"
+                }))?;
         if format.lossy() && params.format.is_none() {
             return Err(CommandError::new(
                 ErrorCode::InvalidParams,
@@ -59,6 +89,7 @@ impl Editor {
                 path: params.path.unwrap_or_else(|| document.path.clone()),
                 format,
                 sample_rate,
+                channels,
                 overwrite: params.overwrite,
                 overload: params.overload,
             },
@@ -72,6 +103,12 @@ impl Editor {
     ) -> Result<CommandResult, CommandError> {
         let (id, base) = params.target.ids();
         let (document, audio) = self.playback_audio(id)?;
+        if self.has_active_preview() {
+            return Err(CommandError::new(
+                ErrorCode::Busy,
+                "Commit or cancel processing previews before saving or exporting",
+            ));
+        }
         if document.revision_id != base {
             return Err(CommandError::new(
                 ErrorCode::StaleRevision,
@@ -80,11 +117,15 @@ impl Editor {
         }
         let range = params.target.range(audio.frames())?;
         let rate = params.format.output_rate(audio.rate, params.sample_rate)?;
+        let snapshot = self.processing_read(crate::processing::Owner::Document(id.into()))?;
         let identity = OutputIdentity {
             document_id: document.id,
             base_revision: document.revision_id.clone(),
             save,
-            allow_stale: false,
+            mix: false,
+            render_identity: snapshot.render_identity.clone(),
+            processing: snapshot.committed.clone(),
+            tempo: snapshot.effect_tempo,
         };
         let path = params.path.clone();
         let overwrite = params.overwrite;
@@ -93,6 +134,9 @@ impl Editor {
             revision_id: document.revision_id,
             format: params.format,
             rate,
+            channels: params.channels,
+            render_identity: snapshot.render_identity.clone(),
+            render_metadata: None,
             overwrite,
             overload: params.overload,
             protected_source: (!save).then_some(document.path),
@@ -108,7 +152,33 @@ impl Editor {
             path,
             if save { "Save" } else { "Export" },
             overwrite,
-            move |cancel, progress| exports::prepare(&audio, range, request, cancel, progress),
+            move |cancel, progress| {
+                let (rendered, mut metadata) = crate::rendering::offline_document_range(
+                    &audio,
+                    range.clone(),
+                    &snapshot.committed,
+                    snapshot.effect_tempo,
+                    cancel,
+                )?;
+                metadata.render_identity = snapshot.render_identity;
+                progress(25);
+                let mut request = request;
+                request.render_metadata = Some(metadata);
+                let mut prepared = exports::prepare(
+                    &rendered,
+                    FrameRange {
+                        start: 0,
+                        end: rendered.frames(),
+                    },
+                    request,
+                    cancel,
+                    |v| progress(25 + (v as u16 * 3 / 4) as u8),
+                )?;
+                prepared.summary.source_start_frame = range.start;
+                prepared.summary.source_end_frame = range.end;
+                prepared.summary.source_frames = range.end - range.start;
+                Ok(prepared)
+            },
         )
     }
     pub(super) fn launch_output(
@@ -160,7 +230,10 @@ impl Editor {
                 document_id: identity.document_id,
                 base_revision: identity.base_revision,
                 save: identity.save,
-                allow_stale: identity.allow_stale,
+                mix: identity.mix,
+                render_identity: identity.render_identity,
+                processing: identity.processing,
+                tempo: identity.tempo,
                 committing: false,
                 error: None,
                 worker: None,
@@ -223,14 +296,18 @@ impl Editor {
                 ErrorCode::Cancelled,
                 "Output cancelled before publication",
             ))
-        } else if !pending.allow_stale
-            && !self
-                .document(&pending.document_id)
-                .is_ok_and(|document| document.revision_id == pending.base_revision)
-        {
+        } else if if pending.mix {
+            self.audible_arrangement().revision_id != pending.render_identity
+        } else {
+            self.processing_read(crate::processing::Owner::Document(
+                pending.document_id.clone(),
+            ))
+            .ok()
+            .is_none_or(|state| state.render_identity != pending.render_identity)
+        } {
             Err(CommandError::new(
                 ErrorCode::StaleRevision,
-                "Audio changed before output publication",
+                "Sound changed before output publication",
             ))
         } else if pending.save && revision == u64::MAX {
             Err(CommandError::new(
@@ -277,7 +354,11 @@ impl Editor {
         {
             let mut after = document.clone();
             after.saved_revision_id = Some(pending.base_revision);
-            after.dirty = after.saved_revision_id.as_ref() != Some(&after.revision_id);
+            after.saved_processing = pending.processing;
+            after.saved_effect_tempo = pending.tempo;
+            after.saved_render_identity = Some(pending.render_identity);
+            after.save_channels = Some(summary.channels);
+            after.refresh_dirty(self.arrangement.effect_tempo);
             after.path = summary.path.clone();
             after.name = std::path::Path::new(&after.path)
                 .file_name()

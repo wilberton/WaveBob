@@ -2,8 +2,11 @@
 import argparse
 import hashlib
 import json
+import os
 import pathlib
+import shutil
 import subprocess
+import sys
 import time
 import zipfile
 
@@ -12,6 +15,8 @@ parser.add_argument("archive", type=pathlib.Path)
 parser.add_argument("--out", required=True, type=pathlib.Path)
 parser.add_argument("--gui", action="store_true")
 parser.add_argument("--audition", action="store_true")
+parser.add_argument("--ui-scale",type=float,default=1.0,help="Exercise native GUI rendering at this UI scale")
+parser.add_argument("--gl-runtime", type=pathlib.Path, help="Use an installed Windows Mesa runtime for CI GUI checks")
 args = parser.parse_args()
 assert not args.out.exists(), "Use a fresh smoke-test directory"
 args.out.mkdir(parents=True)
@@ -42,13 +47,34 @@ for name, info in manifest["binaries"].items():
     assert digest(path) == info["sha256"], name
 
 
+graphics_runtime = None
+if args.gl_runtime:
+    assert args.gui and os.name == "nt", "An external GL runtime is only supported for Windows GUI checks"
+    runtime = args.gl_runtime.resolve()
+    graphics_runtime = {"directory": str(runtime), "driver": "llvmpipe", "dll_sha256": {}}
+    for name in ["opengl32.dll", "libgallium_wgl.dll"]:
+        library = runtime / name
+        assert library.is_file(), f"Incomplete Mesa runtime: {library}"
+        shutil.copyfile(library, kit / "bin" / name)
+        graphics_runtime["dll_sha256"][name] = digest(library)
+    os.environ["PATH"] = str(runtime) + os.pathsep + os.environ.get("PATH", "")
+    os.environ["GALLIUM_DRIVER"] = "llvmpipe"
+    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "true"
+
+
 def executable(name):
     return str(kit / "bin" / (name + suffix))
 
 
 def command(*items, **kwargs):
-    return subprocess.run(items, check=True, capture_output=True, text=True,
-                          creationflags=creationflags, timeout=240, **kwargs)
+    result = subprocess.run(items, capture_output=True, text=True, encoding="utf-8",
+                            creationflags=creationflags, timeout=240, **kwargs)
+    if result.returncode:
+        print(result.stderr[-16000:], file=sys.stderr)
+        if result.stdout:
+            print(result.stdout[-16000:], file=sys.stderr)
+    result.check_returncode()
+    return result
 
 
 results = {}
@@ -71,9 +97,11 @@ if args.gui:
     print("Shipped GUI attachment and MCP screenshots", flush=True)
     runtime = args.out / "runtime"
     runtime.mkdir()
+    native_log = (args.out / "gui-native.log").open("wb")
     gui = subprocess.Popen([executable("wavebob"), "--hidden", "--name", "Release smoke",
+                            "--ui-scale",str(args.ui_scale),
                             "--runtime-dir", str(runtime), "--preferences", str(args.out / "layout.json")],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, creationflags=creationflags)
+                           stdout=subprocess.DEVNULL, stderr=native_log, creationflags=creationflags)
     try:
         deadline = time.monotonic() + 30
         while True:
@@ -89,6 +117,8 @@ if args.gui:
         if args.audition:
             items.append("--audition")
         results["gui"] = json.loads(command(*items).stdout)
+        for capture in results["gui"]["captures"]:
+            assert capture["metadata"]["scale"] >= args.ui_scale * 0.99
         request = json.dumps({"id": "smoke-quit", "command": "presentation.quit", "params": {}}) + "\n"
         closed = json.loads(command(executable("wavebob-headless"), "--attach", session,
                                     "--runtime-dir", str(runtime), input=request).stdout)
@@ -98,9 +128,11 @@ if args.gui:
         if gui.poll() is None:
             gui.kill()
             gui.wait()
-        gui.stderr.close()
+        native_log.close()
+        if gui.returncode:
+            print((args.out / "gui-native.log").read_text(encoding="utf-8", errors="replace")[-16000:])
 record = {"archive": str(args.archive.resolve()), "archive_sha256": archive_hash,
-          "build_commit": manifest["commit"], "host": manifest["host"], "results": results}
+          "build_commit": manifest["commit"], "host": manifest["host"], "ui_scale":args.ui_scale, "graphics_runtime": graphics_runtime, "results": results}
 (args.out / "smoke-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 print(json.dumps({"host": manifest["host"], "gui_checked": args.gui,
                   "result": str(args.out / "smoke-result.json")}, indent=2))

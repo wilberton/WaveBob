@@ -193,7 +193,7 @@ fn save_tracks_exact_revision_and_undo_redo_recompute_dirty_without_reencoding_w
     let doc = source(&mut s, d.path(), 48000, 1, "pcm16");
     let edit = ok(
         &mut s,
-        "effects.apply",
+        "edit.process",
         json!({"target":target(&doc),"effect":{"kind":"gain","db":-3.0}}),
     );
     let edited = wait(&mut s, &edit["id"])["result"].clone();
@@ -320,7 +320,7 @@ fn superseded_save_is_rejected_before_publication_and_never_cleans_a_newer_revis
     );
     let effect = ok(
         &mut s,
-        "effects.apply",
+        "edit.process",
         json!({"target":{"scope":"range","document_id":doc["id"],"revision_id":doc["revision_id"],"start_frame":0,"end_frame":100},"effect":{"kind":"reverse"}}),
     );
     let edited = wait(&mut s, &effect["id"]);

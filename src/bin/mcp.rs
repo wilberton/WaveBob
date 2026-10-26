@@ -41,10 +41,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let server = match attach {
-        Some(id) => McpServer::attach(&directory, &id)?,
+        Some(id) => McpServer::attach(&directory, &id).map_err(|error| {
+            io::Error::new(error.kind(), format!("MCP GUI attachment: {error}"))
+        })?,
         None => McpServer::headless()?,
     };
-    server.serve(stdio()).await?.waiting().await?;
+    server
+        .serve(stdio())
+        .await
+        .map_err(|error| io::Error::other(format!("MCP initialization: {error}")))?
+        .waiting()
+        .await?;
     Ok(())
 }
 

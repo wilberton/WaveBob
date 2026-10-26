@@ -84,6 +84,16 @@ pub(super) struct History {
     redo: Vec<Change>,
 }
 impl History {
+    pub fn push_document(&mut self, before: DocumentInfo, after: DocumentInfo, label: &str) {
+        self.undo.push(Change {
+            state: ChangeState::Document {
+                before: before.into(),
+                after: after.into(),
+            },
+            label: label.into(),
+        });
+        self.redo.clear();
+    }
     pub fn snapshot(&self) -> HistoryInfo {
         HistoryInfo {
             can_undo: !self.undo.is_empty(),
@@ -93,6 +103,22 @@ impl History {
             undo_count: self.undo.len(),
             redo_count: self.redo.len(),
         }
+    }
+    pub fn retains_linked_document(&self, id: &str) -> bool {
+        self.undo
+            .iter()
+            .chain(&self.redo)
+            .any(|change| match &change.state {
+                ChangeState::Arrangement { before, after } => {
+                    [before, after].into_iter().any(|a| {
+                        a.tracks
+                            .iter()
+                            .flat_map(|t| &t.clips)
+                            .any(|c| c.linked && c.document_id == id)
+                    })
+                }
+                _ => false,
+            })
     }
     pub fn remove_document(&mut self, id: &str) {
         let keep = |change: &Change| !matches!(&change.state,ChangeState::Document{before,..} if before.id==id);
@@ -117,6 +143,9 @@ impl History {
 }
 impl Editor {
     pub(super) fn retained_bytes(&self) -> u64 {
+        self.retained_with_graph(None)
+    }
+    pub(super) fn retained_with_graph(&self, extra: Option<&crate::audio::mix::Graph>) -> u64 {
         let mut seen = std::collections::BTreeSet::new();
         self.revisions
             .values()
@@ -127,6 +156,7 @@ impl Editor {
                     .map(|clipboard| &clipboard.audio.samples),
             )
             .chain(self.mix.iter().flat_map(|graph| graph.buffers()))
+            .chain(extra.into_iter().flat_map(|graph| graph.buffers()))
             .filter(|samples| seen.insert(samples.as_ptr() as usize))
             .map(|samples| samples.len() as u64 * 4)
             .sum()
@@ -152,6 +182,7 @@ impl Editor {
             }
         }
         retained.extend(self.arrangement.retained_revisions().cloned());
+        retained.extend(self.rendered.keys().cloned());
         self.revisions.retain(|id, _| retained.contains(id));
     }
     pub(super) fn apply_effect(
@@ -470,8 +501,13 @@ impl Editor {
             }
             let mut after = before.clone();
             after.revision_id = uuid::Uuid::new_v4().to_string();
+            after.processing.edit_revision_id = uuid::Uuid::new_v4().to_string();
             after.dirty = true;
             after.frames = audio.frames();
+            after.processing.envelope.fade_in_frames =
+                after.processing.envelope.fade_in_frames.min(after.frames);
+            after.processing.envelope.fade_out_frames =
+                after.processing.envelope.fade_out_frames.min(after.frames);
             after.peak_level = audio.peak_level;
             after.overloaded_samples = audio.overloaded_samples;
             pending.navigation.apply(&mut after);
@@ -550,9 +586,13 @@ impl Editor {
                 restored.path = current.path.clone();
                 restored.name = current.name.clone();
                 restored.saved_revision_id = current.saved_revision_id.clone();
+                restored.saved_processing = current.saved_processing.clone();
+                restored.saved_effect_tempo = current.saved_effect_tempo;
+                restored.saved_render_identity = current.saved_render_identity.clone();
+                restored.save_channels = current.save_channels;
                 restored.save_format = current.save_format.clone();
                 restored.save_sample_rate = current.save_sample_rate;
-                restored.dirty = restored.saved_revision_id.as_ref() != Some(&restored.revision_id);
+                restored.refresh_dirty(self.arrangement.effect_tempo);
                 *self
                     .documents
                     .iter_mut()
@@ -578,6 +618,9 @@ impl Editor {
                     .cloned()
                     .collect();
                 self.arrangement = restored;
+                for doc in &mut self.documents {
+                    doc.refresh_dirty(self.arrangement.effect_tempo);
+                }
             }
         }
         if redo {

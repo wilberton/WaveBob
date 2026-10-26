@@ -20,12 +20,19 @@ the contained-clip ID determines their envelope roles independently. For contain
 intervals of one or two frames, both voices share at 1/√2 because a discrete
 start/peak/end envelope requires at least three frames.
 
-At most two clips may be simultaneous on a track. Third-overlap insert, move or
+At most two clip bodies may be simultaneous on a track. Third-overlap insert, move or
 trim fails atomically with an explanation; use another track or move the clip.
 End boundaries are exclusive, so adjacent clips and adjacent overlap regions are
 valid. Source-rate `clips.samples` remains unchanged by geometry; project-rate
 `mix.samples`, live playback and arrangement export consume the derived envelopes.
 
-Paused arrangement edits do not start unnecessary mix-preparation jobs. Explicit
-offline preparation or play rebuilds the current mix. A seek made while resources
+The multitrack GUI prepares current linked bounces after edits. Explicit offline
+preparation, play and export use the same freshness barrier. A seek made while resources
 are preparing is retained until that graph is adopted.
+
+Audible tails have separate dashed extents and do not participate in body placement
+or overlap derivation. The final body-crossfade gain is held through a tail; an
+exact-zero boundary suppresses its voice/end. A separate64-concurrent-tail budget
+permits tails beyond the two-body rule. Current non-muted/soloed tails extend the
+non-loop end while loop bounds remain body bounds. Tail caps are reported. See
+[shared bounce evidence](verification/linked-bounces/README.md).

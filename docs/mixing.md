@@ -50,3 +50,12 @@ source, history, clipboard and prepared PCM share the existing 2 GiB budget.
 
 Two overlapping clips on a track use [automatic crossfade envelopes](crossfades.md).
 A third simultaneous clip is rejected atomically.
+
+Preparation freshness follows linked document source/processing/tempo dependencies
+as well as the arrangement edit revision. mix.get publishes separate required and
+prepared render identities; derived bounce/cache refresh is outside edit history.
+128 prepared clip voices and64 concurrent tail voices are admitted separately.
+Tails hold body-crossfade boundary gain and extend the contributing non-loop end;
+loop bounds remain body bounds. The protected512MiB bounce cache and2GiB retained
+PCM guard count unique buffers; bounded worker temporaries are separate. See
+[linked bounces](verification/linked-bounces/README.md) and [export](mix-export.md).

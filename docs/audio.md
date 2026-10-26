@@ -12,10 +12,19 @@ Supported encodings:
 | WAV signed PCM 16/24/32-bit | Source rate, mono/stereo | Float32, normalized by 2^(bits−1) |
 | WAV float32 | Source rate, mono/stereo | Finite values retained, including values outside ±1 |
 | MPEG Layer III MP3 | MPEG-1/2/2.5 rates, mono/stereo, CBR/VBR | Float32 with metadata-directed delay/padding removal |
+| Ogg Vorbis (`.ogg`) | Source rate, mono/stereo | Float32 with stream-directed delay/padding removal |
 
-WAV uses locked Hound 3.5.1. MP3 uses locked
+Open, external file drops and browser audition accept all three formats, including
+uppercase filename extensions. Headless and MCP use the same decoder as the GUI.
+Ogg support covers single Vorbis logical streams; other codecs (including Opus),
+chained/multiplexed streams and surround audio return `unsupported_format`.
+Ogg Save opens WAV Save As by default; automation supplies an explicit WAV/MP3
+destination and encoding. Ogg encoding is not offered. Project assets retain
+decoded audio losslessly and do not require the original Ogg file to reopen.
+
+WAV uses locked Hound 3.5.1. MP3 and Ogg Vorbis use locked
 [Symphonia 0.6.1](https://github.com/pdeljanov/Symphonia) with its MP3 and ID3
-features. Symphonia is pure Rust under MPL 2.0; no external codec executable,
+features plus its Ogg demuxer and Vorbis decoder. Symphonia is pure Rust under MPL 2.0; no external codec executable,
 runtime DLL download or audio output device is needed. Cargo.lock records all
 build inputs for desktop, GUI-free headless and MCP builds. Its
 [decoding guide](https://github.com/pdeljanov/Symphonia/blob/main/GETTING_STARTED.md)
@@ -35,6 +44,11 @@ handling from silently accepting a partial last frame. ID3 sizes follow the
 changes within one stream and unsupported channels are explicit errors. A stream
 cut exactly at a complete frame without duration metadata is indistinguishable
 from a shorter valid stream; no missing duration is invented.
+
+Ogg imports validate every page checksum, sequence, continuation and complete
+final page before decoding. Damaged or truncated streams fail rather than
+silently publishing recovered audio. Decoder output must preserve the declared
+frame count when available; the same cancellation and PCM resource limits apply.
 
 Jobs decode and build multiresolution extrema on worker threads. Only completed
 jobs publish a document/revision on the serialized command thread. Progress

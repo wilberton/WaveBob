@@ -46,9 +46,13 @@ impl Editor {
     }
     pub(super) fn document_in_project(&self, document: &DocumentInfo) -> bool {
         self.project.saved_key.as_ref().is_some_and(|key| {
-            key.documents
-                .iter()
-                .any(|doc| doc.id == document.id && doc.revision_id == document.revision_id)
+            key.documents.iter().any(|doc| {
+                doc.id == document.id
+                    && doc.revision_id == document.revision_id
+                    && doc.processing.same_sound(&document.processing)
+                    && (doc.processing.effects.is_empty()
+                        || key.effect_tempo == self.arrangement.effect_tempo)
+            })
         })
     }
     pub fn take_project_loop(&mut self) -> Option<bool> {
@@ -111,6 +115,12 @@ impl Editor {
         params: projects::SaveProjectParams,
         loop_enabled: bool,
     ) -> Result<CommandResult, CommandError> {
+        if self.has_active_preview() {
+            return Err(CommandError::new(
+                ErrorCode::Busy,
+                "Commit or cancel processing previews before saving a project",
+            ));
+        }
         let key = self.project_key();
         let revision_id = key.revision();
         if params
@@ -139,9 +149,12 @@ impl Editor {
                     .ok_or_else(|| not_found("audio revision"))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
-        let snapshot = storage::SaveSnapshot {
+        let inputs = self.mix_inputs()?;
+        let previous = self.mix.clone();
+        let mut snapshot = storage::SaveSnapshot {
             payload: projects::Payload {
                 loop_enabled,
+                processing_policy: projects::processing_policy(),
                 documents: self.documents.clone(),
                 active_document_id: self.active.clone(),
                 arrangement: self.arrangement.clone(),
@@ -149,6 +162,7 @@ impl Editor {
             },
             revisions,
             revision_id,
+            protected_roots: self.guarded_asset_roots(),
         };
         let (job, cancel) =
             self.start_project_job(params.path.clone(), "Save project", Operation::Save { key })?;
@@ -163,18 +177,56 @@ impl Editor {
                 }
             };
             let last = std::cell::Cell::new(255);
-            let result = storage::prepare_save(
-                snapshot,
-                &params.path,
-                params.overwrite,
-                &cancel,
-                |percent| {
-                    if last.replace(percent) != percent {
-                        let _ = sender.send(Event::Progress(id.clone(), percent));
+            let result = (|| {
+                let graph = audio::mix::prepare(
+                    &snapshot.payload.arrangement,
+                    inputs,
+                    previous,
+                    &cancel,
+                    |v| {
+                        let _ = sender.send(Event::Progress(id.clone(), v / 3));
                         notify();
+                    },
+                )?;
+                for clip in graph.refreshed_clips {
+                    if let Some(target) = snapshot
+                        .payload
+                        .arrangement
+                        .tracks
+                        .iter_mut()
+                        .flat_map(|t| &mut t.clips)
+                        .find(|c| c.id == clip.id)
+                    {
+                        *target = clip;
                     }
-                },
-            )
+                }
+                for asset in graph.bounces.values() {
+                    snapshot.revisions.insert(
+                        asset.reference.audio_revision_id.clone(),
+                        asset.audio.clone(),
+                    );
+                }
+                let required: std::collections::BTreeSet<_> = snapshot
+                    .payload
+                    .documents
+                    .iter()
+                    .map(|d| d.revision_id.clone())
+                    .chain(snapshot.payload.arrangement.retained_revisions().cloned())
+                    .collect();
+                snapshot.revisions.retain(|id, _| required.contains(id));
+                storage::prepare_save(
+                    snapshot,
+                    &params.path,
+                    params.overwrite,
+                    &cancel,
+                    |percent| {
+                        if last.replace(percent) != percent {
+                            let _ = sender.send(Event::Progress(id.clone(), percent));
+                            notify();
+                        }
+                    },
+                )
+            })()
             .and_then(|prepared| {
                 let (permit, approved) = mpsc::sync_channel(1);
                 sender
@@ -257,6 +309,7 @@ impl Editor {
             .jobs
             .get(&id)
             .is_some_and(|(job, _)| job.status == JobStatus::Running);
+        let current = self.project_key().revision();
         let Some(pending) = self.pending_projects.get_mut(&id) else {
             return;
         };
@@ -264,6 +317,12 @@ impl Editor {
             Some(CommandError::new(
                 ErrorCode::Cancelled,
                 "Project save cancelled before publication",
+            ))
+        } else if matches!(&pending.operation, Operation::Save { key } if key.revision() != current)
+        {
+            Some(CommandError::new(
+                ErrorCode::StaleRevision,
+                "Project changed before save publication",
             ))
         } else if revision == u64::MAX {
             Some(CommandError::new(

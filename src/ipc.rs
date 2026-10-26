@@ -92,9 +92,17 @@ fn write_frame(stream: &mut Stream, bytes: &[u8], deadline: Instant) -> io::Resu
         if Instant::now() >= deadline {
             return Err(io::ErrorKind::TimedOut.into());
         }
-        // Remain compatible with peers using the backend's default 512-byte
-        // buffers. Our Windows listener uses 64 KiB to avoid per-chunk stalls.
-        match stream.write(&remaining[..remaining.len().min(512)]) {
+        // Windows peers may use the backend's default 512-byte pipe buffers.
+        // Unix sockets accept bulk partial writes and wait for readiness using
+        // their socket timeout, avoiding sleep polling between buffer refills.
+        let chunk = if cfg!(windows) { 512 } else { 64 * 1024 };
+        #[cfg(unix)]
+        stream.set_send_timeout(Some(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .max(Duration::from_micros(1)),
+        ))?;
+        match stream.write(&remaining[..remaining.len().min(chunk)]) {
             // Windows byte-mode pipes may report a successful zero-byte write
             // when their nonblocking buffer is full. Retry under the deadline.
             Ok(0) if cfg!(windows) => thread::sleep(Duration::from_millis(2)),
@@ -136,15 +144,43 @@ fn read_frame(stream: &mut Stream, deadline: Instant) -> io::Result<Vec<u8>> {
                 thread::sleep(Duration::from_millis(2))
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error),
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("read reply after {} bytes: {error}", frame.len()),
+                ));
+            }
         }
     }
 }
 
+#[cfg(unix)]
+fn configure_reader(stream: &Stream, deadline: Instant) -> io::Result<()> {
+    // Darwin rejects setsockopt after peer shutdown, even when a complete reply
+    // remains buffered. Configure before sending the request and never change
+    // options between reads. Short readiness waits keep the absolute frame
+    // deadline bounded even when a peer sends only intermittent partial data.
+    stream.set_recv_timeout(Some(
+        deadline
+            .saturating_duration_since(Instant::now())
+            .clamp(Duration::from_micros(1), Duration::from_millis(100)),
+    ))
+}
+
 fn exchange(record: &Record, request: Option<String>, timeout: Duration) -> io::Result<Reply> {
     let deadline = Instant::now() + timeout;
-    let mut stream = Stream::connect(socket_name(&record.endpoint, record.namespaced)?)?;
-    stream.set_nonblocking(true)?;
+    let context = |step: &str, error: io::Error| {
+        io::Error::new(error.kind(), format!("GUI IPC {step}: {error}"))
+    };
+    let mut stream = Stream::connect(socket_name(&record.endpoint, record.namespaced)?)
+        .map_err(|error| context("connect", error))?;
+    // Unix sockets can wait for readiness under a kernel-enforced deadline.
+    // Windows named pipes retain the bounded nonblocking compatibility path.
+    stream
+        .set_nonblocking(cfg!(windows))
+        .map_err(|error| context("blocking mode", error))?;
+    #[cfg(unix)]
+    configure_reader(&stream, deadline).map_err(|error| context("receive configuration", error))?;
     let mut bytes = serde_json::to_vec(&Packet {
         session_id: record.info.session_id.clone(),
         token: record.token.clone(),
@@ -152,8 +188,10 @@ fn exchange(record: &Record, request: Option<String>, timeout: Duration) -> io::
         timeout_ms: timeout.as_millis() as u64,
     })?;
     bytes.push(b'\n');
-    write_frame(&mut stream, &bytes, deadline)?;
-    Ok(serde_json::from_slice(&read_frame(&mut stream, deadline)?)?)
+    write_frame(&mut stream, &bytes, deadline).map_err(|error| context("send", error))?;
+    Ok(serde_json::from_slice(
+        &read_frame(&mut stream, deadline).map_err(|error| context("receive", error))?,
+    )?)
 }
 
 /// List only live, authenticated endpoints. Never chooses a session for callers.
@@ -372,7 +410,11 @@ fn serve(
     sender: &mpsc::SyncSender<Incoming>,
     wake: &dyn Fn(),
 ) -> io::Result<()> {
-    stream.set_nonblocking(true)?;
+    // Unix sockets can wait for readiness under a kernel-enforced deadline.
+    // Windows named pipes retain the bounded nonblocking compatibility path.
+    stream.set_nonblocking(cfg!(windows))?;
+    #[cfg(unix)]
+    configure_reader(&stream, Instant::now() + Duration::from_secs(2))?;
     let packet: Packet = serde_json::from_slice(&read_frame(
         &mut stream,
         Instant::now() + Duration::from_secs(2),
@@ -452,12 +494,15 @@ mod tests {
             Server::start(directory.path(), &id, "large-reply".into(), || {}).unwrap();
         let client = Client::attach(directory.path(), &id).unwrap();
         let worker = thread::spawn(move || {
-            let incoming = incoming.recv_timeout(Duration::from_secs(2)).unwrap();
-            assert!(incoming.deadline > Instant::now());
-            let response =
-                crate::protocol::dispatch_line(&mut crate::Session::default(), &incoming.line);
-            assert!(serde_json::to_vec(&response).unwrap().len() > 64 * 1024);
-            incoming.reply.send(response).unwrap();
+            for _ in 0..2 {
+                let incoming = incoming.recv_timeout(Duration::from_secs(2)).unwrap();
+                assert!(incoming.deadline > Instant::now());
+                let mut response =
+                    crate::protocol::dispatch_line(&mut crate::Session::default(), &incoming.line);
+                response.session_id = id.clone();
+                assert!(serde_json::to_vec(&response).unwrap().len() > 64 * 1024);
+                incoming.reply.send(response).unwrap();
+            }
         });
         let response = exchange(
             &client.record,
@@ -469,6 +514,52 @@ mod tests {
             "Large response failed: {:?}",
             response.err()
         );
+        client
+            .call(r#"{"id":"mcp-startup","command":"session.capabilities"}"#)
+            .expect("The public MCP startup deadline must also accept the full schema");
         worker.join().unwrap();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod unix_deadline_tests {
+    use super::*;
+    #[test]
+    fn a_complete_buffered_reply_survives_peer_shutdown_before_readback() {
+        let (stream, mut writer) = std::os::unix::net::UnixStream::pair().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let mut stream = Stream::from(interprocess::os::unix::uds_local_socket::Stream::from(
+            stream,
+        ));
+        writer.write_all(&[b'x'; 1024]).unwrap();
+        writer.write_all(b"\n").unwrap();
+        writer.shutdown(std::net::Shutdown::Both).unwrap();
+        drop(writer);
+        let reply = read_frame(&mut stream, Instant::now() + Duration::from_millis(500)).unwrap();
+        assert_eq!(reply, vec![b'x'; 1024]);
+    }
+    #[test]
+    fn stalled_unix_peer_cannot_block_frame_reads_or_writes_indefinitely() {
+        let (stream, _unread_peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut stream = Stream::from(interprocess::os::unix::uds_local_socket::Stream::from(
+            stream,
+        ));
+        stream.set_nonblocking(false).unwrap();
+        let start = Instant::now();
+        configure_reader(&stream, start + Duration::from_millis(40)).unwrap();
+        let error = read_frame(&mut stream, start + Duration::from_millis(40)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        let start = Instant::now();
+        let error = write_frame(
+            &mut stream,
+            &vec![b'a'; MAX_FRAME],
+            start + Duration::from_millis(40),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(1));
     }
 }

@@ -1,0 +1,8 @@
+#[path="@ROOT@/crates/os-engine/src/effects/dynamics.rs"] mod dynamics;
+fn main(){
+    let args:Vec<_>=std::env::args().collect();let bytes=std::fs::read(&args[1]).unwrap();let v:Vec<i32>=args[5].split(',').map(|v|v.parse().unwrap()).collect();
+    let mut effect=dynamics::Dynamics::new(args[3].parse().unwrap(),v.try_into().unwrap(),args[4].parse().unwrap());let latency=effect.latency();println!("{latency}");
+    let mut samples:Vec<_>=bytes.chunks_exact(4).map(|b|f32::from_le_bytes(b.try_into().unwrap())).collect();samples.resize(samples.len()+latency*2,0.0);
+    for frame in samples.chunks_exact_mut(2){let mut l=[frame[0]];let mut r=[frame[1]];effect.process(&mut l,&mut r,None);frame[0]=l[0];frame[1]=r[0];}
+    let out:Vec<_>=samples.into_iter().flat_map(|v|v.to_le_bytes()).collect();std::fs::write(&args[2],out).unwrap();
+}

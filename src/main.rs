@@ -82,12 +82,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Box::new(move |cc| {
             cc.egui_ctx.set_zoom_factor(ui_scale);
-            Ok(Box::new(app::WaveBob::new(
+            Ok(Box::new(app::DesktopApp::new(app::WaveBob::new(
                 cc,
                 &directory,
                 name,
                 preferences,
-            )?))
+            )?)))
         }),
     )?;
     Ok(())

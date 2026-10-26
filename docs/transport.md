@@ -38,3 +38,14 @@ area. `transport.output.retry` reopens the default device off the UI thread.
 Playback never resumes automatically after a device error. Native dependencies
 are CPAL's platform backends (Windows WASAPI, macOS CoreAudio, Linux ALSA); Linux
 builds need ALSA development headers. No codec executable is used for playback.
+
+Live document/clip processing precedes resampling, with compatible continuous
+control slew, prepared20ms topology transitions and worker-side bounded context.
+transport.get.processing reports requested/applied processing generations,
+preparation errors, latency and active/capped tails. Pause preserves DSP state;
+loop wrap reuses state and body bounds. A reset offline render does not reproduce
+accumulated loop history or transient live smoothing. Multitrack mode entry pauses
+and resolves unfinished previews, then requests current shared bounces. Play/export
+also enforce freshness in the core. Mix edit revisions and required/prepared audible
+render identities are distinct. [Renderer](processing-renderer.md) and
+[final measurements](verification/live-effects-workflow/README.md).

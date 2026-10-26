@@ -1,0 +1,28 @@
+// Copyright (C) 2026 ItsAlphaNeon (included reference DSP)
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Isolated adapter compiling original pinned files unchanged.
+#![allow(dead_code)]
+mod engine {
+    pub trait Effect { fn process(&mut self, samples:&mut [f32]); fn reset(&mut self); fn latency(&self)->usize {0} }
+    #[path="@WORK@/engine/eq/mod.rs"] pub mod eq;
+}
+fn main() {
+    use engine::eq;
+    let args:Vec<_>=std::env::args().collect();
+    let rate:f64=args[3].parse().unwrap();
+    let params:Vec<i32>=args[5].split(',').map(|v|v.parse().unwrap()).collect();
+    let params:[i32;36]=params.try_into().unwrap();
+    let mask:u8=args[4].parse().unwrap();
+    let mut equalizer=eq::Equalizer::new(rate,&params,eq::Options {mask,..Default::default()});
+    equalizer.preroll();
+    let bytes=std::fs::read(&args[1]).unwrap();
+    let input:Vec<_>=bytes.chunks_exact(4).map(|b|f32::from_le_bytes(b.try_into().unwrap())).collect();
+    let mut left:Vec<_>=input.chunks_exact(2).map(|v|v[0]).collect();
+    let mut right:Vec<_>=input.chunks_exact(2).map(|v|v[1]).collect();
+    for (left,right) in left.chunks_mut(64).zip(right.chunks_mut(64)) {equalizer.process(left,right);}
+    let output:Vec<_>=left.into_iter().zip(right).flat_map(|(l,r)|[l,r]).flat_map(f32::to_le_bytes).collect();
+    std::fs::write(&args[2],output).unwrap();
+    let bands=std::array::from_fn(|k|eq::Band {db:params[k] as f64/100.0,freq:params[7+k] as f64/65536.0,width:params[14+k] as f64/65536.0,kind:params[21+k],order:params[28+k]});
+    let settings=eq::Settings {bands,main_db:params[35] as f64/100.0,mask};
+    for index in 0..128 {let hz=20.0*1000.0_f64.powf(index as f64/127.0);println!("{hz},{}",settings.response_db(hz,eq::Design::Ordinary(rate)));}
+}

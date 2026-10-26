@@ -1,0 +1,49 @@
+{
+  "generator": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+  "fixtures": [
+    {
+      "name": "vorbis-1ch-22050",
+      "channels": 1,
+      "sample_rate": 22050,
+      "source_frames": 8192,
+      "decoded_frames": 8192,
+      "decoder_delay_frames": 256,
+      "decoder_padding_frames": 128,
+      "ogg_sha256": "2b946db12711c4227b3a150aaae89c5245cb7e554af2d13d1010291a6272558f",
+      "reference_sha256": "779483b42fe0ed541c95b43006b3211ac43868bf5068fa3214b7b0cc4dbc2173"
+    },
+    {
+      "name": "vorbis-1ch-44100",
+      "channels": 1,
+      "sample_rate": 44100,
+      "source_frames": 8192,
+      "decoded_frames": 8192,
+      "decoder_delay_frames": 128,
+      "decoder_padding_frames": 192,
+      "ogg_sha256": "4e383e8546e36e1063008a9393e7d15ea53466f2cb59ad3bab001e91b81edd16",
+      "reference_sha256": "243081a591d702ce7bb89f87f18022403110b345a805c28f813f6601dc5a87fc"
+    },
+    {
+      "name": "vorbis-2ch-48000",
+      "channels": 2,
+      "sample_rate": 48000,
+      "source_frames": 8192,
+      "decoded_frames": 8192,
+      "decoder_delay_frames": 128,
+      "decoder_padding_frames": 192,
+      "ogg_sha256": "a4d16ae175f5140489985a273b6edf9cbe82f1c32d253142a9bab785a6f19288",
+      "reference_sha256": "c15e481e761f30a9a5afa84e5d838b42544417100f750b82e4c322958b2166a3"
+    },
+    {
+      "name": "vorbis-6ch-48000",
+      "channels": 6,
+      "sample_rate": 48000,
+      "source_frames": 8192,
+      "decoded_frames": 8192,
+      "decoder_delay_frames": 128,
+      "decoder_padding_frames": 192,
+      "ogg_sha256": "e5a0214957496f4752d485c2a83e0a9bd5c79408067f7603f7e88040fe9490e2",
+      "reference_sha256": "cde56dd0798b9f7514d0a023263b1e0b9d138b1fada94883d322e2b65362c726"
+    }
+  ]
+}

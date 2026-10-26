@@ -55,9 +55,9 @@ do not modify the normal user profile.
 
 The status strip sits at the absolute bottom across the whole client width, below
 the centered transport. State readouts and contextual help have separate regions.
-Until real audio is implemented, waveform mode reports no document, an unavailable
-cursor and no selection; arrangement mode reports an empty arrangement, no selection
-and zero selected clips. Labelled synthetic previews never supply fabricated times.
+Waveform mode reports the actual source cursor/selection; arrangement mode reports
+its timeline cursor/selection and selected clip count. Empty states show no document
+or selection. Readouts never fabricate source times.
 
 Hover help takes precedence over keyboard-focus help. Moving away, leaving the
 window or removing a control clears stale help. Disabled controls explain why
@@ -66,7 +66,7 @@ before the state readout; save progress and persistent errors have separate spac
 
 Backtick and slash (loop) run on fresh, unmodified presses. Text editing, native
 loss of focus, open popups and modals suppress shortcuts; ordinary button focus
-does not. Playback and rewind remain disabled until their audio milestone.
+does not. Playback controls depend on available output state; device errors remain visible.
 
 The common shell follows the accepted mockup's dark surfaces, fine borders,
 compact typography, blue controls and centered tabs/transport. Full waveform/clip

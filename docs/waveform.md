@@ -68,3 +68,12 @@ Global selection shortcuts respect text editing, menus/modals, native dialogs,
 focus loss and repeated keys. Capture freezes gesture updates while framebuffer
 readback is pending. A capture of an active preview reports
 `waveform-gesture-preview` in `pending_resources`.
+
+Gain/fade handles edit a nondestructive document envelope through one preview and
+one commit. Exact values remain available through Gain and fades. The waveform
+shows source PCM shaped by that envelope; native effect editors own ordered DSP
+parameters separately. Save/export renders the current stack and tail while keeping
+editable PCM intact. A project stores both editable sources and current lossless
+arrangement bounces. Trimmed links preserve full-document envelope anchors; clip
+envelopes use their own solid-body coordinates. [Envelope controls](envelope-controls.md),
+[processed output](export.md) and [final native captures](verification/live-effects-workflow/README.md).

@@ -17,3 +17,12 @@ padding; no silence is guessed away. Tests compare every sample against the
 independent decoder (maximum error <0.002, RMSE <0.0001), and separately reject
 corrupt/truncated input. PCM equality between lossy source and original signal
 is not expected.
+
+Ogg fixtures use owned mono/stereo Vorbis at 22.05, 44.1 and 48 kHz plus a
+six-channel rejection case. Regenerate with `scripts/generate-ogg-fixtures.py
+--ffmpeg PATH_TO_FFMPEG`. `ogg-manifest.json` records hashes and frame counts.
+The independent FFmpeg reference uses `-flags2 +skip_manual`, removes the initial
+lapped half-block and keeps the known source duration. FFmpeg's automatic skip
+otherwise drops a short final block on these streams. Tests compare all 8192
+frames (maximum PCM error <0.0001) and check malformed pages, truncation, unsupported
+codecs/layouts, cancellation, lossless Save As and adapter parity.

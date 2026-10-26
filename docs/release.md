@@ -15,11 +15,14 @@ bundled; neither FFmpeg nor a user-installed LAME is needed. Native playback use
 the default audio device and reports failure/retry without preventing editing.
 
 macOS builds need the system window/audio frameworks and an OpenGL-capable desktop.
-Linux GUI builds use X11 or Wayland, OpenGL and ALSA. The Debian/Ubuntu native build
+Linux GUI builds use X11 or Wayland, OpenGL and ALSA. X11 also needs the
+`libxkbcommon-x11` runtime (`libxkbcommon-x11-0` on Debian/Ubuntu); the documented
+build package `libxkbcommon-x11-dev` installs it. The Debian/Ubuntu native build
 packages are in the root README. Prepared release CI uses Windows x86-64,
 macOS ARM64 and Linux x86-64 native runners; host identity is recorded by rustc.
 No macOS/Linux binary or X11/Wayland execution is claimed locally. Cross-platform
-CI and native desktop verification remain pending.
+Baseline three-platform CI/native verification is recorded under ticket21; latest
+live-effects work follows the local Windows policy recorded below.
 
 ## Build and package
 
@@ -76,8 +79,7 @@ example from an extracted Windows kit:
 ```
 
 The GitHub Actions release workflow runs this packaging on all three native
-hosts when manually dispatched, and uploads the ZIP plus checksum. A successful
-workflow run has not yet been verified. Signing, notarization,
+hosts when manually dispatched, and uploads the ZIP plus checksum. Baseline successful workflow runs are recorded under ticket21. Signing, notarization,
 installers, auto-updates and public publishing are deferred.
 
 ## Offline rebuilding and encoder relinking
@@ -112,15 +114,32 @@ The application is licensed under [GNU GPL v3](../LICENSE). The bundled
 third-party source/license texts retain their own terms; this document does not
 replace them.
 
+## Current live-processing build
+
+The source includes owner-scoped streaming processing and all eleven verified
+processors: Soft Clipper, Reverb, Parametric EQ, Distortion, Delay, Chorus,
+Limiter, Balance, Stereo Enhancer, Stereo Shaper and Transient Processor. Each
+has a separate native editor; document/clip gain/fade controls remain independent.
+These builds retain the baseline WAV/MP3 workflows. Live document/clip processing renders into current shared lossless bounces and
+processed WAV/MP3 exports. Schema2 projects retain editable sources, stacks, trim
+intent, tempo, policy and current bounce assets. Browser audition remains dry. See
+[live processing](live-processing.md) and [envelope controls](envelope-controls.md).
+
+The earlier Windows kit and its original verification describe the baseline
+commit recorded in its manifest. New kits have a separate output directory and
+record their exact source commit; they do not replace that historical evidence.
+
 ## Known limits
 
-- Native macOS/Linux, physical trackpad and subjective audio acceptance remain
+- Latest native macOS/Linux, physical trackpad and subjective audio acceptance remain
   deferred. Windows UI, native callback, file/path, scale and MCP capture checks
   are recorded under `docs/verification/`.
 - Editing accepts mono/stereo WAV and MP3. MP3 export offers CBR 128/192/256/320
   kbit/s at 32/44.1/48 kHz. Project audio stays lossless.
-- Reverb tails are bounded to the explicit editing/clip/range interval. At most
-  two clips overlap simultaneously per track; a third is rejected.
+- Legacy source reverb is bounded to the explicit editing/clip/range interval.
+  Live processors use the documented renderer tail policy; linked tail geometry
+  and wet export are delivered. At most two clip bodies overlap per track;
+  a separate64-concurrent-tail budget preserves late sound without timeline ripple.
 - Managed project assets are append-only; keep the manifest and assets together.
   Undo history and clipboard do not survive reopen. Memory budgets are 512 MiB
   per decoded/processed audio and 2 GiB retained PCM; arbitrarily large streaming
@@ -128,3 +147,16 @@ replace them.
 - The bundled font lacks some CJK glyphs, although Unicode native paths and
   persistence work. Desktop output uses the default device; device selection,
   plugin hosting, recording and MIDI are outside this release.
+
+Latest local live-effects verification follows the user's explicit policy: focused
+checks per ticket, full local suites at the end, no further GitHub Linux/macOS
+runs. Historical ticket21 three-platform release/native evidence remains valid for
+its recorded commits; it does not establish latest-effects platform coverage.
+Windows local package/smoke and measured manual-clock callback evidence are recorded
+[here](verification/live-effects-workflow/README.md). Physical listening, trackpads,
+other-device behavior and latest macOS/Linux/X11/Wayland execution are unverified.Development reference modules/FFmpeg are absent from production runtime dependencies; 
+all codecs and eleven WaveBob processors are built in.
+
+Final local kit: `dist/live-effects-final-9bcf87f/WaveBob-0.1.0-x86_64-pc-windows-msvc.zip`
+(implementation commit9bcf87f). Extracted direct/headless/MCP/GUI and all-eleven-effect
+public-seam smoke checks pass. [Build, checksum, smoke and timing evidence](verification/live-effects-workflow/README.md).

@@ -5,10 +5,11 @@ multitrack arranging, and a shared command interface for GUI, headless, and MCP 
 
 ![WaveBob editing a stereo waveform](docs/verification/ticket21/waveform.png)
 
-- Import and export WAV and MP3, including drag-and-drop import.
+- Import WAV, MP3 and Ogg Vorbis, including drag-and-drop; export WAV and MP3.
 - Cut, copy, paste, trim, apply gain, fades, reverse, and reverb, with undo/redo.
 - Arrange clips across tracks with automatic crossfades, mixing, and audio export.
-- Save portable projects with lossless audio assets.
+- Edit eleven live effect stacks in native windows, with nondestructive gain/fades.
+- Share linked document bounces, preserve clip tails, and save portable editable projects.
 - Automate edits and capture the running GUI through JSON commands or MCP.
 
 ## Build and run
@@ -18,7 +19,7 @@ MSVC C++ build tools and Windows SDK on Windows, Xcode command line tools on mac
 or the following packages on Debian/Ubuntu:
 
 ```sh
-sudo apt-get install build-essential pkg-config libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libasound2-dev
+sudo apt-get install build-essential pkg-config libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev libasound2-dev
 ```
 
 ```sh
@@ -27,8 +28,9 @@ cd WaveBob
 cargo run --locked
 ```
 
-Windows builds have been verified locally. Native macOS and Linux verification
-is pending; the repository includes CI for all three platforms.
+Windows live-effects builds are verified locally. Earlier baseline release checks
+passed on macOS/Linux; the latest effects changes have no further GitHub platform
+runs under the requested local-test policy. See [final verification](docs/verification/live-effects-workflow/README.md).
 
 ## Automation and development
 

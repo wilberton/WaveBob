@@ -105,14 +105,22 @@ fn load(path: &Path) -> io::Result<PanelLayout> {
     if bytes.len() > 64 * 1024 {
         return Err(io::Error::other("Layout preferences exceed 64 KiB"));
     }
-    let document: Document = serde_json::from_slice(&bytes)?;
-    if document.version != 1 {
+    let mut document: Document = serde_json::from_slice(&bytes)?;
+    if !matches!(document.version, 1 | 2) {
         return Err(io::Error::other("Unsupported layout preference version"));
     }
     document
         .layout
         .validate()
         .map_err(|error| io::Error::other(error.message))?;
+    if document.version == 1 {
+        // Version 2 compacts the effect compositions. Apply this only while
+        // loading old preferences, never to live geometry commands/user resizes.
+        for geometry in document.layout.editor_geometry.values_mut() {
+            geometry.width = (geometry.width * 0.75).max(320.0);
+            geometry.height = (geometry.height * 0.75).max(240.0);
+        }
+    }
     Ok(document.layout)
 }
 
@@ -123,8 +131,48 @@ fn save(path: &Path, layout: PanelLayout) -> io::Result<()> {
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    serde_json::to_writer(temporary.as_file_mut(), &Document { version: 1, layout })?;
+    serde_json::to_writer(temporary.as_file_mut(), &Document { version: 2, layout })?;
     temporary.as_file_mut().flush()?;
     temporary.persist(path).map_err(|error| error.error)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presentation::WindowGeometry;
+
+    #[test]
+    fn old_effect_window_sizes_compact_once_and_preserve_positions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        let mut layout = PanelLayout::default();
+        layout.editor_geometry.insert(
+            "old".into(),
+            WindowGeometry {
+                width: 850.0,
+                height: 530.0,
+                x: Some(-900.0),
+                y: Some(120.0),
+            },
+        );
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&Document { version: 1, layout }).unwrap(),
+        )
+        .unwrap();
+        let mut loaded = load(&path).unwrap();
+        let geometry = &loaded.editor_geometry["old"];
+        assert_eq!((geometry.width, geometry.height), (637.5, 397.5));
+        assert_eq!((geometry.x, geometry.y), (Some(-900.0), Some(120.0)));
+        save(&path, loaded.clone()).unwrap();
+        assert_eq!(load(&path).unwrap(), loaded);
+        loaded.editor_geometry.get_mut("old").unwrap().width = 900.0;
+        save(&path, loaded.clone()).unwrap();
+        assert_eq!(
+            load(&path).unwrap(),
+            loaded,
+            "Subsequent user resizing must persist unchanged"
+        );
+    }
 }

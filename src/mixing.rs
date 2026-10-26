@@ -26,6 +26,7 @@ pub struct MasterGainParams {
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct MixPrepared {
+    pub render_identity: String,
     pub revision_id: String,
     pub frames: u64,
     pub sample_rate: u32,
@@ -39,6 +40,10 @@ pub struct EffectiveTrack {
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct MixState {
+    pub required_render_identity: String,
+    pub prepared_render_identity: Option<String>,
+    pub bounce_cache_bytes: u64,
+    pub bounce_cache_entries: usize,
     pub arrangement_id: String,
     pub revision_id: String,
     pub prepared_revision_id: Option<String>,
@@ -52,6 +57,7 @@ pub struct MixState {
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct MixSamples {
+    pub render_identity: String,
     pub revision_id: String,
     pub sample_rate: u32,
     pub start_frame: u64,

@@ -75,6 +75,7 @@ with tempfile.TemporaryDirectory(prefix=".wavebob-release-", dir=args.output) as
                "This includes cross-platform, build and example-client dependencies; not every package is linked into each executable.",
                "LAME 3.100 and mp3lame-sys 0.1.11 are statically linked. See source/docs/mp3-encoder.md and source/docs/release.md for relinking.",
                "Inter is bundled under its OFL notice in source/assets/fonts/. Rust library source/notices are in source/toolchain-rust-library/.",
+               "Built-in effect algorithms include adaptations from third-party sources, Copyright (C)2026 ItsAlphaNeon, GPL-3.0-or-later. See source/assets/licenses/ and source/docs/verification/ for the pinned source commit, notices and measured adaptations.",
                "\n| Package | Version | Declared license | Source |", "| --- | --- | --- | --- |"]
     for package in packages:
         notices.append(f"| {package['name']} | {package['version']} | {package['license']} | {package['source']} |")
@@ -108,9 +109,9 @@ retrieval and source/docs/automation.md for the reproducible editing example.
 
 Keep this kit's source, dependency sources and notices with the executables.
 It includes full application and encoder source and offline rebuilding/relinking
-instructions. Application licensing for public redistribution is not selected;
-this kit is for the user's local development/review. Third-party licenses remain
-in their original sources. Signing, installers and automatic updates are deferred.
+instructions. WaveBob is licensed under GNU GPL v3; see source/LICENSE.
+Third-party licenses and effect-source provenance remain in their original
+sources. Signing, installers and automatic updates are deferred.
 """
     # ZipInfo preserves executable mode on Unix; ZipFile uses Zip64 when needed.
     staged_archive = temporary / archive.name

@@ -1,0 +1,31 @@
+--- a/src/native/glow_integration.rs
++++ b/src/native/glow_integration.rs
+@@ -677,11 +677,11 @@
+ 
+             // A hidden window is not painted, since nothing would be shown — unless someone
+             // wants the pixels anyway, e.g. to screenshot an app that is in the background:
+-            let is_visible = viewport.info.visible().unwrap_or(true)
+-                || viewport
+-                    .actions_requested
+-                    .iter()
+-                    .any(egui_winit::ActionRequested::wants_paint);
++            let paint_requested = viewport
++                .actions_requested
++                .iter()
++                .any(egui_winit::ActionRequested::wants_paint);
++            let is_visible = viewport.info.visible().unwrap_or(true) || paint_requested;
+ 
+             let Some(egui_winit) = viewport.egui_winit.as_mut() else {
+                 return Ok(EventResult::Wait);
+@@ -689,7 +689,10 @@
+             let mut raw_input = egui_winit.take_egui_input(window);
+             let viewport_ui_cb = viewport.viewport_ui_cb.clone();
+ 
+-            let show_ui = mode == PassMode::Full
++            // An overdue native redraw can be delivered as LogicOnly while a
++            // hidden Win32 window never receives WM_PAINT. Explicit screenshot
++            // and PaintWhileHidden requests still require a real painted frame.
++            let show_ui = (mode == PassMode::Full || paint_requested)
+                 && (is_visible
+                     || is_viewport_or_descendant_visible(&glutin.viewports, viewport_id));
+ 

@@ -55,6 +55,71 @@ fn clip_rect(clip: &Clip, lane: Rect, view: &FrameRange) -> Rect {
     )
 }
 impl WaveBob {
+    fn clip_source_inspector(&mut self, ui: &mut egui::Ui, clip: &Clip, help: &mut Help) {
+        ui.label(if clip.linked {
+            "Linked document source"
+        } else {
+            "Independent source snapshot"
+        });
+        if clip.linked {
+            if ui.button("Make independent").clicked() {
+                self.dispatch(Command::MakeClipIndependent(
+                    wavebob::processing::DetachParams {
+                        owner: wavebob::processing::Owner::Clip(clip.id.clone()),
+                        keep_prior_source: false,
+                    },
+                ));
+                ui.close();
+            }
+            if self.host.mix().preparation_error.is_some()
+                && ui.button("Keep prior source and detach").clicked()
+            {
+                self.dispatch(Command::MakeClipIndependent(
+                    wavebob::processing::DetachParams {
+                        owner: wavebob::processing::Owner::Clip(clip.id.clone()),
+                        keep_prior_source: true,
+                    },
+                ));
+                ui.close();
+            }
+        }
+        let draft = self.clip_trim_draft.get_or_insert_with(|| ClipTrimDraft {
+            revision: clip.edit_revision_id.clone(),
+            start: clip.source_start,
+            end: clip.source_end,
+        });
+        if draft.revision != clip.edit_revision_id {
+            *draft = ClipTrimDraft {
+                revision: clip.edit_revision_id.clone(),
+                start: clip.source_start,
+                end: clip.source_end,
+            };
+        }
+        ui.label("Source interval (frames)");
+        ui.horizontal(|ui| {
+            ui.label("Start");
+            ui.add(egui::DragValue::new(&mut draft.start).range(0..=clip.source_frames));
+        });
+        ui.horizontal(|ui| {
+            ui.label("End");
+            ui.add(egui::DragValue::new(&mut draft.end).range(0..=clip.source_frames));
+        });
+        let interval = (draft.start, draft.end);
+        let trim = ui.button("Trim clip");
+        help.observe(
+            &trim,
+            "Set exact source bounds for this clip as one undoable edit.",
+        );
+        if trim.clicked() {
+            self.dispatch(Command::TrimClip(TrimClipParams {
+                clip_id: clip.id.clone(),
+                edit_revision_id: clip.edit_revision_id.clone(),
+                source_start: interval.0,
+                source_end: interval.1,
+            }));
+            ui.close();
+        }
+    }
     fn timeline_view(&mut self, view: FrameRange) {
         self.dispatch(Command::SetTimelineViewport(TimelineViewportParams {
             start_frame: view.start,
@@ -99,6 +164,7 @@ impl WaveBob {
         }
         ui.horizontal(|ui| {
             ui.label(RichText::new(if arrangement.dirty {"Arrangement *"} else {"Arrangement"}).strong());
+            if let Some(clip) = self.selected_clip() {ui.menu_button("Clip source…",|ui|self.clip_source_inspector(ui,&clip,help));}
             let add=ui.button("+ Track");help.observe(&add,"Create an empty track. Drag open audio onto its timeline.");
             if add.clicked()&&!frozen {self.dispatch(Command::AddTrack(AddTrackParams::default()));}
             if ui.available_width()>300.0 {
@@ -112,17 +178,54 @@ impl WaveBob {
             ui.with_layout(egui::Layout::right_to_left(Align::Center),|ui| {
                 for (label,factor) in [("Fit",0.0),("+",2.0),("−",0.5)] {
                     let response=ui.button(label);help.observe(&response,"Fit the arrangement, or zoom its timeline. Ctrl/Cmd-wheel zooms; wheel pans.");
-                    if response.clicked()&&!frozen {
-                        self.timeline_view(if factor==0.0 {FrameRange{start:0,end:(arrangement.frames()+arrangement.sample_rate as u64).max(arrangement.sample_rate as u64)}} else {zoom(&view,factor,0.5,MAX_TIMELINE_FRAME)});
+                    if response.clicked()&&!frozen&&!self.envelope_pointer_claimed&&self.envelope_drag.is_none() {
+                        self.timeline_view(if factor==0.0 {FrameRange{start:0,end:(arrangement.audible_frames().max(arrangement.frames())+arrangement.sample_rate as u64).max(arrangement.sample_rate as u64)}} else {zoom(&view,factor,0.5,MAX_TIMELINE_FRAME)});
                     }
                 }
             });
+        });
+        let mix = self.host.mix();
+        // Keep timeline/handle geometry stable while a background render completes.
+        ui.horizontal(|ui| {
+            ui.set_min_height(20.0);
+            if let Some(error) = mix.preparation_error {
+                let label = egui::Label::new(
+                    RichText::new(format!("Linked render: {}", error.message))
+                        .color(Color32::LIGHT_RED),
+                )
+                .truncate();
+                let response = ui.add_sized([ui.available_width() - 100.0, 20.0], label);
+                help.observe(&response, &error.message);
+                if ui.button("Retry render").clicked() {
+                    self.dispatch(Command::PrepareMix(wavebob::mixing::PrepareMixParams {
+                        revision_id: arrangement.revision_id.clone(),
+                    }));
+                }
+            } else if mix.prepared_render_identity.as_ref() != Some(&mix.required_render_identity) {
+                ui.label(
+                    RichText::new("Preparing current linked sources…")
+                        .small()
+                        .color(MUTED),
+                );
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(16));
+            } else {
+                ui.label(RichText::new("Current linked sources").small().color(MUTED));
+            }
         });
         ui.add_space(6.0);
         let width = ui.available_width();
         let controls = 154.0_f32.min(width * 0.35);
         let (ruler, rr) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::click_and_drag());
         let time_ruler = Rect::from_min_max(ruler.min + Vec2::new(controls, 0.0), ruler.max);
+        ui.painter_at(Rect::from_min_max(ruler.min, time_ruler.left_bottom()))
+            .text(
+                ruler.left_center() + Vec2::new(4.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                "Source + envelope",
+                egui::FontId::proportional(10.0),
+                MUTED,
+            );
         visuals::ruler(
             &ui.painter_at(time_ruler),
             time_ruler,
@@ -235,8 +338,11 @@ impl WaveBob {
                     }
                     painter.text(empty.center(),egui::Align2::CENTER_CENTER,"Drag audio here",egui::FontId::proportional(11.0),MUTED);
                 }
+                let mut envelope_targets=Vec::new();
                 for clip in &track.clips {
                     let rect=clip_rect(clip,lane,&view);let visible=rect.intersect(lane).intersect(ui.clip_rect());
+                    if clip.tail_frames>0 {let end=lane.left()+((clip.position+clip.frames+clip.tail_frames) as f64-view.start as f64) as f32/(view.end-view.start) as f32*lane.width();let tail=Rect::from_min_max(Pos2::new(rect.right(),rect.top()+23.0),Pos2::new(end,rect.bottom())).intersect(lane);if tail.is_positive(){painter.rect_filled(tail,0.0,color.gamma_multiply(0.07));painter.extend(egui::Shape::dashed_line(&[tail.left_top(),tail.right_top(),tail.right_bottom(),tail.left_bottom()],Stroke::new(1.0,color.gamma_multiply(0.6)),4.0,3.0));painter.text(tail.left_top()+Vec2::splat(4.0),egui::Align2::LEFT_TOP,if clip.tail_capped {"Tail · capped"}else{"Tail"},egui::FontId::proportional(10.0),MUTED);let response=ui.interact(tail,ui.scope_id().with((&clip.id,"tail")),Sense::hover());help.observe(&response,"Rendered effect tail. Clip placement, trims and crossfades use the solid body; later clips stay in place.");}}
+
                     if !visible.is_positive(){continue;}
                     let selected=arrangement.selected_clip_ids.contains(&clip.id);
                     let painter=ui.painter_at(lane);
@@ -249,7 +355,19 @@ impl WaveBob {
                         if let Outcome::Ok{result:CommandResult::Waveform(wave)}=result.outcome {self.clip_waves.insert(clip.id.clone(),wave);}
                         } else {ui.ctx().request_repaint();}
                     }
-                    if let Some(wave)=self.clip_waves.get(&clip.id)&&let Some(peaks)=wave.channels.first(){visuals::peaks(&painter,Rect::from_min_max(rect.min+Vec2::new(2.0,23.0),rect.max-Vec2::splat(3.0)),peaks,color);}
+                    let envelope_owner=wavebob::processing::Owner::Clip(clip.id.clone());
+                    let clip_envelope=self.envelope_state(&envelope_owner).unwrap_or_else(wavebob::processing::Envelope::unity);
+                    let body=Rect::from_min_max(rect.min+Vec2::new(2.0,23.0),rect.max-Vec2::splat(3.0));
+                    if body.is_positive()&&let Some(wave)=self.clip_waves.get(&clip.id)&&let Some(peaks)=wave.channels.first(){visuals::peaks_enveloped(&painter,body,peaks,color,&clip_envelope,wave.end_frame-wave.start_frame,wave.start_frame);}
+                    if selected||visible.contains(ui.ctx().input(|input|input.pointer.hover_pos()).unwrap_or(Pos2::new(-100.0,-100.0))) {
+                        let mut reserved=vec![Rect::from_min_max(rect.min+Vec2::new(0.0,39.0),Pos2::new(rect.left()+6.0,rect.bottom())),Rect::from_min_max(Pos2::new(rect.right()-6.0,rect.top()+39.0),rect.max)];
+                        reserved.extend(crossfades.regions.iter().filter(|region|region.track_id==track.id).map(|region| {
+                            let x=lane.left()+(region.end as f64-view.start as f64) as f32/(view.end-view.start) as f32*lane.width();
+                            Rect::from_center_size(Pos2::new(x,(lane.top()+27.0+lane.bottom()-9.0)/2.0),Vec2::new(12.0,24.0))
+                        }));
+                        let target=envelopes::Target{owner:envelope_owner.clone(),body,visible:body.intersect(lane).intersect(ui.clip_rect()),frames:clip.source_end-clip.source_start,rate:clip.source_rate,reserved,selected};
+                        self.claim_envelope_pointer(ui,&target);envelope_targets.push(target);
+                    }
                     let next_start=track.clips.iter().filter(|other|other.position>clip.position).map(|other|lane.left()+(other.position as f64-view.start as f64) as f32/(view.end-view.start) as f32*lane.width()).fold(rect.right(),f32::min);
                     let title_right=rect.right().min(next_start).min(lane.right());
                     let title_width=(title_right-rect.left()-12.0).max(0.0);
@@ -259,22 +377,24 @@ impl WaveBob {
                     painter.with_clip_rect(rect.intersect(lane)).galley(rect.min+Vec2::new(8.0,6.0),title,Color32::WHITE);
                     let response=ui.interact(visible,ui.scope_id().with(&clip.id),Sense::click_and_drag());
                     response.context_menu(|ui| {
+                        if ui.button("Gain and fades…").clicked() {self.open_envelope_entry(envelope_owner.clone());ui.close();}
+                        if ui.button("Duplicate clip").clicked()&&!frozen {self.dispatch(Command::DuplicateClip(DuplicateClipParams{clip_id:clip.id.clone(),track_id:None,position:clip.position.saturating_add(clip.frames)}));ui.close();}
                         if ui.button("Remove clip").clicked()&&!frozen {self.dispatch(Command::RemoveClip(ClipParams{clip_id:clip.id.clone()}));ui.close();}
                     });
                     help.observe(&response,"Drag this pinned clip in time or onto another track. Invalid/off-track drops cancel. Ctrl/Cmd-click selects multiple clips.");
-                    if response.clicked()&&!frozen {
+                    if response.clicked()&&!frozen&&!self.envelope_pointer_claimed&&self.envelope_drag.is_none() {
                         let mut selected_ids=if ui.ctx().input(|i|i.modifiers.ctrl||i.modifiers.command){arrangement.selected_clip_ids.clone()}else{Vec::new()};
                         if selected_ids.contains(&clip.id){selected_ids.retain(|id|id!=&clip.id);}else{selected_ids.push(clip.id.clone());}
                         self.navigate_arrangement(clip.position,None,selected_ids);
                     }
-                    if response.drag_started()&&!frozen&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {self.arrangement_gesture=Some(Gesture::Move{clip:clip.clone(),offset:frame_at(pos,lane,&view).saturating_sub(clip.position),revision:snapshot.revision});}
+                    if response.drag_started()&&!frozen&&!self.envelope_pointer_claimed&&self.envelope_drag.is_none()&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {self.arrangement_gesture=Some(Gesture::Move{clip:clip.clone(),offset:frame_at(pos,lane,&view).saturating_sub(clip.position),revision:snapshot.revision});}
                     if rect.width()>16.0 {
                         for left in [true,false] {
-                            let edge=if left {Rect::from_min_max(rect.min,Pos2::new(rect.left()+6.0,rect.bottom()))}else{Rect::from_min_max(Pos2::new(rect.right()-6.0,rect.top()),rect.max)}.intersect(visible);
+                            let edge=if left {Rect::from_min_max(rect.min+Vec2::new(0.0,39.0),Pos2::new(rect.left()+6.0,rect.bottom()))}else{Rect::from_min_max(Pos2::new(rect.right()-6.0,rect.top()+39.0),rect.max)}.intersect(visible);
                             let handle=ui.interact(edge,ui.scope_id().with((&clip.id,left)),Sense::drag());
                             if handle.hovered()||handle.dragged(){ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);}
                             help.observe(&handle,"Drag this edge to trim the pinned source interval. Release commits one edit; Escape cancels.");
-                            if handle.drag_started()&&!frozen&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {self.arrangement_gesture=Some(Gesture::Trim{clip:clip.clone(),left,anchor:frame_at(pos,lane,&view),revision:snapshot.revision});}
+                            if handle.drag_started()&&!frozen&&!self.envelope_pointer_claimed&&self.envelope_drag.is_none()&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {self.arrangement_gesture=Some(Gesture::Trim{clip:clip.clone(),left,anchor:frame_at(pos,lane,&view),revision:snapshot.revision});}
                         }
                     }
                 }
@@ -298,9 +418,9 @@ impl WaveBob {
                             let handle=ui.interact(handle_rect,ui.scope_id().with((&region.first_clip_id,&region.second_clip_id,"crossfade-end")),Sense::drag());
                             let active=handle.hovered()||handle.dragged();
                             painter.rect_filled(Rect::from_center_size(center,Vec2::new(6.0,20.0)),2.0,if active{Color32::WHITE}else{color});
-                            if active {ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);}
+                            if active&&!self.envelope_pointer_claimed {ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);}
                             help.observe(&handle,"Drag the crossfade end to adjust its length by trimming the ending clip. Release commits one edit; Escape cancels.");
-                            if handle.drag_started()&&!frozen&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {
+                            if handle.drag_started()&&!frozen&&!self.envelope_pointer_claimed&&self.envelope_drag.is_none()&&let Some(pos)=ui.ctx().input(|i|i.pointer.press_origin()) {
                                 self.arrangement_gesture=Some(Gesture::Trim{clip:clip.clone(),left:false,anchor:frame_at(pos,lane,&view),revision:snapshot.revision});
                             }
                         }
@@ -312,6 +432,7 @@ impl WaveBob {
                 }
                 let x=lane.left()+(arrangement.cursor as f64-view.start as f64) as f32/(view.end-view.start) as f32*lane.width();
                 if lane.x_range().contains(x){painter.vline(x,lane.y_range(),Stroke::new(1.0,Color32::WHITE));}
+                self.envelope_targets(ui,envelope_targets,help);
             }
         });
         self.clip_waves
@@ -343,6 +464,14 @@ impl WaveBob {
                         + document.sample_rate as u128 / 2)
                         / document.sample_rate as u128) as u64;
                     let ghost = Clip {
+                        source_range_intent: None,
+                        envelope_intent: None,
+                        bounce: None,
+                        tail_frames: 0,
+                        tail_capped: false,
+                        processing: wavebob::processing::Processing::default(),
+                        linked: true,
+                        full_document: true,
                         id: String::new(),
                         name: document.name.clone(),
                         document_id: document.id.clone(),

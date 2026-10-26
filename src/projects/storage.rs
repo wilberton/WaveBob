@@ -17,6 +17,7 @@ pub(crate) struct SaveSnapshot {
     pub payload: Payload,
     pub revisions: BTreeMap<String, Arc<Audio>>,
     pub revision_id: String,
+    pub protected_roots: Vec<String>,
 }
 pub(crate) struct LoadedProject {
     pub payload: Payload,
@@ -109,6 +110,15 @@ pub(crate) fn prepare_save(
         .unwrap_or(Path::new("."))
         .canonicalize()
         .map_err(exports::io_error)?;
+    if snapshot
+        .protected_roots
+        .iter()
+        .any(|root| parent.starts_with(root))
+    {
+        return Err(invalid(
+            "Managed project assets are immutable; choose a project destination outside the asset directory",
+        ));
+    }
     let destination = parent.join(name);
     if !overwrite && destination.try_exists().map_err(exports::io_error)? {
         return Err(CommandError::new(
@@ -458,7 +468,7 @@ pub(crate) fn load(
         let audio = &revisions[&doc.revision_id];
         doc.peak_level = audio.peak_level;
         doc.overloaded_samples = audio.overloaded_samples;
-        doc.dirty = doc.saved_revision_id.as_ref() != Some(&doc.revision_id);
+        doc.refresh_dirty(file.payload.arrangement.effect_tempo);
     }
     file.payload.arrangement.saved_revision_id = Some(file.payload.arrangement.revision_id.clone());
     file.payload.arrangement.dirty = false;
@@ -500,10 +510,25 @@ fn validate_payload(
     payload: &Payload,
     revisions: &BTreeMap<String, Arc<Audio>>,
 ) -> Result<(), CommandError> {
+    if payload.processing_policy != super::processing_policy() {
+        return Err(invalid("Unsupported DSP or tail policy"));
+    }
     let mut ids = BTreeSet::new();
     for doc in &payload.documents {
         canonical_id(&doc.id)?;
         canonical_id(&doc.revision_id)?;
+        doc.processing
+            .validate(doc.frames)
+            .map_err(|error| invalid(&error.message))?;
+        doc.saved_processing
+            .validate(u64::MAX)
+            .map_err(|e| invalid(&e.message))?;
+        if !doc.saved_effect_tempo.is_finite()
+            || !(20.0..=400.0).contains(&doc.saved_effect_tempo)
+            || doc.save_channels.is_some_and(|c| !(1..=2).contains(&c))
+        {
+            return Err(invalid("Invalid saved output baseline"));
+        }
         if !ids.insert(doc.id.clone()) {
             return Err(invalid("Duplicate document ID"));
         }
@@ -540,7 +565,9 @@ fn validate_payload(
     let arr = &payload.arrangement;
     canonical_id(&arr.id)?;
     canonical_id(&arr.revision_id)?;
-    if arr.sample_rate != 48000
+    if !arr.effect_tempo.is_finite()
+        || !(20.0..=400.0).contains(&arr.effect_tempo)
+        || arr.sample_rate != 48000
         || !arr.master_gain_db.is_finite()
         || !(-120.0..=24.0).contains(&arr.master_gain_db)
         || arr.cursor > crate::arrangement::MAX_TIMELINE_FRAME
@@ -570,6 +597,12 @@ fn validate_payload(
             canonical_id(&clip.id)?;
             canonical_id(&clip.document_id)?;
             canonical_id(&clip.edit_revision_id)?;
+            clip.processing
+                .validate(clip.source_end.saturating_sub(clip.source_start))
+                .map_err(|error| invalid(&error.message))?;
+            if clip.linked && !ids.contains(&clip.document_id) {
+                return Err(invalid("Linked clip document is missing"));
+            }
             if !clip_ids.insert(&clip.id)
                 || !orders.insert(clip.insertion_order)
                 || clip.insertion_order >= arr.next_clip_order
@@ -579,19 +612,86 @@ fn validate_payload(
             let source = revisions
                 .get(&clip.revision_id)
                 .ok_or_else(|| invalid("Clip source revision is missing"))?;
+            let bounce = clip
+                .bounce
+                .as_ref()
+                .map(|b| {
+                    canonical_id(&b.audio_revision_id)?;
+                    canonical_id(&b.source_revision_id)?;
+                    let rendered = revisions
+                        .get(&b.audio_revision_id)
+                        .ok_or_else(|| invalid("Bounce asset is missing"))?;
+                    if b.source_start >= b.source_end
+                        || b.metadata.source_body_frames != b.source_end - b.source_start
+                        || b.metadata.audio_revision_id != b.audio_revision_id
+                        || b.metadata.render_identity != b.render_identity
+                        || b.metadata.sample_rate != rendered.rate
+                        || b.metadata.channels != rendered.channels
+                        || b.metadata
+                            .source_body_frames
+                            .checked_add(b.metadata.tail_frames)
+                            != Some(rendered.frames())
+                        || b.metadata.tail_frames > rendered.rate as u64 * 60
+                        || b.metadata.latency_frames > rendered.rate as u64
+                    {
+                        return Err(invalid("Invalid bounce metadata or dimensions"));
+                    }
+                    if clip.linked {
+                        let doc = payload
+                            .documents
+                            .iter()
+                            .find(|d| d.id == clip.document_id)
+                            .unwrap();
+                        let expected = checksum(&(
+                            doc.processing.identity(&doc.revision_id, arr.effect_tempo),
+                            clip.source_start,
+                            clip.source_end,
+                        ));
+                        if b.source_revision_id != doc.revision_id
+                            || b.source_start != clip.source_start
+                            || b.source_end != clip.source_end
+                            || b.render_identity != expected
+                        {
+                            return Err(invalid("Linked bounce is stale"));
+                        }
+                    }
+                    Ok(rendered)
+                })
+                .transpose()?;
+            let expected_source_frames = if !clip.linked
+                && clip
+                    .bounce
+                    .as_ref()
+                    .is_some_and(|b| b.audio_revision_id == clip.revision_id)
+            {
+                clip.bounce.as_ref().unwrap().metadata.source_body_frames
+            } else {
+                source.frames()
+            };
+            let source_channels = bounce.map_or(source.channels, |b| b.channels);
             if clip.source_start >= clip.source_end
-                || clip.source_end > source.frames()
-                || clip.source_frames != source.frames()
+                || clip.source_end > expected_source_frames
+                || clip.source_frames != expected_source_frames
                 || clip.source_rate != source.rate
-                || clip.channels != source.channels
+                || clip.channels != source_channels
                 || clip.frames
                     != audio::resample::frame_count(
                         clip.source_end - clip.source_start,
                         source.rate,
                         arr.sample_rate,
                     )
+                || clip.tail_frames > arr.sample_rate as u64 * 60
+                || clip.source_range_intent.as_ref().is_some_and(|r| {
+                    !clip.linked
+                        || r.start >= r.end
+                        || r.start.min(source.frames()) != clip.source_start
+                        || r.end.min(source.frames()) != clip.source_end
+                })
             {
                 return Err(invalid("Clip source interval or format is invalid"));
+            }
+            if let Some(intent) = &clip.envelope_intent {
+                intent.validate(u64::MAX).map_err(|e| invalid(&e.message))?;
             }
             if clip.effects.len() > 32 {
                 return Err(invalid("Too many clip processing steps"));

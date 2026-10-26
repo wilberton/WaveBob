@@ -45,6 +45,7 @@ fn asynchronous_folder_navigation_retains_usable_state_on_errors_and_marks_forma
     std::fs::create_dir(d.path().join("子 folder")).unwrap();
     wav(&d.path().join("Sound.WAV"));
     std::fs::write(d.path().join("broken.mp3"), b"broken").unwrap();
+    std::fs::write(d.path().join("broken.OGG"), b"broken").unwrap();
     std::fs::write(d.path().join("Notes.txt"), b"text").unwrap();
     let mut s = Session::default();
     ok(&mut s, "browser.navigate", json!({"path":d.path()}));
@@ -57,7 +58,7 @@ fn asynchronous_folder_navigation_retains_usable_state_on_errors_and_marks_forma
             .iter()
             .filter(|v| v["supported"] == true)
             .count(),
-        2
+        3
     );
     let path = state["entries"]
         .as_array()
@@ -79,6 +80,27 @@ fn asynchronous_folder_navigation_retains_usable_state_on_errors_and_marks_forma
     assert_eq!(
         send(&mut s, "browser.select", json!({"path":"unlisted"}))["error"]["code"],
         "invalid_params"
+    );
+}
+#[test]
+fn ogg_audition_decodes_without_opening_a_document() {
+    let (mut s, mut output) = Session::with_manual_output(48000).unwrap();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/audio/vorbis-2ch-48000.ogg");
+    ok(&mut s, "audition.start", json!({"path":path}));
+    let state = wait(&mut s, "/audition/loading");
+    assert!(state["audition"]["error"].is_null(), "{state}");
+    assert_eq!(state["audition"]["playing"], true);
+    assert_eq!(state["audition"]["channels"], 2);
+    assert_eq!(state["audition"]["sample_rate"], 48000);
+    assert!(s.snapshot().documents.is_empty());
+    let mut pcm = [[0.0_f32; 2]; 4096];
+    output.render_into(&mut pcm);
+    assert!(pcm.iter().flatten().any(|sample| sample.abs() > 0.01));
+    ok(&mut s, "audition.stop", json!({}));
+    assert_eq!(
+        ok(&mut s, "browser.get", json!({}))["audition"]["playing"],
+        false
     );
 }
 #[test]

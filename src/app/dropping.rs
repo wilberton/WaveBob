@@ -16,7 +16,9 @@ fn supported(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {
-            extension.eq_ignore_ascii_case("wav") || extension.eq_ignore_ascii_case("mp3")
+            ["wav", "mp3", "ogg"]
+                .iter()
+                .any(|ext| extension.eq_ignore_ascii_case(ext))
         })
 }
 impl WaveBob {
@@ -66,7 +68,7 @@ impl WaveBob {
             };
             if !supported(path) {
                 self.error = Some(format!(
-                    "Cannot open {}: drop WAV or MP3 audio files.",
+                    "Cannot open {}: drop WAV, MP3 or Ogg Vorbis audio files.",
                     path.display()
                 ));
                 self.file_imports.paths.pop_front();
@@ -130,7 +132,7 @@ impl WaveBob {
             .filter(|file| file.path.as_ref().is_none_or(|path| supported(path)))
             .count();
         let title = if supported_count == 0 {
-            "Drop WAV or MP3 audio files"
+            "Drop WAV, MP3 or Ogg Vorbis audio files"
         } else {
             "Drop audio to open"
         };
@@ -140,11 +142,11 @@ impl WaveBob {
             "These files are not supported.".into()
         } else {
             format!(
-                "{supported_count} audio file{} · WAV & MP3",
+                "{supported_count} audio file{} · WAV, MP3 & Ogg",
                 if supported_count == 1 { "" } else { "s" }
             )
         };
-        help.hover=Some("Drop WAV or MP3 files to open documents. Drag open documents onto tracks to arrange them.".into());
+        help.hover=Some("Drop WAV, MP3 or Ogg Vorbis files to open documents. Drag open documents onto tracks to arrange them.".into());
         let rect = ctx.content_rect().shrink2(Vec2::new(12.0, 40.0));
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Foreground,

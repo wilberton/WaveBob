@@ -25,10 +25,11 @@ pub(super) struct OutputDialog {
     document: DocumentInfo,
     save: bool,
     selection: bool,
-    path: String,
-    format: ExportFormat,
+    pub(super) path: String,
+    pub(super) format: ExportFormat,
     rate: Option<u32>,
-    overwrite: bool,
+    channels: Option<u16>,
+    pub(super) overwrite: bool,
     overload: OverloadPolicy,
     close_after: bool,
 }
@@ -62,8 +63,14 @@ impl WaveBob {
             .join("Arrangement.wav")
             .to_string_lossy()
             .into_owned();
-        let frames = arrangement.frames();
+        let frames = arrangement.audible_frames().max(arrangement.frames());
         let document = DocumentInfo {
+            processing: wavebob::processing::Processing::default(),
+            saved_processing: wavebob::processing::Processing::default(),
+            saved_effect_tempo: 120.0,
+            saved_render_identity: None,
+            save_channels: None,
+            tab_open: true,
             id: arrangement.id,
             revision_id: arrangement.revision_id,
             path: path.clone(),
@@ -90,6 +97,7 @@ impl WaveBob {
             path,
             format: ExportFormat::default(),
             rate: None,
+            channels: None,
             overwrite: false,
             overload: OverloadPolicy::Reject,
             close_after: false,
@@ -126,6 +134,12 @@ impl WaveBob {
             .save_format
             .clone()
             .or_else(|| ExportFormat::source_wav(&document.encoding));
+        if document.encoding == "ogg_vorbis"
+            && existing.is_none()
+            && matches!(action, FileAction::Save)
+        {
+            action = FileAction::SaveAs;
+        }
         if matches!(action, FileAction::Save)
             && let Some(format) = &existing
             && !format.lossy()
@@ -144,6 +158,7 @@ impl WaveBob {
                     path: None,
                     format: None,
                     sample_rate: None,
+                    channels: None,
                     overwrite: true,
                     overload: OverloadPolicy::Reject,
                 }),
@@ -177,6 +192,7 @@ impl WaveBob {
             path: path.to_string_lossy().into_owned(),
             format,
             rate,
+            channels: None,
             overwrite: matches!(action, FileAction::Save),
             overload: OverloadPolicy::Reject,
             close_after,
@@ -319,9 +335,15 @@ impl WaveBob {
             if old_format.extension()!=dialog.format.extension(){let mut path=std::path::PathBuf::from(&dialog.path);path.set_extension(dialog.format.extension());dialog.path=path.to_string_lossy().into_owned();}
             if let ExportFormat::Mp3{bitrate_kbps}=&mut dialog.format{ui.horizontal(|ui|{ui.label("CBR bitrate");let response=egui::ComboBox::from_id_salt("mp3-bitrate").selected_text(format!("{bitrate_kbps} kbit/s")).show_ui(ui,|ui|{for bitrate in [128,192,256,320]{let response=ui.selectable_value(bitrate_kbps,bitrate,format!("{bitrate} kbit/s"));help.observe(&response,"Choose the MP3 CBR bitrate in kilobits per second.");}});help.observe(&response.response,"MP3 CBR bitrate. The working audio revision remains lossless.");});ui.label(RichText::new("MP3 uses lossy encoding. Working audio is retained.").small().color(Color32::from_rgb(226,178,89)));}
             ui.horizontal(|ui|{ui.label("Sample rate");let response=egui::ComboBox::from_id_salt("output-rate").selected_text(dialog.rate.map_or("Automatic".into(),|rate|format!("{rate} Hz"))).show_ui(ui,|ui|{let response=ui.selectable_value(&mut dialog.rate,None,"Automatic");help.observe(&response,"Preserve a supported source rate; MP3 otherwise uses 44.1 kHz.");for rate in [32000,44100,48000]{let response=ui.selectable_value(&mut dialog.rate,Some(rate),format!("{rate} Hz"));help.observe(&response,"Convert the output to this sample rate using the shared resampler.");}});help.observe(&response.response,"Automatic preserves supported source rates; MP3 otherwise defaults to 44.1 kHz. Conversion uses the shared resampler.");});
+            ui.horizontal(|ui| { ui.label("Channels"); egui::ComboBox::from_id_salt("output-channels").selected_text(match dialog.channels { Some(1) => "Mono (average L/R)", Some(2) => "Stereo", _ => "Preserve processed channels" }).show_ui(ui, |ui| {
+                ui.selectable_value(&mut dialog.channels, None, "Preserve processed channels");
+                ui.selectable_value(&mut dialog.channels, Some(1), "Mono (average L/R)");
+                ui.selectable_value(&mut dialog.channels, Some(2), "Stereo");
+            }); });
             let range=dialog.range();
-            if dialog.mix {ui.label(format!("Project frames {}–{} · {:.6}–{:.6} s",range.start,range.end,range.start as f64/dialog.document.sample_rate as f64,range.end as f64/dialog.document.sample_rate as f64));ui.label(RichText::new("Exact range · no tail beyond clip/range boundaries").small().color(MUTED));}
-            if let Ok(rate)=dialog.format.output_rate(dialog.document.sample_rate,dialog.rate){let frames=wavebob::exports::converted_frames(range.end-range.start,dialog.document.sample_rate,rate).unwrap_or(0);ui.label(format!("{} frames · {} Hz · {}{}",frames,rate,if dialog.document.channels==1{"Mono"}else{"Stereo"},if rate!=dialog.document.sample_rate{" · resampled"}else{""}));}
+            if !dialog.mix {ui.label(RichText::new("Source interval shown below; rendered output includes audible effect tails.").small().color(MUTED));}
+            if dialog.mix {ui.label(format!("Project frames {}–{} · {:.6}–{:.6} s",range.start,range.end,range.start as f64/dialog.document.sample_rate as f64,range.end as f64/dialog.document.sample_rate as f64));ui.label(RichText::new("Selected range is exact; whole arrangement includes current audible tails").small().color(MUTED));}
+            if let Ok(rate)=dialog.format.output_rate(dialog.document.sample_rate,dialog.rate){let frames=wavebob::exports::converted_frames(range.end-range.start,dialog.document.sample_rate,rate).unwrap_or(0);ui.label(format!("Interval: {} frames · {} Hz · {}{}",frames,rate,match dialog.channels {Some(1)=>"Mono",Some(2)=>"Stereo",_=>"Processed channels"},if rate!=dialog.document.sample_rate{" · resampled"}else{""}));}
             let response=ui.checkbox(&mut dialog.overwrite,"Allow replacing an existing file");help.observe(&response,"Existing output is replaced atomically only with this explicit intent.");
             let mut clip=dialog.overload==OverloadPolicy::Clip;let response=ui.checkbox(&mut clip,"Clip overloads for integer WAV / MP3");help.observe(&response,"Off rejects overloads. Float WAV preserves finite headroom. Clipped sample counts are reported in the job result.");dialog.overload=if clip{OverloadPolicy::Clip}else{OverloadPolicy::Reject};
             if let Some(error)=&self.error{ui.colored_label(Color32::LIGHT_RED,error);}
@@ -334,12 +356,14 @@ impl WaveBob {
             let command = if dialog.mix {
                 let range = dialog.range();
                 Command::ExportMix(wavebob::exports::MixExportParams {
+                    include_tail: !dialog.selection,
                     revision_id: dialog.document.revision_id.clone(),
                     start_frame: range.start,
                     end_frame: range.end,
                     path: dialog.path.clone(),
                     format: dialog.format.clone(),
                     sample_rate: dialog.rate,
+                    channels: dialog.channels,
                     overwrite: dialog.overwrite,
                     overload: dialog.overload,
                 })
@@ -350,6 +374,7 @@ impl WaveBob {
                     path: Some(dialog.path.clone()),
                     format: Some(dialog.format.clone().into()),
                     sample_rate: dialog.rate,
+                    channels: dialog.channels,
                     overwrite: dialog.overwrite,
                     overload: dialog.overload,
                 })
@@ -373,6 +398,7 @@ impl WaveBob {
                     path: dialog.path.clone(),
                     format: dialog.format.clone(),
                     sample_rate: dialog.rate,
+                    channels: dialog.channels,
                     overwrite: dialog.overwrite,
                     overload: dialog.overload,
                 })

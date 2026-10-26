@@ -39,3 +39,20 @@ the console summary omits that array.
 Copy `Editing session.wavebob` with `Editing session.assets/` to reopen it. The
 generated standalone outputs remain in the review directory. The example uses
 only WaveBob's bundled encoder/decoder; FFmpeg is used separately for QA.
+
+The delivered live-effects scenario is selected with --live-effects on the same
+workflow client. It imports WAV and bundled-encoder MP3, inserts shared full/trim
+links, commits an envelope preview, reorders/bypasses/undoes a three-effect stack,
+checks separate late tails and later positions, adds clip Limiter processing,
+saves/reopens schema2 after deleting originals and exports identical WAV/MP3 across
+adapters. With --attach it additionally opens three simultaneous native editors
+and captures both main modes through attached MCP. Use a fresh GUI/workspace and
+new output directory. The test runs normal, narrow and high-DPI native sizes.
+
+```sh
+cargo run --offline --release --no-default-features --example workflow -- --live-effects --adapter mcp --binary target/release/wavebob-mcp --out live-review
+```
+
+[Final verification](verification/live-effects-workflow/README.md) distinguishes
+fixed-setting reference comparisons, live transition/loop state, codec tolerances,
+manual callback measurements and physical listening/platform limits.

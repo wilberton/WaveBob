@@ -18,14 +18,73 @@ jobs:
           python-version: '3.12'
       - name: Linux native dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev libasound2-dev xvfb weston
       - name: Test device-free commands and MP3 workflow
         run: cargo test --locked --no-default-features --all-targets
       - name: Package native GUI, device-free runners, source and notices
+        id: kit
         run: python scripts/package-release.py
-      - name: Smoke-check shipped automation binaries
+      - name: Install software OpenGL for the Windows CI desktop
+        if: runner.os == 'Windows'
+        id: mesa
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-mesa
+      - name: Smoke-check shipped binaries on Windows with software OpenGL
+        if: runner.os == 'Windows'
+        env:
+          MESA_RUNTIME: ${{ steps.mesa.outputs.msys2-location }}\mingw64\bin
+        run: |
+          python scripts/smoke-release.py (Get-ChildItem dist/*.zip).FullName --out .tools/release-smoke --gui --gl-runtime "$env:MESA_RUNTIME"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/smoke-release.py (Get-ChildItem dist/*.zip).FullName --out .tools/release-dpi --gui --ui-scale 1.25 --gl-runtime "$env:MESA_RUNTIME"
+      - name: Smoke-check shipped GUI, headless and MCP binaries on macOS
+        if: runner.os == 'macOS'
         shell: bash
-        run: python scripts/smoke-release.py dist/*.zip --out .tools/release-smoke
+        run: |
+          python scripts/smoke-release.py dist/*.zip --out .tools/release-smoke --gui
+          python scripts/smoke-release.py dist/*.zip --out .tools/release-dpi --gui --ui-scale 1.25
+      - name: Smoke-check shipped binaries on Linux X11
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          xvfb-run -a -s '-screen 0 1920x1080x24' python scripts/smoke-release.py dist/*.zip --out .tools/release-x11 --gui
+          xvfb-run -a -s '-screen 0 1920x1080x24' python scripts/smoke-release.py dist/*.zip --out .tools/release-x11-dpi --gui --ui-scale 1.25
+      - name: Smoke-check shipped GUI on Linux Wayland
+        if: always() && runner.os == 'Linux' && steps.kit.outcome == 'success'
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/wavebob-wayland"
+          mkdir -m 700 -p "$XDG_RUNTIME_DIR"
+          export WAYLAND_DISPLAY=wavebob-test
+          weston --backend=headless --renderer=pixman --socket="$WAYLAND_DISPLAY" --idle-time=0 --width=1920 --height=1080 > .tools/weston.log 2>&1 &
+          weston_pid=$!
+          trap 'kill "$weston_pid"' EXIT
+          for attempt in {1..60}; do
+            test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" && break
+            sleep 0.1
+          done
+          test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+          unset DISPLAY
+          python scripts/smoke-release.py dist/*.zip --out .tools/release-wayland --gui
+          python scripts/smoke-release.py dist/*.zip --out .tools/release-wayland-dpi --gui --ui-scale 1.25
+      - name: Retain native capture and workflow evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaveBob-native-checks-${{ runner.os }}-${{ runner.arch }}
+          include-hidden-files: true
+          path: |
+            .tools/release-*/smoke-result.json
+            .tools/release-*/gui/*.png
+            .tools/release-*/gui-native.log
+            .tools/weston.log
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: WaveBob-${{ runner.os }}-${{ runner.arch }}

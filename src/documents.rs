@@ -12,8 +12,17 @@ mod arranging;
 mod clip_processing;
 mod editing;
 mod mixing;
+mod processing;
 mod projecting;
+mod rendering;
 mod saving;
+
+fn saved_tempo_default() -> f64 {
+    120.0
+}
+fn tab_open_default() -> bool {
+    true
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct FrameRange {
@@ -30,6 +39,16 @@ pub struct SourceDetails {
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct DocumentInfo {
+    pub processing: crate::processing::Processing,
+    pub saved_processing: crate::processing::Processing,
+    #[serde(default = "saved_tempo_default")]
+    pub saved_effect_tempo: f64,
+    #[serde(default)]
+    pub saved_render_identity: Option<String>,
+    #[serde(default)]
+    pub save_channels: Option<u16>,
+    #[serde(default = "tab_open_default")]
+    pub tab_open: bool,
     pub id: String,
     pub revision_id: String,
     pub path: String,
@@ -76,10 +95,11 @@ pub struct JobInfo {
 #[serde(tag = "kind", content = "details", rename_all = "snake_case")]
 pub enum JobOutput {
     AudioExport(crate::exports::ExportSummary),
-    ClipEdit(crate::arrangement::Clip),
+    ClipEdit(Box<crate::arrangement::Clip>),
     MixPrepared(crate::mixing::MixPrepared),
     ProjectSaved(crate::projects::ProjectSummary),
     ProjectOpened(crate::projects::ProjectSummary),
+    ProcessingRendered(crate::rendering::RenderMetadata),
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct Peak {
@@ -168,6 +188,10 @@ pub struct WaveformParams {
 }
 
 enum Event {
+    ProcessingRendered(
+        String,
+        Result<(audio::Audio, crate::rendering::RenderMetadata), CommandError>,
+    ),
     Progress(String, u8),
     Finished(String, Result<audio::Audio, CommandError>),
     Edited(String, Result<Option<audio::Audio>, CommandError>),
@@ -206,6 +230,9 @@ pub(crate) struct Editor {
     project: projecting::ProjectState,
     pending_projects: BTreeMap<String, projecting::PendingProject>,
     loaded_loop: Option<bool>,
+    preview: Option<processing::Preview>,
+    pending_renders: BTreeMap<String, rendering::PendingRender>,
+    rendered: BTreeMap<String, crate::rendering::RenderMetadata>,
 }
 impl Default for Editor {
     fn default() -> Self {
@@ -230,6 +257,9 @@ impl Default for Editor {
             project: projecting::ProjectState::default(),
             pending_projects: BTreeMap::new(),
             loaded_loop: None,
+            preview: None,
+            pending_renders: BTreeMap::new(),
+            rendered: BTreeMap::new(),
         }
     }
 }
@@ -257,7 +287,11 @@ impl Editor {
         Ok(())
     }
     pub fn documents(&self) -> Vec<DocumentInfo> {
-        self.documents.clone()
+        self.documents
+            .iter()
+            .filter(|doc| doc.tab_open)
+            .cloned()
+            .collect()
     }
     pub fn jobs(&self) -> Vec<JobInfo> {
         self.jobs.values().map(|(info, _)| info.clone()).collect()
@@ -277,7 +311,7 @@ impl Editor {
         self.active = Some(id.into());
     }
     pub fn update_playback_cursor(&mut self, id: &str, audio_revision: &str, frame: u64) {
-        if id == self.arrangement.id && audio_revision == self.arrangement.revision_id {
+        if id == self.arrangement.id && audio_revision == self.audible_arrangement().revision_id {
             self.arrangement.cursor = frame.min(crate::arrangement::MAX_TIMELINE_FRAME);
             return;
         }
@@ -312,6 +346,7 @@ impl Editor {
     pub fn poll(&mut self, revision: &mut u64) {
         while let Ok(event) = self.receiver.try_recv() {
             match event {
+                Event::ProcessingRendered(id, result) => self.finish_render(id, result),
                 Event::Edited(id, result) => self.finish_edit(id, result, revision),
                 Event::ClipProcessed(id, result) => self.finish_clip(id, result, revision),
                 Event::MixPrepared(id, result) => self.finish_mix(id, result),
@@ -355,6 +390,12 @@ impl Editor {
                                     continue;
                                 };
                                 let mut document = DocumentInfo {
+                                    processing: crate::processing::Processing::default(),
+                                    saved_processing: crate::processing::Processing::default(),
+                                    saved_effect_tempo: 120.0,
+                                    saved_render_identity: None,
+                                    save_channels: None,
+                                    tab_open: true,
                                     id: uuid::Uuid::new_v4().to_string(),
                                     revision_id: uuid::Uuid::new_v4().to_string(),
                                     path: job.path.clone(),
@@ -411,7 +452,54 @@ impl Editor {
         command: Command,
         revision: &mut u64,
     ) -> Result<CommandResult, CommandError> {
+        let cancel_preview = command.mutates()
+            && !matches!(
+                &command,
+                Command::UpdateProcessingPreview(_)
+                    | Command::CommitProcessingPreview(_)
+                    | Command::CancelProcessingPreview(_)
+                    | Command::BeginProcessingPreview(_)
+                    | Command::CancelJob(_)
+                    | Command::PrepareMix(_)
+                    | Command::SetCursor(_)
+                    | Command::SetSelection(_)
+                    | Command::SelectAll(_)
+                    | Command::ClearSelection(_)
+                    | Command::NavigateArrangement(_)
+                    | Command::ActivateDocument(_)
+            );
+        let result = self.execute_inner(command, revision);
+        if result.is_ok() && cancel_preview {
+            self.preview = None;
+        }
+        result
+    }
+    fn execute_inner(
+        &mut self,
+        command: Command,
+        revision: &mut u64,
+    ) -> Result<CommandResult, CommandError> {
         match command {
+            Command::RenderProcessing(params) => self.render_owner(params),
+            Command::ReadRenderedSamples(params) => self.rendered_samples(params),
+            command @ (Command::GetProcessing(_)
+            | Command::EditProcessing(_)
+            | Command::BeginProcessingPreview(_)
+            | Command::UpdateProcessingPreview(_)
+            | Command::CommitProcessingPreview(_)
+            | Command::CancelProcessingPreview(_)
+            | Command::SetEffectTempo(_)
+            | Command::MakeClipIndependent(_)) => self.processing_command(command, revision),
+            Command::GetEffectCatalogue(_) => Ok(CommandResult::EffectCatalogue(
+                crate::processing::catalogue(),
+            )),
+            Command::OpenEffectEditor(_)
+            | Command::FocusEffectEditor(_)
+            | Command::CloseEffectEditor(_)
+            | Command::SetEditorGeometry(_) => Err(CommandError::new(
+                ErrorCode::MissingCapability,
+                "Native effect editors require an attached GUI",
+            )),
             Command::PrepareMix(params) => {
                 if params.revision_id != self.arrangement.revision_id {
                     Err(CommandError::new(
@@ -425,7 +513,7 @@ impl Editor {
             }
             Command::ReadMixSamples(params) => self.mix_samples(params),
             Command::ExportMix(params) => self.export_mix(params),
-            Command::TrimClip(params) => self.trim_clip(params),
+            Command::TrimClip(params) => self.trim_clip(params, revision),
             Command::ApplyClipEffect(params) => self.process_clip(params),
             Command::ReadClipSamples(params) => self.clip_samples(params),
             command @ (Command::GetArrangement(_)
@@ -435,6 +523,7 @@ impl Editor {
             | Command::UpdateTrack(_)
             | Command::RemoveTrack(_)
             | Command::InsertClip(_)
+            | Command::DuplicateClip(_)
             | Command::MoveClip(_)
             | Command::RemoveClip(_)
             | Command::NavigateArrangement(_)
@@ -461,6 +550,11 @@ impl Editor {
                     advance(revision)?;
                     self.active = Some(document.id.clone());
                 }
+                self.documents
+                    .iter_mut()
+                    .find(|d| d.id == document.id)
+                    .unwrap()
+                    .tab_open = true;
                 Ok(CommandResult::Document(document.into()))
             }
             Command::CloseDocument(params) => {
@@ -473,11 +567,31 @@ impl Editor {
                     ));
                 }
                 advance(revision)?;
-                self.documents.retain(|doc| doc.id != document.id);
-                self.history.remove_document(&document.id);
+                if self
+                    .arrangement
+                    .tracks
+                    .iter()
+                    .flat_map(|t| &t.clips)
+                    .any(|c| c.linked && c.document_id == document.id)
+                    || self.history.retains_linked_document(&document.id)
+                {
+                    self.documents
+                        .iter_mut()
+                        .find(|d| d.id == document.id)
+                        .unwrap()
+                        .tab_open = false;
+                } else {
+                    self.documents.retain(|doc| doc.id != document.id);
+                    self.history.remove_document(&document.id);
+                }
                 self.collect_revisions();
                 if self.active.as_ref() == Some(&document.id) {
-                    self.active = self.documents.last().map(|doc| doc.id.clone());
+                    self.active = self
+                        .documents
+                        .iter()
+                        .rev()
+                        .find(|doc| doc.tab_open)
+                        .map(|doc| doc.id.clone());
                 }
                 Ok(CommandResult::Document(document.into()))
             }
@@ -732,4 +846,196 @@ fn advance(revision: &mut u64) -> Result<(), CommandError> {
         CommandError::new(ErrorCode::RevisionExhausted, "Session revision exhausted")
     })?;
     Ok(())
+}
+
+#[cfg(all(test, feature = "gui"))]
+mod native_editor_host_tests {
+    use super::*;
+    use crate::{
+        Outcome, Request, Session,
+        desktop::DesktopHost,
+        presentation::*,
+        processing::{EffectKind, Instance, Owner, Processing},
+    };
+    fn fixture() -> (DesktopHost, Vec<(Owner, String)>) {
+        let mut session = Session::default();
+        let mut owners = Vec::new();
+        for name in ["First", "Second"] {
+            let id = uuid::Uuid::new_v4().to_string();
+            let revision = uuid::Uuid::new_v4().to_string();
+            let effect = uuid::Uuid::new_v4().to_string();
+            let mut processing = Processing::default();
+            // A shell probe only: unavailable DSP is never registered or played.
+            processing.effects.push(Instance {
+                id: effect.clone(),
+                kind: EffectKind::SoftClipper,
+                bypassed: false,
+                parameters: Default::default(),
+            });
+            let document:DocumentInfo = serde_json::from_value(serde_json::json!({"id":id,"revision_id":revision,"name":name,"path":"probe.wav","sample_rate":48000,"channels":1,"frames":128,"encoding":"float32","dirty":false,"cursor":0,"selection":null,"peak_level":0.0,"overloaded_samples":0,"processing":processing,"saved_processing":processing})).unwrap();
+            let audio = audio::prepare(
+                48000,
+                1,
+                "float32".into(),
+                Default::default(),
+                vec![0.0; 128],
+                &AtomicBool::new(false),
+                |_| {},
+            )
+            .unwrap();
+            session.editor.revisions.insert(revision, Arc::new(audio));
+            session.editor.documents.push(document);
+            owners.push((Owner::Document(id), effect));
+        }
+        (DesktopHost::with_session(session), owners)
+    }
+    fn params(owner: &(Owner, String)) -> EditorParams {
+        EditorParams {
+            owner: owner.0.clone(),
+            instance_id: owner.1.clone(),
+            expected_presentation_revision: None,
+        }
+    }
+    fn execute(host: &mut DesktopHost, command: Command) {
+        let response = host.execute(Request::new("shell-probe", command));
+        assert!(
+            matches!(response.outcome, Outcome::Ok { .. }),
+            "{response:?}"
+        );
+    }
+    #[test]
+    fn native_bindings_focus_close_remove_and_undo_preserve_owner_identity() {
+        let (mut host, owners) = fixture();
+        let initial = host.snapshot().revision;
+        execute(&mut host, Command::OpenEffectEditor(params(&owners[0])));
+        execute(&mut host, Command::OpenEffectEditor(params(&owners[1])));
+        let first = host.presentation().editor_windows[0].clone();
+        execute(&mut host, Command::OpenEffectEditor(params(&owners[0])));
+        assert_eq!(host.presentation().editor_windows.len(), 2);
+        assert_eq!(host.presentation().editor_windows[0].id, first.id);
+        assert_eq!(host.presentation().editor_windows[0].focus_generation, 2);
+        execute(
+            &mut host,
+            Command::SetMode(SetModeParams {
+                mode: ViewMode::Multitrack,
+                expected_presentation_revision: None,
+            }),
+        );
+        assert_eq!(host.presentation().editor_windows[0].owner, owners[0].0);
+        let processing = host.processing(owners[1].0.clone()).unwrap();
+        execute(
+            &mut host,
+            Command::BeginProcessingPreview(crate::processing::BeginParams {
+                owner: owners[1].0.clone(),
+                expected_edit_revision: processing.committed.edit_revision_id.clone(),
+            }),
+        );
+        let preview = host
+            .processing(owners[1].0.clone())
+            .unwrap()
+            .preview_id
+            .unwrap();
+        let id = host.presentation().editor_windows[1].id.clone();
+        host.register_editor_preview(&id, Some(preview));
+        execute(&mut host, Command::CloseEffectEditor(params(&owners[1])));
+        assert_eq!(host.processing(owners[1].0.clone()).unwrap(), processing);
+        assert_eq!(host.snapshot().revision, initial);
+        let processing = host.processing(owners[0].0.clone()).unwrap();
+        execute(
+            &mut host,
+            Command::EditProcessing(crate::processing::EditParams {
+                owner: owners[0].0.clone(),
+                expected_edit_revision: processing.committed.edit_revision_id,
+                change: crate::processing::Action::Remove {
+                    effect_id: owners[0].1.clone(),
+                },
+            }),
+        );
+        host.begin_frame(&eframe::egui::Context::default());
+        assert!(host.presentation().editor_windows.is_empty());
+        execute(&mut host, Command::Undo(crate::EmptyParams {}));
+        assert_eq!(
+            host.processing(owners[0].0.clone())
+                .unwrap()
+                .committed
+                .effects
+                .len(),
+            1
+        );
+        host.begin_frame(&eframe::egui::Context::default());
+        assert!(
+            host.presentation().editor_windows.is_empty(),
+            "Undo must not reopen windows"
+        );
+    }
+    #[test]
+    fn native_editor_validation_and_geometry_are_presentation_only() {
+        let (mut host, owners) = fixture();
+        let revision = host.snapshot().revision;
+        assert!(matches!(
+            host.execute(Request::new(
+                "focus-closed",
+                Command::FocusEffectEditor(params(&owners[0]))
+            ))
+            .outcome,
+            Outcome::Error {
+                error: CommandError {
+                    code: ErrorCode::NotFound,
+                    ..
+                }
+            }
+        ));
+        execute(&mut host, Command::OpenEffectEditor(params(&owners[0])));
+        let id = host.presentation().editor_windows[0].id.clone();
+        execute(
+            &mut host,
+            Command::SetEditorGeometry(EditorGeometryParams {
+                editor_id: id.clone(),
+                geometry: WindowGeometry {
+                    width: 800.0,
+                    height: 500.0,
+                    x: Some(-1400.0),
+                    y: Some(50.0),
+                },
+                expected_presentation_revision: None,
+            }),
+        );
+        assert_eq!(host.presentation().layout.editor_geometry[&id].width, 800.0);
+        let before = host.presentation();
+        let response = host.execute(Request::new(
+            "invalid-size",
+            Command::SetEditorGeometry(EditorGeometryParams {
+                editor_id: id,
+                geometry: WindowGeometry {
+                    width: f32::NAN,
+                    ..Default::default()
+                },
+                expected_presentation_revision: None,
+            }),
+        ));
+        assert!(matches!(response.outcome, Outcome::Error { .. }));
+        assert_eq!(host.presentation(), before);
+        assert_eq!(host.snapshot().revision, revision);
+        let response = Session::default().execute(Request::new(
+            "headless",
+            Command::OpenEffectEditor(params(&owners[0])),
+        ));
+        assert!(matches!(
+            response.outcome,
+            Outcome::Error {
+                error: CommandError {
+                    code: ErrorCode::MissingCapability,
+                    ..
+                }
+            }
+        ));
+    }
+}
+
+impl DocumentInfo {
+    pub(crate) fn refresh_dirty(&mut self, tempo: f64) {
+        self.dirty = self.saved_revision_id.as_ref() != Some(&self.revision_id)
+            || !self.processing.same_sound(&self.saved_processing)
+            || (!self.processing.effects.is_empty() && self.saved_effect_tempo != tempo);
+    }
 }

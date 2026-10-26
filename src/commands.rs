@@ -94,6 +94,21 @@ macro_rules! command_registry {
 }
 
 command_registry! {
+    OpenEffectEditor(crate::presentation::EditorParams) => ("effects.editor.open", "Open or focus the native editor bound to one owner and effect instance.", true, true, false, PresentationSnapshot),
+    FocusEffectEditor(crate::presentation::EditorParams) => ("effects.editor.focus", "Focus an existing native effect editor without retargeting it.", true, true, false, PresentationSnapshot),
+    CloseEffectEditor(crate::presentation::EditorParams) => ("effects.editor.close", "Close the native editor while leaving its processing active.", true, true, false, PresentationSnapshot),
+    SetEditorGeometry(crate::presentation::EditorGeometryParams) => ("effects.editor.geometry", "Remember native editor geometry outside audio history.", true, true, false, PresentationSnapshot),
+    RenderProcessing(crate::rendering::RenderParams) => ("processing.render", "Render committed owner audio and bounded tails asynchronously without a device.", true, false, false, JobInfo),
+    ReadRenderedSamples(crate::rendering::SamplesParams) => ("processing.samples", "Read a bounded interval of a completed processing render.", false, false, false, SamplesData),
+    GetEffectCatalogue(EmptyParams) => ("processing.catalogue", "List built-in processors, availability and typed parameter metadata.", false, false, false, Vec<crate::processing::EffectInfo>),
+    GetProcessing(crate::processing::OwnerParams) => ("processing.get", "Inspect committed and transient owner processing and render identity.", false, false, false, crate::processing::Snapshot),
+    EditProcessing(crate::processing::EditParams) => ("processing.edit", "Commit one validated owner envelope or stack change.", true, false, false, crate::processing::Snapshot),
+    BeginProcessingPreview(crate::processing::BeginParams) => ("processing.preview.begin", "Begin an owner-bound preview transaction.", true, false, false, crate::processing::Snapshot),
+    UpdateProcessingPreview(crate::processing::UpdateParams) => ("processing.preview.update", "Update transient processing without audio history.", true, false, false, crate::processing::Snapshot),
+    CommitProcessingPreview(crate::processing::PreviewParams) => ("processing.preview.commit", "Commit a preview as one chronological undo entry.", true, false, false, crate::processing::Snapshot),
+    CancelProcessingPreview(crate::processing::PreviewParams) => ("processing.preview.cancel", "Restore committed processing and abandon the preview.", true, false, false, crate::processing::Snapshot),
+    SetEffectTempo(crate::processing::TempoParams) => ("processing.tempo.set", "Set shared effect BPM (20..400), initially 120.", true, false, false, crate::arrangement::Arrangement),
+    MakeClipIndependent(crate::processing::DetachParams) => ("processing.make_independent", "Detach a linked clip while preserving its current snapshot.", true, false, false, crate::processing::Snapshot),
     GetProject(EmptyParams) => ("project.get", "Inspect portable project path, dirty state and saved working revisions.", false, false, false, crate::projects::ProjectInfo),
     SaveProject(crate::projects::SaveProjectParams) => ("project.save", "Atomically save a workspace snapshot and checksummed managed lossless assets.", true, false, false, JobInfo),
     OpenProject(crate::projects::OpenProjectParams) => ("project.open", "Validate and open a portable project without source files; dirty work requires explicit policy.", true, false, false, JobInfo),
@@ -108,12 +123,13 @@ command_registry! {
     SeekMix(crate::mixing::MixSeekParams) => ("mix.seek", "Seek the arrangement while preserving selection and playing state.", true, false, false, crate::arrangement::Arrangement),
     RewindMix(EmptyParams) => ("mix.rewind", "Rewind the arrangement to absolute start, retaining playing state.", true, false, false, crate::arrangement::Arrangement),
     TrimClip(crate::arrangement::TrimClipParams) => ("clips.trim", "Trim a clip's pinned source interval and rebuild its instance processing as one background edit.", true, false, false, JobInfo),
-    ApplyClipEffect(crate::arrangement::ClipEffectParams) => ("clips.effects.apply", "Apply shared DSP only to one pinned clip instance as one cancellable background edit.", true, false, false, JobInfo),
+    ApplyClipEffect(crate::arrangement::ClipEffectParams) => ("clips.pcm.process", "Process one clip snapshot independently of its live envelope/stack, as a cancellable source edit.", true, false, false, JobInfo),
     ReadClipSamples(crate::arrangement::ClipSamplesParams) => ("clips.samples", "Inspect a bounded interval of a clip's processed source-rate audio.", false, false, false, SamplesData),
     GetArrangement(EmptyParams) => ("arrangement.get", "Inspect tracks, pinned clips and exact project-frame navigation.", false, false, false, crate::arrangement::Arrangement),
     AddTrack(crate::arrangement::AddTrackParams) => ("tracks.add", "Insert a named track as one undoable arrangement edit.", true, false, false, crate::arrangement::Arrangement),
     UpdateTrack(crate::arrangement::UpdateTrackParams) => ("tracks.update", "Rename, reorder or change track controls as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
     RemoveTrack(crate::arrangement::TrackParams) => ("tracks.remove", "Remove a track and its clips in one undoable edit.", true, false, false, crate::arrangement::Arrangement),
+    DuplicateClip(crate::arrangement::DuplicateClipParams) => ("clips.duplicate", "Duplicate a clip with independent envelope/effect identities while retaining its immutable source and document link.", true, false, false, crate::arrangement::Arrangement),
     InsertClip(crate::arrangement::InsertClipParams) => ("clips.insert", "Insert an immutable source interval at an exact project frame, deriving pairwise crossfades and rejecting third overlaps.", true, false, false, crate::arrangement::Arrangement),
     MoveClip(crate::arrangement::MoveClipParams) => ("clips.move", "Move a clip in time or between tracks as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
     RemoveClip(crate::arrangement::ClipParams) => ("clips.remove", "Remove a clip as one undoable edit.", true, false, false, crate::arrangement::Arrangement),
@@ -146,10 +162,10 @@ command_registry! {
     BrowseFolder(PathParams) => ("browser.navigate", "List a folder asynchronously, retaining navigation after errors.", true, false, false, BrowserSnapshot),
     SelectBrowserFile(PathParams) => ("browser.select", "Select a listed file without opening or auditioning it.", true, false, false, BrowserSnapshot),
     OpenBrowserFile(PathParams) => ("browser.open", "Stop audition and open the specified browser audio file.", true, false, false, JobInfo),
-    StartAudition(PathParams) => ("audition.start", "Decode and preview WAV or MP3 without creating an audio document.", true, false, true, BrowserSnapshot),
+    StartAudition(PathParams) => ("audition.start", "Decode and preview WAV, MP3 or Ogg Vorbis without creating an audio document.", true, false, true, BrowserSnapshot),
     StopAudition(EmptyParams) => ("audition.stop", "Cancel or stop browser preview without resuming editor playback.", true, false, false, BrowserSnapshot),
     SetAuditionVolume(AuditionVolumeParams) => ("audition.volume.set", "Set independent browser preview volume from zero to one.", true, false, false, BrowserSnapshot),
-    ApplyEffect(ApplyEffectParams) => ("effects.apply", "Apply gain, fade, reverse or bounded reverb to an explicit immutable audio target as one undoable background edit.", true, false, false, JobInfo),
+    ApplyEffect(ApplyEffectParams) => ("edit.process", "Process source PCM at an explicit immutable target, independently of live envelopes/stacks.", true, false, false, JobInfo),
     GetHistory(EmptyParams) => ("history.get", "Inspect chronological session undo and redo availability.", false, false, false, HistoryInfo),
     Undo(EmptyParams) => ("history.undo", "Undo the latest committed audio edit.", true, false, false, HistoryInfo),
     Redo(EmptyParams) => ("history.redo", "Redo the latest undone audio edit.", true, false, false, HistoryInfo),
@@ -184,6 +200,7 @@ pub(crate) fn capabilities(gui: bool, device: bool) -> Capabilities {
         "transport".into(),
         "browser".into(),
         "effects".into(),
+        "processing".into(),
         "history".into(),
         "edit".into(),
         "audio.export".into(),
@@ -194,7 +211,11 @@ pub(crate) fn capabilities(gui: bool, device: bool) -> Capabilities {
         capabilities.push("audio.output".into());
     }
     if gui {
-        capabilities.extend(["presentation".into(), "capture.png".into()]);
+        capabilities.extend([
+            "presentation".into(),
+            "capture.png".into(),
+            "effects.editors".into(),
+        ]);
     }
     Capabilities {
         protocol_version: PROTOCOL_VERSION,

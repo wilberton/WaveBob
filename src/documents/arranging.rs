@@ -18,7 +18,10 @@ impl Editor {
             if !(1..=2048).contains(&params.bins) {
                 return Err(invalid("Waveform bins must be 1..2048"));
             }
-            let (_, audio, range) = self.clip_audio(&clip.id)?;
+            let (_, audio, mut range) = self.clip_audio(&clip.id)?;
+            if clip.bounce.is_some() {
+                range.end = range.start + clip.source_end - clip.source_start;
+            }
             return Ok(CommandResult::Waveform(WaveformData {
                 document_id: clip.document_id.clone(),
                 revision_id: clip.edit_revision_id.clone(),
@@ -126,6 +129,14 @@ impl Editor {
                     .find(|t| t.id == params.track_id)
                     .ok_or_else(|| not_found("track"))?;
                 let clip = Clip {
+                    source_range_intent: None,
+                    envelope_intent: None,
+                    bounce: None,
+                    tail_frames: 0,
+                    tail_capped: false,
+                    processing: crate::processing::Processing::default(),
+                    linked: true,
+                    full_document: params.source_start == 0 && params.source_end == audio.frames(),
                     id: uuid::Uuid::new_v4().to_string(),
                     name: doc.name.clone(),
                     document_id: doc.id.clone(),
@@ -151,6 +162,35 @@ impl Editor {
                 })?;
                 track.clips.push(clip);
                 "Insert clip"
+            }
+            Command::DuplicateClip(params) => {
+                let (origin, source) = next
+                    .clip(&params.clip_id)
+                    .ok_or_else(|| not_found("clip"))?;
+                let track_id = params.track_id.unwrap_or_else(|| origin.id.clone());
+                let mut clip = source.clone();
+                clip.id = uuid::Uuid::new_v4().to_string();
+                clip.edit_revision_id = uuid::Uuid::new_v4().to_string();
+                clip.processing.edit_revision_id = uuid::Uuid::new_v4().to_string();
+                for instance in &mut clip.processing.effects {
+                    instance.id = uuid::Uuid::new_v4().to_string();
+                }
+                clip.position = params.position;
+                clip.insertion_order = next.next_clip_order;
+                next.next_clip_order = next.next_clip_order.checked_add(1).ok_or_else(|| {
+                    CommandError::new(
+                        ErrorCode::RevisionExhausted,
+                        "Clip insertion counter exhausted",
+                    )
+                })?;
+                next.selected_clip_ids = vec![clip.id.clone()];
+                next.tracks
+                    .iter_mut()
+                    .find(|track| track.id == track_id)
+                    .ok_or_else(|| not_found("track"))?
+                    .clips
+                    .push(clip);
+                "Duplicate clip"
             }
             Command::MoveClip(params) => {
                 let (track, clip) = next

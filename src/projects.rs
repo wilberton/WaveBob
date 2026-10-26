@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 pub(crate) mod storage;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectInfo {
     pub path: Option<String>,
@@ -51,11 +51,17 @@ pub struct ProjectSummary {
 pub(crate) struct StateKey {
     pub documents: Vec<DocumentKey>,
     pub arrangement_revision_id: String,
+    pub effect_tempo: f64,
 }
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct DocumentKey {
     pub id: String,
     pub revision_id: String,
+    pub processing: crate::processing::Processing,
+    saved_processing: crate::processing::Processing,
+    saved_effect_tempo: f64,
+    saved_render_identity: Option<String>,
+    save_channels: Option<u16>,
     path: String,
     name: String,
     saved_revision_id: Option<String>,
@@ -66,11 +72,17 @@ impl StateKey {
     pub fn new(documents: &[DocumentInfo], arrangement: &Arrangement) -> Self {
         Self {
             arrangement_revision_id: arrangement.revision_id.clone(),
+            effect_tempo: arrangement.effect_tempo,
             documents: documents
                 .iter()
                 .map(|doc| DocumentKey {
                     id: doc.id.clone(),
                     revision_id: doc.revision_id.clone(),
+                    processing: doc.processing.clone(),
+                    saved_processing: doc.saved_processing.clone(),
+                    saved_effect_tempo: doc.saved_effect_tempo,
+                    saved_render_identity: doc.saved_render_identity.clone(),
+                    save_channels: doc.save_channels,
                     path: doc.path.clone(),
                     name: doc.name.clone(),
                     saved_revision_id: doc.saved_revision_id.clone(),
@@ -100,6 +112,7 @@ pub(crate) struct ProjectFile {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Payload {
     pub loop_enabled: bool,
+    pub processing_policy: String,
     pub documents: Vec<DocumentInfo>,
     pub active_document_id: Option<String>,
     pub arrangement: Arrangement,
@@ -116,4 +129,11 @@ pub(crate) struct Asset {
     pub frames: u64,
     pub encoding: String,
     pub source_details: SourceDetails,
+}
+
+pub(crate) fn processing_policy() -> String {
+    format!(
+        "dsp:{};tail:-100dB/100ms/60s/10ms;range:document-context-60s;latency:compensated-once",
+        crate::processing::DSP_VERSION
+    )
 }

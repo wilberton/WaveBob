@@ -91,7 +91,7 @@ impl WaveBob {
         egui::ScrollArea::vertical().id_salt(("file-browser",&state.path)).auto_shrink([false,false]).show_rows(&mut browser,24.0,state.entries.len(),|ui,rows|{
             for entry in &state.entries[rows] {
                 let response=visuals::file_row(ui,&entry.name,state.selected_path.as_ref()==Some(&entry.path),entry.directory,entry.directory||entry.supported);
-                let description=if entry.directory{"Double-click to open this folder."} else if entry.supported{"Click to select. Audition previews without opening; double-click opens for editing."} else{"Unsupported file type. WaveBob opens WAV and MP3 audio."};
+                let description=if entry.directory{"Double-click to open this folder."} else if entry.supported{"Click to select. Audition previews without opening; double-click opens for editing."} else{"Unsupported file type. WaveBob opens WAV, MP3 and Ogg Vorbis audio."};
                 help.observe(&response,description);
                 if response.double_clicked() {
                     if entry.directory {self.browser_path=entry.path.clone();self.dispatch(Command::BrowseFolder(PathParams{path:entry.path.clone()}));}
@@ -133,7 +133,7 @@ impl WaveBob {
             let supported=state.selected_path.as_deref().is_some_and(|path|std::path::Path::new(path).extension().is_some_and(|ext|ext.eq_ignore_ascii_case("wav")||ext.eq_ignore_ascii_case("mp3")));
             let enabled=active||(supported&&self.host.transport().output.status==wavebob::transport::OutputStatus::Ready);
             let response=icon_button(ui,if active{Icon::Pause}else{Icon::Play},"Audition",active,enabled);
-            help.observe(&response,if active{"Stop preview without resuming editor playback."}else if !supported{"Select a WAV or MP3 file to enable audition."}else if !enabled{"Audition needs an available audio output. Use Retry output if the device failed."}else{"Audition the selected WAV or MP3 without creating a document. Editor playback pauses."});
+            help.observe(&response,if active{"Stop preview without resuming editor playback."}else if !supported{"Select a WAV, MP3 or Ogg Vorbis file to enable audition."}else if !enabled{"Audition needs an available audio output. Use Retry output if the device failed."}else{"Audition the selected WAV, MP3 or Ogg Vorbis without creating a document. Editor playback pauses."});
             if response.clicked(){if active{self.dispatch(Command::StopAudition(EmptyParams{}));}else if let Some(path)=state.selected_path.clone(){self.dispatch(Command::StartAudition(PathParams{path}));}}
             let mut volume=state.audition_volume;
             ui.spacing_mut().slider_width=(area.width()-65.0).max(30.0);

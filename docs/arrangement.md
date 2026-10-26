@@ -38,7 +38,7 @@ source edge shifts timeline position by the same duration, rounded to the neares
 project frame; negative positions are rejected. The right edge changes duration.
 Drag edges in the GUI or use the exact source frame fields beneath the effects.
 
-`clips.effects.apply` takes clip_id, edit_revision_id and an effect, returning a
+`clips.pcm.process` takes clip_id, edit_revision_id and an effect, returning a
 job. It uses the same gain/fade/reverse/reverb DSP as waveform edits. Each clip
 retains its ordered processing steps (up to 32) and a prepared immutable result.
 Trimming rebuilds those steps over the new interval; reverb state resets at its

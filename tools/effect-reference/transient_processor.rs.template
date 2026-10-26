@@ -1,0 +1,8 @@
+mod effects {
+    pub trait Effect {fn process(&mut self,b:&mut [f32]);}
+    fn field(b:&[u8],i:usize)->Option<i32>{Some(i32::from_le_bytes(b.get(i*4..i*4+4)?.try_into().ok()?))}
+    fn ints<const N:usize>(b:&[u8],offset:usize)->Option<[i32;N]>{let mut v=[0;N];for (i,x) in v.iter_mut().enumerate(){*x=field(b,offset+i)?;}Some(v)}
+    fn state_of(v:&[i32])->Vec<u8>{v.iter().flat_map(|x|x.to_le_bytes()).collect()}
+    #[path="@ROOT@/crates/os-engine/src/effects/transient_processor.rs"]pub mod transient_processor;
+}
+fn main(){let args:Vec<_>=std::env::args().collect();let mut b:Vec<f32>=std::fs::read(&args[1]).unwrap().chunks_exact(4).map(|b|f32::from_le_bytes(b.try_into().unwrap())).collect();let v:Vec<i32>=args[3].split(',').map(|s|s.parse().unwrap()).collect();let rate:u32=args[4].parse().unwrap();let mut r=effects::transient_processor::TransientProcessor::with_settings(rate,&effects::transient_processor::Settings{v:v.try_into().unwrap()});b.resize(b.len()+rate as usize*4,0.0);for frame in b.chunks_exact_mut(2){effects::Effect::process(&mut r,frame);}std::fs::write(&args[2],b.iter().flat_map(|x|x.to_le_bytes()).collect::<Vec<_>>()).unwrap();println!("0");}

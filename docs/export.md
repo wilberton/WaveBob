@@ -9,16 +9,16 @@ and chosen save rate. Output runs in background jobs shown in the file panel.
 
 `audio.export` takes `target` (an explicit immutable document revision plus whole
 sample or nonempty frame interval), `path`, optional `format`, `sample_rate`,
-`overwrite` and `overload`. New exports default to 24-bit PCM WAV. WAV encodings
+`channels`, `overwrite` and `overload`. New exports default to 24-bit PCM WAV. WAV encodings
 are `pcm16`, `pcm24`, `pcm32` and `float32`. MP3 uses
 `{"kind":"mp3","bitrate_kbps":192}`; supported CBR bitrates are 128/192/256/320.
 MP3 rates are 32000/44100/48000 Hz. The source rate is preserved when supported,
 otherwise MP3 defaults to 44100 Hz. The shared resampler handles explicit conversion.
-Output retains mono/stereo layout and reports settings, conversion, intended
+Output preserves the processed layout by default and reports settings, conversion, intended
 frames, bytes and MP3 delay/padding.
 
 `documents.save` takes `document_id`, `revision_id`, optional `path`, `format`,
-`sample_rate`, `overwrite` and `overload`. For WAV, omitted format retains the
+`sample_rate`, `channels`, `overwrite` and `overload`. For WAV, omitted format retains the
 current save encoding, initially the source encoding. MP3 Save requires explicit
 lossy format and bitrate settings on every call. Existing destinations require `overwrite:
 true`. Lossless WAV Save As is always available by choosing WAV and a `.wav` path.
@@ -37,7 +37,7 @@ and edits made during a save retain correct dirty state and the current backing
 path/format/rate. The working sample rate and floating-point revision stay intact.
 
 Workers prepare and sync temporary output in the destination directory. Before
-publication, the serialized core checks cancellation and the source revision.
+publication, the serialized core checks cancellation and the source and processing/tempo render identity.
 Then the worker atomically publishes using explicit overwrite/no-clobber policy.
 Cancellation after publication starts returns `busy`; it never reports success
 while allowing a cancelled job to write output. Preparation/stale/cancel failures
@@ -62,3 +62,17 @@ independent session without a hidden dialog. A GUI-free quit request reports
 the normal missing-renderer capability error.
 
 See [encoder inputs, metadata and distribution requirements](mp3-encoder.md).
+
+Save and export run the shared processing renderer, including document gain/fades,
+ordered effects/bypass, one computational-latency compensation and declared audible
+tails. Editable PCM is retained unchanged after standalone Save. Reimporting the
+output produces flattened sound. A range uses up to60 seconds of preceding source
+context, keeps full-document fade anchors, excludes later input and then drains its
+tail. Summary `render_identity`/`render_metadata` identify sound and body/tail/cap;
+source_start/end_frames remain the requested dry-source bounds.
+
+Optional `channels: 1` explicitly averages processed stereo `(L+R)/2`; `channels: 2`
+retains stereo or duplicates mono. Omitting it preserves processed channels (plain
+Save retains its previously chosen channel setting). Rate conversion follows DSP.
+The GUI exposes the same channel choice. Previews must first commit or cancel.
+See [processed output and independent MP3 checks](verification/processed-persistence/README.md).

@@ -252,3 +252,20 @@ publication; native verification must allow these normal file operations.
 
 The [ticket 02 verification record](verification/ticket02/README.md) includes
 inspected PNGs and metadata from the release GUI controlled by the GUI-free runner.
+
+Live effects are queried through processing.catalogue/get and changed through
+processing.edit or preview begin/update/commit/cancel. Explicit document/clip owners,
+processing edit revisions and audible render identities prevent accidental retargets.
+All11 catalogue entries ship DSP and native editors. effects.editor.open/close/focus/
+geometry and capture.png editor_id operate on stable instance bindings. processing.render
+and processing.samples inspect committed wet PCM without changing source audio.
+
+mix.get exposes required/prepared render identities and protected bounce-cache
+bytes/entries. mix.prepare, play and export share current linked full/trim preparation.
+processing.make_independent accepts explicit keep_prior_source:true when refresh
+fails. Source/processing snapshots remain independent. Project schema2 saves current
+lossless assets and editable stacks; audio.export/documents.save render sound.
+Output channels:1 explicitly averages processed stereo, channels:2 retains stereo;
+mix.export include_tail:true includes the current contributing audible end. See
+[live processing](live-processing.md), [sample output](export.md), [projects](projects.md)
+and [complete workflow evidence](verification/live-effects-workflow/README.md).

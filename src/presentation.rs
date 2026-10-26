@@ -12,6 +12,8 @@ pub enum ViewMode {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct PresentationSnapshot {
     pub revision: u64,
+    #[serde(default)]
+    pub editor_windows: Vec<EditorWindow>,
     pub mode: ViewMode,
     pub layout: PanelLayout,
     pub preferences: PreferenceStatus,
@@ -28,6 +30,7 @@ impl Default for PresentationSnapshot {
     fn default() -> Self {
         Self {
             revision: 0,
+            editor_windows: Vec::new(),
             mode: ViewMode::default(),
             layout: PanelLayout::default(),
             preferences: PreferenceStatus::default(),
@@ -157,6 +160,8 @@ pub struct PanelLayout {
     pub right: SidePanelLayout,
     /// Fraction of the left column reserved for open documents.
     pub library_fraction: f64,
+    #[serde(default)]
+    pub editor_geometry: std::collections::BTreeMap<String, WindowGeometry>,
 }
 
 impl Default for PanelLayout {
@@ -171,12 +176,22 @@ impl Default for PanelLayout {
                 width: 200.0,
             },
             library_fraction: 0.18,
+            editor_geometry: Default::default(),
         }
     }
 }
 
 impl PanelLayout {
     pub fn validate(&self) -> Result<(), crate::CommandError> {
+        if self.editor_geometry.len() > 128 {
+            return Err(crate::CommandError::new(
+                crate::ErrorCode::ResourceLimit,
+                "At most 128 editor geometries may be retained",
+            ));
+        }
+        for geometry in self.editor_geometry.values() {
+            geometry.validate()?;
+        }
         if [self.left.width, self.right.width]
             .iter()
             .any(|width| !width.is_finite() || *width < MIN_PANEL_WIDTH as f64)
@@ -294,6 +309,7 @@ pub fn default_timeout_ms() -> u64 {
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenderParams {
+    pub editor_id: Option<String>,
     pub after_revision: Option<u64>,
     pub after_presentation_revision: Option<u64>,
     #[serde(default = "default_timeout_ms")]
@@ -307,6 +323,7 @@ pub struct CaptureParams {
     pub path: Option<String>,
     #[serde(default)]
     pub overwrite: bool,
+    pub editor_id: Option<String>,
     pub after_revision: Option<u64>,
     pub after_presentation_revision: Option<u64>,
     #[serde(default = "default_timeout_ms")]
@@ -316,6 +333,12 @@ pub struct CaptureParams {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct RenderMetadata {
+    pub editor_id: Option<String>,
+    pub owner: Option<crate::processing::Owner>,
+    pub instance_id: Option<String>,
+    pub processing_revision: Option<String>,
+    pub processing_identity: Option<String>,
+    pub preview_id: Option<String>,
     pub session_id: String,
     pub rendered_revision: u64,
     pub presentation_revision: u64,
@@ -332,4 +355,61 @@ pub struct CaptureResult {
     pub path: String,
     pub mime_type: String,
     pub metadata: RenderMetadata,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WindowGeometry {
+    pub width: f32,
+    pub height: f32,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+}
+impl Default for WindowGeometry {
+    fn default() -> Self {
+        Self {
+            width: 720.0,
+            height: 460.0,
+            x: None,
+            y: None,
+        }
+    }
+}
+impl WindowGeometry {
+    pub fn validate(&self) -> Result<(), crate::CommandError> {
+        if !self.width.is_finite()
+            || !self.height.is_finite()
+            || !(320.0..=4096.0).contains(&self.width)
+            || !(240.0..=2160.0).contains(&self.height)
+            || self.x.is_some_and(|v| !v.is_finite())
+            || self.y.is_some_and(|v| !v.is_finite())
+        {
+            return Err(crate::CommandError::new(
+                crate::ErrorCode::InvalidParams,
+                "Invalid native editor geometry",
+            ));
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct EditorWindow {
+    pub id: String,
+    pub owner: crate::processing::Owner,
+    pub instance_id: String,
+    pub focus_generation: u64,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditorParams {
+    pub owner: crate::processing::Owner,
+    pub instance_id: String,
+    pub expected_presentation_revision: Option<u64>,
+}
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditorGeometryParams {
+    pub editor_id: String,
+    pub geometry: WindowGeometry,
+    pub expected_presentation_revision: Option<u64>,
 }

@@ -4,18 +4,52 @@ use wavebob::{Command, EmptyParams, Outcome, Request, desktop::DesktopHost, pres
 use wavebob::{CommandResult, documents::*};
 #[path = "app/arranging.rs"]
 mod arranging;
+#[path = "app/balance.rs"]
+mod balance;
 #[path = "app/browser.rs"]
 mod browser;
+#[path = "app/chorus.rs"]
+mod chorus;
+#[path = "app/delay.rs"]
+mod delay;
 #[path = "app/dropping.rs"]
 mod dropping;
 #[path = "app/editing.rs"]
 mod editing;
+#[path = "app/effect_panel.rs"]
+mod effect_panel;
 #[path = "app/effects.rs"]
 mod effects;
+#[path = "app/envelopes.rs"]
+mod envelopes;
+#[path = "app/fast_distortion.rs"]
+mod fast_distortion;
+#[path = "app/limiter.rs"]
+mod limiter;
+#[path = "app/parametric_eq.rs"]
+mod parametric_eq;
 #[path = "app/projecting.rs"]
 mod projecting;
+#[path = "app/reverb.rs"]
+mod reverb;
+#[path = "app/reverb_field.rs"]
+mod reverb_field;
+#[path = "app/routing.rs"]
+mod routing;
 #[path = "app/saving.rs"]
 mod saving;
+#[path = "app/soft_clipper.rs"]
+mod soft_clipper;
+#[path = "app/stereo_enhancer.rs"]
+mod stereo_enhancer;
+#[path = "app/stereo_shaper.rs"]
+mod stereo_shaper;
+#[path = "app/transfer_plot.rs"]
+mod transfer_plot;
+#[path = "app/transient_processor.rs"]
+mod transient_processor;
+#[path = "app/visualization/mod.rs"]
+mod visualization;
 #[path = "app/visuals.rs"]
 mod visuals;
 #[path = "app/waveform.rs"]
@@ -30,6 +64,7 @@ const MUTED: Color32 = Color32::from_rgb(145, 160, 179);
 #[derive(Default)]
 pub struct WaveBob {
     host: DesktopHost,
+    shared_self: std::sync::Weak<std::sync::Mutex<WaveBob>>,
     error: Option<String>,
     waveform: Option<WaveformData>,
     detail: Option<WaveformData>,
@@ -41,10 +76,14 @@ pub struct WaveBob {
     browser_path: String,
     browser_seen_path: Option<String>,
     browser_edit_path: bool,
-    effect: wavebob::effects::Effect,
-    observed_effect: Option<wavebob::effects::Effect>,
-    gain_db: f64,
-    reverb: effects::ReverbControls,
+    native_editors: std::collections::BTreeMap<String, effects::NativeEditor>,
+    visualization: visualization::Renderer,
+    stack_drag: Option<String>,
+    envelope_drag: Option<envelopes::Drag>,
+    envelope_dialog: Option<envelopes::Entry>,
+    envelope_click: Option<envelopes::PendingClick>,
+    envelope_focus: Option<(wavebob::processing::Owner, envelopes::Handle)>,
+    envelope_pointer_claimed: bool,
     output_dialog: Option<saving::OutputDialog>,
     save_picker: Option<mpsc::Receiver<Option<std::path::PathBuf>>>,
     project_picker: Option<projecting::ProjectPicker>,
@@ -130,7 +169,7 @@ impl WaveBob {
         std::thread::spawn(move || {
             let path = rfd::FileDialog::new()
                 .set_title("Open audio")
-                .add_filter("WAV and MP3 audio", &["wav", "mp3"])
+                .add_filter("WAV, MP3 and Ogg Vorbis audio", &["wav", "mp3", "ogg"])
                 .pick_file();
             let _ = sender.send(path);
             ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
@@ -215,6 +254,19 @@ impl WaveBob {
                 | Command::TogglePanels(_)
                 | Command::ActivateDocument(_)
                 | Command::CloseDocument(_)
+                | Command::Undo(_)
+                | Command::Redo(_)
+        ) {
+            self.cancel_envelope_drag();
+            self.envelope_dialog = None;
+        }
+        if matches!(
+            &command,
+            Command::SetMode(_)
+                | Command::SetLayout(_)
+                | Command::TogglePanels(_)
+                | Command::ActivateDocument(_)
+                | Command::CloseDocument(_)
         ) {
             self.gesture = None;
         }
@@ -273,8 +325,20 @@ impl WaveBob {
         name: String,
         preferences: std::path::PathBuf,
     ) -> std::io::Result<Self> {
+        Self::with_host(cc, directory, name, preferences, DesktopHost::default())
+    }
+    pub fn with_host(
+        cc: &eframe::CreationContext<'_>,
+        directory: &std::path::Path,
+        name: String,
+        preferences: std::path::PathBuf,
+        host: DesktopHost,
+    ) -> std::io::Result<Self> {
         theme(&cc.egui_ctx);
-        let mut app = Self::default();
+        let mut app = Self {
+            host,
+            ..Self::default()
+        };
         app.host
             .configure_preferences(preferences, cc.egui_ctx.clone());
         app.host.listen(directory, name, cc.egui_ctx.clone())?;
@@ -291,6 +355,8 @@ impl WaveBob {
             || self.dialog.is_some()
             || self.open_requested
             || self.output_dialog.is_some()
+            || self.envelope_dialog.is_some()
+            || self.envelope_keyboard_owns_input(ctx)
             || self.save_picker.is_some()
             || self.project_picker.is_some()
             || self.close_flow.is_some()
@@ -300,7 +366,13 @@ impl WaveBob {
         {
             return;
         }
+        let native_controls = ctx.viewport_id() != egui::ViewportId::ROOT;
         let pressed = |key| {
+            // Reserve Escape for effect gestures. Ordinary control focus must
+            // not block preview transport; text and modal focus are guarded above.
+            if native_controls && key == egui::Key::Escape {
+                return false;
+            }
             ctx.input_mut(|input| {
             let fresh = input.events.iter().any(|event| matches!(event, egui::Event::Key { key: actual, pressed: true, repeat: false, modifiers, .. } if *actual == key && modifiers.is_none()));
             fresh && input.consume_key(egui::Modifiers::NONE, key)
@@ -432,10 +504,13 @@ impl WaveBob {
 
     // Independent of eframe::Frame for real egui pointer/key/focus tests.
     fn draw(&mut self, ui: &mut egui::Ui) {
+        self.envelope_pointer_claimed = false;
         self.host.begin_frame(ui.ctx());
+        self.envelope_shortcuts(ui.ctx());
         self.handle_native_close(ui.ctx());
         if !self.host.frozen() && !ui.ctx().input(|input| input.focused) {
             self.cancel_gesture();
+            self.cancel_envelope_drag();
         }
         self.poll_dialog();
         self.file_drops(ui.ctx());
@@ -469,7 +544,7 @@ impl WaveBob {
                     ui.add_space(12.0);
                     let menu = ui.menu_button("File", |ui| {
                         let response = ui.button("Open audio…");
-                        help.observe(&response, "Open a WAV or MP3 audio file in a new document.");
+                        help.observe(&response, "Open a WAV, MP3 or Ogg Vorbis audio file in a new document.");
                         if response.clicked() && !self.host.frozen() {
                             self.open_requested = true;
                             ui.close();
@@ -495,7 +570,7 @@ impl WaveBob {
                     });
                     help.observe(
                         &menu.response,
-                        "Open a WAV or MP3 audio file in a new document.",
+                        "Open a WAV, MP3 or Ogg Vorbis audio file in a new document.",
                     );
                     let edit = ui.menu_button("Edit", |ui| {
                         let history = self.host.history();
@@ -596,18 +671,7 @@ impl WaveBob {
 
         // Allocate the strip first; paint its text after collecting this frame's help.
         let status = egui::Panel::bottom("status")
-            .exact_size(
-                if self
-                    .display_document()
-                    .is_some_and(|doc| doc.selection.is_some())
-                {
-                    if error.is_some() { 74.0 } else { 50.0 }
-                } else if error.is_some() {
-                    54.0
-                } else {
-                    30.0
-                },
-            )
+            .exact_size(if error.is_some() { 74.0 } else { 50.0 })
             .frame(panel_frame())
             .show(ui, |ui| ui.max_rect())
             .inner;
@@ -663,7 +727,7 @@ impl WaveBob {
                 help.observe(&rewind,if target {"Rewind to absolute start and preserve playing/paused state and selection. Shortcut: Enter or comma."} else {"Open audio or arrange a clip to enable rewind. Shortcut: Enter or comma."});
                 if rewind.clicked() {self.rewind();}
                 if output.output.status==wavebob::transport::OutputStatus::Failed {
-                    let retry=ui.button("Retry output");
+                    let retry=ui.add(egui::Button::new("Retry").min_size(Vec2::new(46.0,28.0)));
                     help.observe(&retry,"Retry audio output after connecting or restoring a device.");
                     if retry.clicked() {self.dispatch(Command::RetryOutput(EmptyParams{}));}
                 } else {
@@ -705,11 +769,14 @@ impl WaveBob {
                 }
             });
         self.file_modals(ui.ctx(), &mut help);
+        self.envelope_modals(ui.ctx());
         self.file_drop_feedback(ui.ctx(), &mut help);
         self.status(ui, status, mode, &help, error.as_deref());
         self.host.set_ui_resources(
             [
                 self.output_dialog.is_some().then_some("output-dialog"),
+                self.envelope_dialog.is_some().then_some("envelope-dialog"),
+                self.envelope_drag.is_some().then_some("envelope-preview"),
                 self.save_picker.is_some().then_some("native-output-picker"),
                 self.project_picker
                     .is_some()
@@ -726,6 +793,8 @@ impl WaveBob {
             .map(str::to_owned)
             .collect(),
         );
+        self.effect_windows(ui.ctx());
+        self.visualization.maintain(ui.painter());
         self.host.end_frame(ui.ctx());
         if self.host.ready_to_close() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -766,7 +835,10 @@ impl WaveBob {
             ),
             egui::Button::new("+").frame(false),
         );
-        help.observe(&add, "Open a WAV or MP3 audio file in a new document.");
+        help.observe(
+            &add,
+            "Open a WAV, MP3 or Ogg Vorbis audio file in a new document.",
+        );
         if add.clicked() && !self.host.frozen() {
             self.open_requested = true;
         }
@@ -796,7 +868,7 @@ impl WaveBob {
                             .color(MUTED),
                     );
                     let response = ui.button("Open audio…");
-                    help.observe(&response, "Open a WAV or MP3 audio file in a new document.");
+                    help.observe(&response, "Open a WAV, MP3 or Ogg Vorbis audio file in a new document.");
                     if response.clicked() && !self.host.frozen() {
                         self.open_requested = true;
                     }
@@ -932,7 +1004,6 @@ impl WaveBob {
         } else {
             None
         };
-        let selected = document.as_ref().is_some_and(|doc| doc.selection.is_some());
         let readout = if mode == ViewMode::Waveform {
             document
                 .map(|doc| {
@@ -986,28 +1057,56 @@ impl WaveBob {
             PreferenceStatus::Saving
         );
         content.horizontal(|ui| {
-            ui.label(RichText::new(readout).size(11.0));
-            if !selected {
-                ui.separator();
-                let available = (ui.available_width() - if saving { 95.0 } else { 0.0 }).max(0.0);
-                ui.add_sized(
-                    [available, 18.0],
-                    egui::Label::new(RichText::new(help.text()).size(11.0).color(MUTED)).truncate(),
-                );
-            }
+            let available = (ui.available_width() - if saving { 95.0 } else { 0.0 }).max(0.0);
+            ui.allocate_ui_with_layout(
+                Vec2::new(available, 18.0),
+                egui::Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.add(egui::Label::new(RichText::new(readout).size(11.0)).truncate());
+                },
+            );
             if saving {
                 ui.label(RichText::new("Saving layout…").size(10.0).color(MUTED));
             }
         });
-        if selected {
-            content.add(
-                egui::Label::new(RichText::new(help.text()).size(11.0).color(MUTED)).truncate(),
-            );
+        content
+            .add(egui::Label::new(RichText::new(help.text()).size(11.0).color(MUTED)).truncate());
+    }
+}
+
+/// Native viewports share the same UI model while rendering independently.
+/// This mutex never enters the audio callback.
+pub struct DesktopApp {
+    state: std::sync::Arc<std::sync::Mutex<WaveBob>>,
+}
+impl DesktopApp {
+    pub fn new(app: WaveBob) -> Self {
+        let state = std::sync::Arc::new(std::sync::Mutex::new(app));
+        state.lock().unwrap().shared_self = std::sync::Arc::downgrade(&state);
+        Self { state }
+    }
+}
+impl eframe::App for DesktopApp {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        eframe::App::logic(&mut *self.state.lock().unwrap(), ctx, frame);
+    }
+    fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        if let Some(gl) = gl {
+            self.state.lock().unwrap().visualization.destroy(gl);
         }
+    }
+    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        eframe::App::raw_input_hook(&mut *self.state.lock().unwrap(), ctx, input);
+    }
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        eframe::App::ui(&mut *self.state.lock().unwrap(), ui, frame);
     }
 }
 
 impl eframe::App for WaveBob {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.host.background_frame(ctx);
+    }
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         self.text_clipboard_input(ctx, input);
     }
@@ -1045,6 +1144,8 @@ fn encoding_label(document: &DocumentInfo) -> String {
                 .as_deref()
                 .unwrap_or("")
         )
+    } else if document.encoding == "ogg_vorbis" {
+        "Ogg Vorbis".into()
     } else {
         document
             .encoding
@@ -1090,6 +1191,9 @@ fn child(ui: &mut egui::Ui, rect: Rect) -> egui::Ui {
 }
 
 fn theme(ctx: &egui::Context) {
+    // The approved palette is dark. Native system-theme events must not switch
+    // to an unstyled light bank after this one-time setup.
+    ctx.set_theme(egui::ThemePreference::Dark);
     ctx.options_mut(|options| {
         options.input_options.zoom_modifier = egui::Modifiers {
             ctrl: true,
@@ -1110,6 +1214,17 @@ fn theme(ctx: &egui::Context) {
         .entry(egui::FontFamily::Proportional)
         .or_default()
         .insert(0, "Inter".into());
+    // Reuse the bundled variable font for the approved effect-editor typography.
+    for (name, weight) in [("Inter Medium", 500.0), ("Inter Semibold", 620.0)] {
+        let mut data = fonts.font_data["Inter"].as_ref().clone();
+        data.tweak.coords.push(b"wght", weight);
+        fonts
+            .font_data
+            .insert(name.into(), std::sync::Arc::new(data));
+        fonts
+            .families
+            .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
+    }
     ctx.set_fonts(fonts);
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = SURFACE;

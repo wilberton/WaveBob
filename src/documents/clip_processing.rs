@@ -11,7 +11,51 @@ impl Editor {
         id: &str,
     ) -> Result<(Clip, Arc<audio::Audio>, FrameRange), CommandError> {
         let (_, clip) = self.arrangement.clip(id).ok_or_else(|| not_found("clip"))?;
-        let (audio, range) = if let Some(processed) = &clip.processed_revision_id {
+        if clip.linked {
+            let doc = self.document(&clip.document_id)?;
+            let current = if let Some(bounce) = &clip.bounce {
+                let identity = doc
+                    .processing
+                    .identity(&doc.revision_id, self.arrangement.effect_tempo);
+                bounce.render_identity
+                    == crate::projects::checksum(&(identity, clip.source_start, clip.source_end))
+                    && bounce.source_revision_id == doc.revision_id
+            } else {
+                doc.revision_id == clip.revision_id
+                    && doc
+                        .processing
+                        .same_sound(&crate::processing::Processing::default())
+            };
+            if !current {
+                return Err(CommandError::new(
+                    ErrorCode::Busy,
+                    "Linked source is pending; prepare the current mix before reading or rendering it",
+                ));
+            }
+        }
+        let (audio, range) = if let Some(bounce) = &clip.bounce {
+            let audio = self
+                .revisions
+                .get(&bounce.audio_revision_id)
+                .ok_or_else(|| not_found("bounce audio"))?
+                .clone();
+            let range = if clip.linked {
+                FrameRange {
+                    start: 0,
+                    end: audio.frames(),
+                }
+            } else {
+                FrameRange {
+                    start: clip.source_start,
+                    end: if clip.source_end == bounce.metadata.source_body_frames {
+                        audio.frames()
+                    } else {
+                        clip.source_end
+                    },
+                }
+            };
+            (audio, range)
+        } else if let Some(processed) = &clip.processed_revision_id {
             let audio = self
                 .revisions
                 .get(processed)
@@ -69,6 +113,7 @@ impl Editor {
     pub(super) fn trim_clip(
         &mut self,
         params: TrimClipParams,
+        revision: &mut u64,
     ) -> Result<CommandResult, CommandError> {
         let (_, old) = self
             .arrangement
@@ -85,6 +130,39 @@ impl Editor {
         let mut test = self.arrangement.clone();
         *find_clip(&mut test, &clip.id).unwrap() = clip.clone();
         test.validate()?;
+        if clip.effects.is_empty() {
+            let mut clip = clip;
+            if clip.linked {
+                clip.bounce = None;
+                clip.tail_frames = 0;
+                clip.tail_capped = false;
+            }
+            let before = self.arrangement.clone();
+            if clip != *old {
+                advance(revision)?;
+                clip.edit_revision_id = uuid::Uuid::new_v4().to_string();
+                *find_clip(&mut self.arrangement, &clip.id).unwrap() = clip.clone();
+                self.arrangement.revision_id = uuid::Uuid::new_v4().to_string();
+                self.arrangement.dirty = true;
+                self.history
+                    .push_arrangement(before, self.arrangement.clone(), "Trim clip");
+            }
+            let job = JobInfo {
+                id: uuid::Uuid::new_v4().to_string(),
+                kind: "Trim clip".into(),
+                path: clip.name.clone(),
+                status: JobStatus::Succeeded,
+                progress: 100,
+                result: None,
+                error: None,
+                output: Some(JobOutput::ClipEdit(Box::new(clip))),
+            };
+            self.jobs.insert(
+                job.id.clone(),
+                (job.clone(), Arc::new(AtomicBool::new(false))),
+            );
+            return Ok(CommandResult::Job(job.into()));
+        }
         self.start_clip(clip, "Trim clip", None)
     }
     pub(super) fn process_clip(
@@ -271,6 +349,10 @@ impl Editor {
             clip.edit_revision_id = uuid::Uuid::new_v4().to_string();
             let audio_id = uuid::Uuid::new_v4().to_string();
             clip.processed_revision_id = Some(audio_id.clone());
+            clip.bounce = None;
+            clip.linked = false;
+            clip.tail_frames = 0;
+            clip.tail_capped = false;
             let mut next = self.arrangement.clone();
             *find_clip(&mut next, &clip.id).unwrap() = clip.clone();
             next.validate()?;
@@ -289,7 +371,7 @@ impl Editor {
             Ok(clip) => {
                 job.status = JobStatus::Succeeded;
                 job.progress = 100;
-                job.output = Some(JobOutput::ClipEdit(clip));
+                job.output = Some(JobOutput::ClipEdit(Box::new(clip)));
             }
             Err(error) => {
                 job.status = if error.code == ErrorCode::Cancelled {

@@ -111,6 +111,7 @@ fn quit_waits_for_cancelled_output_acknowledgement_and_rejects_new_mutations() {
                 .into(),
             format: ExportFormat::default(),
             sample_rate: None,
+            channels: None,
             overwrite: false,
             overload: OverloadPolicy::Reject,
         }),

@@ -55,6 +55,53 @@ impl WaveBob {
         }
     }
     pub(super) fn edit_menu(&mut self, ui: &mut egui::Ui, help: &mut Help) {
+        let owner = self.stack_owner();
+        let envelope = ui.add_enabled(owner.is_some(), egui::Button::new("Gain and Fades…"));
+        help.observe(
+            &envelope,
+            if owner.is_some() {
+                "Edit exact gain, mute and fades for the active document or selected clip."
+            } else {
+                "Open a waveform document or select exactly one clip to edit gain and fades."
+            },
+        );
+        if envelope.clicked()
+            && let Some(owner) = owner
+        {
+            self.open_envelope_entry(owner);
+            ui.close();
+        }
+        let reverse = ui.add_enabled(
+            self.active_document().is_some() && self.host.presentation().mode == ViewMode::Waveform,
+            egui::Button::new("Reverse"),
+        );
+        help.observe(
+            &reverse,
+            "Reverse the selection or whole source as one structural edit.",
+        );
+        if reverse.clicked()
+            && let Some(document) = self.active_document()
+        {
+            let target = if let Some(range) = document.selection {
+                EditTarget::Range {
+                    document_id: document.id,
+                    revision_id: document.revision_id,
+                    start_frame: range.start,
+                    end_frame: range.end,
+                }
+            } else {
+                EditTarget::Whole {
+                    document_id: document.id,
+                    revision_id: document.revision_id,
+                }
+            };
+            self.dispatch(Command::ApplyEffect(wavebob::effects::ApplyEffectParams {
+                target,
+                effect: wavebob::effects::Effect::Reverse,
+            }));
+            ui.close();
+        }
+        ui.separator();
         for (action, label, description) in [
             (
                 Action::Cut,

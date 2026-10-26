@@ -1,5 +1,618 @@
 use super::*;
 
+#[path = "distortion_tests.rs"]
+mod distortion_tests;
+#[path = "effect_panel_tests.rs"]
+mod effect_panel_tests;
+#[path = "effect_redesign_tests.rs"]
+mod effect_redesign_tests;
+
+#[test]
+fn adding_an_effect_opens_its_editor_and_undo_redo_does_not_reopen_it() {
+    let (mut h, _directory) = audio_harness();
+    let owner = wavebob::processing::Owner::Document(h.app.active_document().unwrap().id);
+    let add = h.text_rect("+ Add effect").center();
+    h.click(add);
+    let balance = h.text_rect("Balance").center();
+    h.click(balance);
+    let state = h.app.host.processing(owner.clone()).unwrap().committed;
+    assert_eq!(state.effects.len(), 1);
+    let windows = h.app.host.presentation().editor_windows;
+    assert_eq!(
+        windows.len(),
+        1,
+        "Add effect must open controls immediately"
+    );
+    assert_eq!(windows[0].owner, owner);
+    assert_eq!(windows[0].instance_id, state.effects[0].id);
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    h.frame(Vec::new());
+    assert!(h.app.host.presentation().editor_windows.is_empty());
+    h.app.dispatch(Command::Redo(EmptyParams {}));
+    h.frame(Vec::new());
+    assert!(h.app.host.presentation().editor_windows.is_empty());
+}
+
+#[test]
+fn effect_window_geometry_does_not_drift_between_native_frames() {
+    use wavebob::processing::{Action, EffectKind, Owner};
+    let (mut h, _directory) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::Balance,
+        },
+    );
+    let instance_id = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .effects[0]
+        .id
+        .clone();
+    h.app.dispatch(Command::OpenEffectEditor(EditorParams {
+        owner,
+        instance_id,
+        expected_presentation_revision: None,
+    }));
+    let id = h.app.host.presentation().editor_windows[0].id.clone();
+    let viewport_id = egui::ViewportId::from_hash_of(&id);
+    let shared = std::sync::Arc::new(std::sync::Mutex::new(h.app));
+    shared.lock().unwrap().shared_self = std::sync::Arc::downgrade(&shared);
+    h.ctx.set_embed_viewports(false);
+    let size = Vec2::new(640.0, 430.0);
+    let mut opening = true;
+    // Native APIs report the client origin below/right of the decorated window origin.
+    let decorations = Vec2::new(8.0, 31.0);
+    for outer in [
+        Pos2::new(100.0, 100.0),
+        Pos2::new(400.0, 250.0),
+        Pos2::new(-900.0, 120.0),
+        Pos2::new(2400.0, 100.0),
+    ] {
+        for _ in 0..8 {
+            let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+                shared.lock().unwrap().effect_windows(ui.ctx());
+            });
+            output.textures_delta.clear();
+            let callback = output.viewport_output[&viewport_id]
+                .viewport_ui_cb
+                .clone()
+                .unwrap();
+            // A native backend first acknowledges the requested opening size.
+            // Later frames emulate a user resize, including below panel minimum.
+            let client_size = if opening {
+                opening = false;
+                output.viewport_output[&viewport_id]
+                    .builder
+                    .inner_size
+                    .unwrap()
+            } else {
+                size
+            };
+            let mut input = egui::RawInput {
+                viewport_id,
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, client_size)),
+                ..Default::default()
+            };
+            input.viewports.insert(
+                viewport_id,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    inner_rect: Some(Rect::from_min_size(outer + decorations, client_size)),
+                    outer_rect: Some(Rect::from_min_size(
+                        outer,
+                        client_size + Vec2::new(16.0, 39.0),
+                    )),
+                    monitor_size: Some(Vec2::new(1920.0, 1080.0)),
+                    ..Default::default()
+                },
+            );
+            let mut output = h.ctx.run_ui(input, |ui| callback(ui));
+            output.textures_delta.clear();
+            let geometry = shared
+                .lock()
+                .unwrap()
+                .host
+                .presentation()
+                .layout
+                .editor_geometry[&id]
+                .clone();
+            assert_eq!(
+                (geometry.width, geometry.height),
+                (client_size.x, client_size.y)
+            );
+            assert_eq!(
+                (geometry.x, geometry.y),
+                (Some(outer.x), Some(outer.y)),
+                "Saving a client origin as the outer origin moves the decorated window each repaint"
+            );
+            let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+                shared.lock().unwrap().effect_windows(ui.ctx());
+            });
+            output.textures_delta.clear();
+            assert_eq!(
+                output.viewport_output[&viewport_id].builder.position,
+                Some(outer)
+            );
+        }
+    }
+}
+
+#[test]
+fn native_light_system_theme_does_not_override_the_approved_dark_editor_palette() {
+    let ctx = egui::Context::default();
+    theme(&ctx);
+    for system_theme in [egui::Theme::Light, egui::Theme::Dark, egui::Theme::Light] {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                system_theme: Some(system_theme),
+                ..Default::default()
+            },
+            |ui| {
+                assert!(
+                    ui.visuals().dark_mode,
+                    "A native system-theme event replaced WaveBob's palette"
+                );
+                assert_eq!(
+                    ui.visuals().override_text_color,
+                    Some(Color32::from_rgb(209, 220, 235))
+                );
+                assert_eq!(ui.visuals().panel_fill, SURFACE);
+            },
+        );
+        output.textures_delta.clear();
+    }
+}
+
+#[test]
+fn reverb_editor_only_shows_six_dials_and_opening_preserves_legacy_settings() {
+    use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
+    let (mut h, _directory) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::Reverb,
+        },
+    );
+    let id = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .effects[0]
+        .id
+        .clone();
+    for (parameter_id, value) in [
+        ("tempo_sync", ParameterValue::Boolean(true)),
+        ("predelay", ParameterValue::Integer(384)),
+        ("early", ParameterValue::Integer(27)),
+        ("wet", ParameterValue::Integer(96)),
+    ] {
+        h.app.processing_action(
+            &owner,
+            Action::SetParameter {
+                effect_id: id.clone(),
+                parameter_id: parameter_id.into(),
+                value,
+            },
+        );
+    }
+    h.app
+        .dispatch(Command::SetEffectTempo(wavebob::processing::TempoParams {
+            bpm: 20.0,
+        }));
+    let before = h.app.host.processing(owner.clone()).unwrap().committed;
+    let window = EditorWindow {
+        id: "six-dial-test".into(),
+        owner: owner.clone(),
+        instance_id: id,
+        focus_generation: 1,
+    };
+    let mut native = effects::NativeEditor::default();
+    let ctx = egui::Context::default();
+    theme(&ctx);
+    for time in [0.0, 0.1, 0.2] {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(850.0, 530.0))),
+                time: Some(time),
+                ..Default::default()
+            },
+            |ui| {
+                h.app
+                    .native_parameters(ui, &window, &before.effects[0], &mut native)
+            },
+        );
+        output.textures_delta.clear();
+        let text: Vec<_> = text_shapes(&output)
+            .into_iter()
+            .map(|(_, text)| text)
+            .collect();
+        for label in [
+            "Size",
+            "Decay",
+            "Pre-delay",
+            "Damping",
+            "Width",
+            "Mix",
+            "Bypass",
+        ] {
+            assert_eq!(
+                text.iter().filter(|s| s.as_str() == label).count(),
+                1,
+                "{label}: {text:?}"
+            );
+        }
+        assert!(text.iter().any(|s| s == "6000 ms"), "{text:?}");
+        for removed in ["Set tempo", "Dry", "Wet", "Diffusion", "M/S", "Separation"] {
+            assert!(!text.iter().any(|s| s == removed), "{text:?}");
+        }
+    }
+    assert_eq!(h.app.host.processing(owner).unwrap().committed, before);
+}
+
+#[test]
+fn reverb_mix_drag_commits_together_escape_cancels_and_bypass_is_undoable() {
+    use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
+    let (mut h, _directory) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::Reverb,
+        },
+    );
+    let before = h.app.host.processing(owner.clone()).unwrap().committed;
+    let id = before.effects[0].id.clone();
+    let window = EditorWindow {
+        id: "reverb-gesture".into(),
+        owner: owner.clone(),
+        instance_id: id,
+        focus_generation: 1,
+    };
+    let ctx = egui::Context::default();
+    theme(&ctx);
+    let mut native = effects::NativeEditor::default();
+    let mut time = 0.0;
+    let mut render = |app: &mut WaveBob, events| {
+        time += 0.1;
+        let snapshot = app.host.processing(owner.clone()).unwrap();
+        let state = snapshot.preview.as_ref().unwrap_or(&snapshot.committed);
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(850.0, 530.0))),
+                time: Some(time),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |ui| app.native_parameters(ui, &window, &state.effects[0], &mut native),
+        );
+        output.textures_delta.clear();
+        output
+    };
+    let pointer = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    render(&mut h.app, vec![]);
+    let start = Pos2::new(790.0, 400.0);
+    let end = start - Vec2::new(0.0, 32.0);
+    let history = h.app.host.history().undo_count;
+    render(&mut h.app, vec![egui::Event::PointerMoved(start)]);
+    render(&mut h.app, vec![pointer(start, true)]);
+    render(&mut h.app, vec![egui::Event::PointerMoved(end)]);
+    let preview = h.app.host.processing(owner.clone()).unwrap();
+    assert!(preview.preview.is_some(), "{preview:?}");
+    assert_eq!(h.app.host.history().undo_count, history);
+    render(&mut h.app, vec![pointer(end, false)]);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    let changed = h.app.host.processing(owner.clone()).unwrap().committed;
+    let parameters = &changed.effects[0].parameters;
+    assert_eq!(parameters["early"], parameters["wet"]);
+    let ParameterValue::Integer(wet) = parameters["wet"] else {
+        panic!()
+    };
+    assert!(wet > 64);
+    assert_eq!(parameters["dry"], ParameterValue::Integer(128 - wet));
+    for hidden in [
+        "diffusion",
+        "mod_depth",
+        "mod_speed",
+        "bass",
+        "crossover",
+        "low_cut",
+        "high_cut",
+    ] {
+        assert_eq!(parameters[hidden], before.effects[0].parameters[hidden]);
+    }
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects,
+        before.effects
+    );
+    render(&mut h.app, vec![egui::Event::PointerMoved(start)]);
+    render(&mut h.app, vec![pointer(start, true)]);
+    render(&mut h.app, vec![egui::Event::PointerMoved(end)]);
+    render(
+        &mut h.app,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerMoved(end - Vec2::new(0.0, 12.0))],
+    );
+    render(&mut h.app, vec![pointer(end, false)]);
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview
+            .is_none()
+    );
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects,
+        before.effects
+    );
+    let bypass = Pos2::new(740.0, 28.0);
+    render(&mut h.app, vec![egui::Event::PointerMoved(bypass)]);
+    render(&mut h.app, vec![pointer(bypass, true)]);
+    render(&mut h.app, vec![pointer(bypass, false)]);
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects[0]
+            .bypassed
+    );
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert!(
+        !h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects[0]
+            .bypassed
+    );
+    let width = Pos2::new(150.0, 393.0);
+    render(&mut h.app, vec![egui::Event::PointerMoved(width)]);
+    for pressed in [true, false] {
+        render(&mut h.app, vec![pointer(width, pressed)]);
+    }
+    render(
+        &mut h.app,
+        vec![egui::Event::Key {
+            key: egui::Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects[0]
+            .parameters["separation"],
+        ParameterValue::Integer(-1)
+    );
+    render(&mut h.app, vec![]);
+    render(&mut h.app, vec![]);
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            render(&mut h.app, vec![pointer(width, pressed)]);
+        }
+    }
+    assert_eq!(
+        h.app.host.processing(owner).unwrap().committed.effects[0].parameters["separation"],
+        ParameterValue::Integer(0)
+    );
+}
+
+#[test]
+fn parametric_eq_graph_edits_are_one_transaction_and_escape_waits_for_pointer_release() {
+    use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
+    let (mut h, _directory) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::ParametricEq,
+        },
+    );
+    let original = h.app.host.processing(owner.clone()).unwrap().committed;
+    let window = EditorWindow {
+        id: "eq-input-test".into(),
+        owner: owner.clone(),
+        instance_id: original.effects[0].id.clone(),
+        focus_generation: 1,
+    };
+    let mut native = effects::NativeEditor::default();
+    let ctx = egui::Context::default();
+    theme(&ctx);
+    let mut time = 0.0;
+    let mut render = |app: &mut WaveBob, events: Vec<egui::Event>| {
+        time += 0.05;
+        let state = app.host.processing(owner.clone()).unwrap();
+        let instance = state.preview.as_ref().unwrap_or(&state.committed).effects[0].clone();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1120.0, 700.0))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| app.native_parameters(ui, &window, &instance, &mut native),
+        );
+        output.textures_delta.clear();
+        output
+    };
+    let pointer = |pos: Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let output = render(&mut h.app, vec![]);
+    let token = text_shapes(&output)
+        .into_iter()
+        .find(|(r, s)| s == "4" && r.right() < 740.0 && r.bottom() < 300.0)
+        .unwrap()
+        .0
+        .center();
+    let history = h.app.host.history().undo_count;
+    let target = token + Vec2::new(65.0, -40.0);
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerMoved(token), pointer(token, true)],
+    );
+    render(&mut h.app, vec![egui::Event::PointerMoved(target)]);
+    let preview = h.app.host.processing(owner.clone()).unwrap();
+    assert!(preview.preview_id.is_some());
+    assert_ne!(
+        preview.preview.as_ref().unwrap().effects[0].parameters["freq4"],
+        original.effects[0].parameters["freq4"]
+    );
+    assert_ne!(
+        preview.preview.as_ref().unwrap().effects[0].parameters["level4"],
+        original.effects[0].parameters["level4"]
+    );
+    assert_eq!(h.app.host.history().undo_count, history);
+    let output = render(&mut h.app, vec![pointer(target, false)]);
+    let modified = h.app.host.processing(owner.clone()).unwrap().committed;
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    let reset = text_shapes(&output)
+        .into_iter()
+        .find(|(r, s)| s == "4" && r.right() < 740.0 && r.bottom() < 300.0)
+        .unwrap()
+        .0
+        .center();
+    for pressed in [true, false] {
+        render(
+            &mut h.app,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::ALT),
+                egui::Event::PointerMoved(reset),
+                egui::Event::PointerButton {
+                    pos: reset,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::ALT,
+                },
+            ],
+        );
+    }
+    render(
+        &mut h.app,
+        vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)],
+    );
+    let reset_state = h.app.host.processing(owner.clone()).unwrap().committed;
+    assert_eq!(
+        reset_state.effects[0].parameters["freq4"],
+        ParameterValue::Integer(32768)
+    );
+    assert_eq!(
+        reset_state.effects[0].parameters["level4"],
+        ParameterValue::Integer(0)
+    );
+    assert_eq!(h.app.host.history().undo_count, history + 2);
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects,
+        modified.effects
+    );
+    let output = render(&mut h.app, vec![]);
+    let token = text_shapes(&output)
+        .into_iter()
+        .find(|(r, s)| s == "4" && r.right() < 740.0 && r.bottom() < 300.0)
+        .unwrap()
+        .0
+        .center();
+    let target = token + Vec2::new(20.0, 15.0);
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerMoved(token), pointer(token, true)],
+    );
+    render(&mut h.app, vec![egui::Event::PointerMoved(target)]);
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview_id
+            .is_some()
+    );
+    render(
+        &mut h.app,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerMoved(target + Vec2::new(20.0, 0.0))],
+    );
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview_id
+            .is_none()
+    );
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects,
+        modified.effects
+    );
+    render(&mut h.app, vec![pointer(target, false)]);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+}
+
 struct Harness {
     ctx: egui::Context,
     app: WaveBob,
@@ -124,6 +737,7 @@ fn arrangement_library_drop_moves_once_and_invalid_or_escape_drops_cancel() {
         .unwrap()
         .0;
     let from = clip_text.left_center() + Vec2::new(10.0, 25.0);
+    settle_linked_mix(&mut h);
     let before = h.app.host.snapshot();
     h.drag(from, Pos2::new(20.0, 400.0));
     assert_eq!(h.app.host.snapshot(), before);
@@ -185,7 +799,7 @@ fn clip_edge_trim_and_single_clip_effect_target_use_shared_jobs() {
     assert!(
         text_shapes(&output)
             .iter()
-            .any(|(_, text)| text == "Selected clip")
+            .any(|(_, text)| text == "OUTPUT")
     );
     let timeline_left = text.left() - 8.0;
     let right = h.app.host.presentation().layout.effective_widths(1440.0)[1];
@@ -219,25 +833,24 @@ fn clip_edge_trim_and_single_clip_effect_target_use_shared_jobs() {
         h.app.error
     );
     assert_eq!(h.app.host.history().undo_count, history + 1);
-    let fade = h.text_rect("Fade out").center();
-    h.click(fade);
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
-    while h
-        .app
-        .host
-        .snapshot()
-        .jobs
-        .iter()
-        .any(|j| j.status == JobStatus::Running)
-    {
-        assert!(std::time::Instant::now() < deadline);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        h.frame(vec![]);
-    }
+    let owner = wavebob::processing::Owner::Clip(clip.id.clone());
+    assert_eq!(h.app.stack_owner(), Some(owner.clone()));
+    h.app.processing_action(
+        &owner,
+        wavebob::processing::Action::SetEnvelope {
+            envelope: wavebob::processing::Envelope {
+                gain_db: Some(0.0),
+                fade_in_frames: 0,
+                fade_out_frames: 128,
+            },
+        },
+    );
     assert_eq!(
-        h.app.host.snapshot().arrangement.tracks[0].clips[0].effects,
-        vec![wavebob::effects::Effect::FadeOut]
+        h.app.host.snapshot().arrangement.tracks[0].clips[0]
+            .processing
+            .envelope
+            .fade_out_frames,
+        128
     );
     assert_eq!(
         h.app.active_document().unwrap().revision_id,
@@ -245,10 +858,7 @@ fn clip_edge_trim_and_single_clip_effect_target_use_shared_jobs() {
     );
     h.app.navigate_arrangement(0, None, Vec::new());
     h.frame(vec![]);
-    let history = h.app.host.history().undo_count;
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
-    assert_eq!(h.app.host.history().undo_count, history);
+    assert_eq!(h.app.stack_owner(), None);
     let arrangement = h.app.host.snapshot().arrangement;
     h.app.dispatch(Command::InsertClip(InsertClipParams {
         track_id: arrangement.tracks[0].id.clone(),
@@ -265,10 +875,12 @@ fn clip_edge_trim_and_single_clip_effect_target_use_shared_jobs() {
         .collect();
     h.app.navigate_arrangement(0, None, selected);
     h.frame(vec![]);
-    let history = h.app.host.history().undo_count;
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
-    assert_eq!(h.app.host.history().undo_count, history);
+    assert_eq!(h.app.stack_owner(), None);
+    assert!(
+        text_shapes(&h.frame(vec![]))
+            .iter()
+            .any(|(_, text)| text.contains("Select exactly one clip"))
+    );
 }
 
 #[test]
@@ -301,6 +913,7 @@ fn crossfade_overlay_tracks_clip_drag_and_third_drop_has_visible_rejection() {
             .iter()
             .any(|(_, text)| text == "Auto crossfade")
     );
+    settle_linked_mix(&mut h);
     let before = h.app.host.snapshot();
     let row = h.text_rect("Track 1");
     let source = h.text_rect("Gestures.wav").center();
@@ -372,6 +985,7 @@ fn crossfade_endpoint_trims_covered_clip_and_preserves_other_clip() {
             expected_presentation_revision: None,
         }));
     h.frame(vec![]);
+    settle_linked_mix(&mut h);
     let original = h.app.host.snapshot().arrangement;
     let history = h.app.host.history().undo_count;
     let endpoint = h
@@ -394,22 +1008,7 @@ fn crossfade_endpoint_trims_covered_clip_and_preserves_other_clip() {
         endpoint,
         endpoint - Vec2::new(818.0 * 1200.0 / 14400.0, 0.0),
     );
-    let wait = |h: &mut Harness| {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while h
-            .app
-            .host
-            .snapshot()
-            .jobs
-            .iter()
-            .any(|job| job.status == JobStatus::Running)
-        {
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::sleep(std::time::Duration::from_millis(2));
-            h.frame(vec![]);
-        }
-        h.frame(vec![]);
-    };
+    let wait = |h: &mut Harness| settle_linked_mix(h);
     wait(&mut h);
     let edited = h.app.host.snapshot().arrangement;
     assert_eq!(edited.tracks[0].clips[0].source_end, doc.frames - 1200);
@@ -417,9 +1016,17 @@ fn crossfade_endpoint_trims_covered_clip_and_preserves_other_clip() {
     assert_eq!(edited.crossfades().regions[0].end, doc.frames - 1200);
     assert_eq!(h.app.host.history().undo_count, history + 1);
     h.app.dispatch(Command::Undo(Default::default()));
-    assert_eq!(h.app.host.snapshot().arrangement.tracks, original.tracks);
+    assert_eq!(
+        editable_tracks(&h.app.host.snapshot().arrangement.tracks),
+        editable_tracks(&original.tracks)
+    );
     h.app.dispatch(Command::Redo(Default::default()));
-    assert_eq!(h.app.host.snapshot().arrangement.tracks, edited.tracks);
+    assert_eq!(
+        editable_tracks(&h.app.host.snapshot().arrangement.tracks),
+        editable_tracks(&edited.tracks)
+    );
+    settle_linked_mix(&mut h);
+    let edited = h.app.host.snapshot().arrangement;
     // Dragging back beyond the available source clamps to the original end.
     let shortened = endpoint - Vec2::new(818.0 * 1200.0 / 14400.0, 0.0);
     h.frame(vec![egui::Event::PointerMoved(shortened)]);
@@ -728,7 +1335,7 @@ fn pointer_drags_resize_both_panels_and_the_library_browser_split() {
     h.drag(Pos2::new(1243.0, 400.0), Pos2::new(1140.0, 400.0));
     assert!(h.app.host.presentation().layout.right.width > 290.0);
     let top = 47.0;
-    let height = 810.0; // Visible column between header and status, inset by 10.
+    let height = 790.0; // Visible column between header and reserved status, inset by 10.
     h.drag(
         Pos2::new(100.0, top + height * 0.18),
         Pos2::new(100.0, top + height * 0.44),
@@ -740,7 +1347,7 @@ fn pointer_drags_resize_both_panels_and_the_library_browser_split() {
 #[test]
 fn hover_and_keyboard_focus_help_clear_without_tooltip_popups() {
     let mut h = Harness::new();
-    let play = Pos2::new(634.0, 844.0);
+    let play = Pos2::new(634.0, 824.0);
     h.frame(vec![egui::Event::PointerMoved(play)]);
     h.time += 3.0;
     let output = h.frame(Vec::new());
@@ -955,6 +1562,9 @@ fn open_action_real_channels_document_switching_and_failed_jobs_use_shared_state
 }
 
 fn audio_harness() -> (Harness, tempfile::TempDir) {
+    audio_harness_with_session(wavebob::Session::default())
+}
+fn audio_harness_with_session(session: wavebob::Session) -> (Harness, tempfile::TempDir) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("Gestures.wav");
     let mut writer = hound::WavWriter::create(
@@ -974,6 +1584,7 @@ fn audio_harness() -> (Harness, tempfile::TempDir) {
     }
     writer.finalize().unwrap();
     let mut h = Harness::new();
+    h.app.host = DesktopHost::with_session(session);
     h.app.open_path(path);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while h.app.active_document().is_none() {
@@ -1046,6 +1657,9 @@ fn native_file_drop_batches_import_once_without_placing_clips() {
     let mp3 = dir.path().join("Four.MP3");
     std::fs::copy("tests/fixtures/audio/vbr-2ch-44100-tagged.mp3", &mp3).unwrap();
     paths.push(mp3);
+    let ogg = dir.path().join("Five.OGG");
+    std::fs::copy("tests/fixtures/audio/vorbis-2ch-48000.ogg", &ogg).unwrap();
+    paths.push(ogg);
     h.app.dispatch(Command::AddTrack(
         wavebob::arrangement::AddTrackParams::default(),
     ));
@@ -1054,7 +1668,7 @@ fn native_file_drop_batches_import_once_without_placing_clips() {
     finish_dropped_files(&mut h);
     assert_eq!(
         h.app.host.snapshot().documents.len(),
-        5,
+        6,
         "{:?}",
         h.app.error
     );
@@ -1074,13 +1688,44 @@ fn native_file_drop_batches_import_once_without_placing_clips() {
     }
     assert_eq!(h.app.host.snapshot().jobs.len(), jobs);
     assert!(h.app.error.is_none(), "{:?}", h.app.error);
+    let ogg = h
+        .app
+        .host
+        .snapshot()
+        .documents
+        .into_iter()
+        .find(|doc| doc.encoding == "ogg_vorbis")
+        .unwrap();
+    assert_eq!(encoding_label(&ogg), "Ogg Vorbis");
+    let original = std::fs::read(dir.path().join("Five.OGG")).unwrap();
+    h.app.file_action(saving::FileAction::Save, &ogg.id, false);
+    h.frame(vec![]);
+    h.text_rect("WAV · 24-bit PCM");
+    let save = h.text_rect("Save").center();
+    h.click(save);
+    finish_dropped_files(&mut h);
+    assert!(
+        dir.path().join("Five-edited.wav").exists(),
+        "{:?}",
+        h.app.error
+    );
+    assert_eq!(
+        std::fs::read(dir.path().join("Five.OGG")).unwrap(),
+        original
+    );
 }
 #[test]
 fn file_drop_errors_preserve_existing_audio_and_continue_the_batch() {
     let (mut h, dir) = audio_harness();
     let original = h.app.active_document().unwrap();
     h.input_frame(dropped([dir.path().join("notes.txt")]));
-    assert!(h.app.error.as_ref().unwrap().contains("WAV or MP3"));
+    assert!(
+        h.app
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("WAV, MP3 or Ogg Vorbis")
+    );
     assert_eq!(h.app.active_document().unwrap(), original);
     h.input_frame(dropped([
         dir.path().join("missing.wav"),
@@ -1275,7 +1920,7 @@ fn browser_preview_button_is_enabled_for_selected_audio_and_uses_status_help() {
 }
 
 #[test]
-fn effect_choice_apply_and_history_buttons_use_the_current_selection() {
+fn reverse_and_shared_history_remain_edit_actions_with_the_current_selection() {
     let (mut h, _directory) = audio_harness();
     let document = h.app.active_document().unwrap();
     h.app.dispatch(Command::SetSelection(SelectionParams {
@@ -1283,29 +1928,18 @@ fn effect_choice_apply_and_history_buttons_use_the_current_selection() {
         start_frame: 100,
         end_frame: 4000,
     }));
-    let effect = h.text_rect("Fade in").center();
-    h.click(effect);
-    assert_eq!(
-        h.app.active_document().unwrap().revision_id,
-        document.revision_id
-    );
-    assert!(!h.app.host.history().can_undo);
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while h.app.active_document().unwrap().revision_id == document.revision_id {
-        assert!(std::time::Instant::now() < deadline);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        h.frame(vec![]);
-    }
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
+    let reverse = h.text_rect("Reverse").center();
+    h.click(reverse);
+    finish_gui_jobs(&mut h);
     let edited = h.app.active_document().unwrap();
+    assert_ne!(edited.revision_id, document.revision_id);
     assert!(edited.dirty);
     assert_eq!(h.app.host.history().undo_count, 1);
-    assert_eq!(
-        h.app.detail.as_ref().unwrap().revision_id,
-        edited.revision_id
-    );
-    let undo = h.text_rect("Undo").center();
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
+    let undo = h.text_rect("Undo    Ctrl/Cmd+Z").center();
     h.click(undo);
     assert_eq!(
         h.app.active_document().unwrap().revision_id,
@@ -1456,53 +2090,62 @@ fn text_clipboard_keys_delegate_to_the_platform_while_audio_keys_stay_raw() {
 }
 
 #[test]
-fn reverb_controls_and_tail_policy_are_visible_without_mutating_audio() {
+fn compact_stack_has_management_without_owner_labels_or_inline_parameters() {
     let (mut h, _d) = audio_harness();
-    let doc = h.app.active_document().unwrap();
-    let reverb = h.text_rect("Reverb").center();
-    h.click(reverb);
-    assert!(matches!(
-        h.app.host.presentation().effect,
-        wavebob::effects::Effect::Reverb { .. }
-    ));
-    assert_eq!(
-        h.app.active_document().unwrap().revision_id,
-        doc.revision_id
-    );
-    assert!(!h.app.host.history().can_undo);
-    let frame = h.frame(vec![]);
-    let texts = text_shapes(&frame);
-    assert!(
-        texts
-            .iter()
-            .any(|(_, text)| text == "Tail is truncated at target end.")
-    );
-    for label in ["Room", "Decay s", "Wet"] {
+    let before = h.app.active_document().unwrap();
+    let texts = text_shapes(&h.frame(vec![]));
+    for label in ["EFFECTS", "+ Add effect", "Bypass all", "OUTPUT"] {
+        assert!(texts.iter().any(|(_, text)| text == label), "{label}");
+    }
+    for old in [
+        "Whole document",
+        "Selected clip",
+        "Gain and fades…",
+        "Gain and Fades…",
+        "Apply",
+        "Fade in",
+        "Fade out",
+        "Gain",
+        "Room",
+        "Decay s",
+        "Wet",
+    ] {
         assert!(
-            texts
-                .iter()
-                .any(|(rect, text)| text == label && rect.right() <= 1440.0),
-            "{label}: {:?}",
-            texts
-                .iter()
-                .filter(|(rect, _)| rect.left() > 1240.0)
-                .collect::<Vec<_>>()
+            !texts.iter().any(|(_, text)| text == old),
+            "Old inline control {old}"
         );
     }
+    assert_eq!(h.app.active_document().unwrap(), before);
+    assert!(!h.app.host.history().can_undo);
     h.size = Vec2::new(800.0, 520.0);
     h.frame(vec![]);
-    assert!(
-        h.text_rect("›").top() < 70.0,
-        "Panel handle remains accessible above scrolling controls"
-    );
+    assert!(h.text_rect("›").top() < 70.0);
+}
+
+#[test]
+fn selection_changes_keep_waveform_height_stable() {
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    for size in [Vec2::new(1440.0, 900.0), Vec2::new(800.0, 600.0)] {
+        h.size = size;
+        let before = canvas_rects(&mut h);
+        h.app.dispatch(Command::SelectAll(DocumentParams {
+            document_id: document.id.clone(),
+        }));
+        assert_eq!(canvas_rects(&mut h), before);
+        h.app.dispatch(Command::ClearSelection(DocumentParams {
+            document_id: document.id.clone(),
+        }));
+        assert_eq!(canvas_rects(&mut h), before);
+    }
 }
 
 fn dirty_audio_harness() -> (Harness, tempfile::TempDir) {
     let (mut h, d) = audio_harness();
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
     let reverse = h.text_rect("Reverse").center();
     h.click(reverse);
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while !h.app.active_document().unwrap().dirty {
         assert!(std::time::Instant::now() < deadline);
@@ -1794,10 +2437,10 @@ fn closing_an_edited_mp3_confirms_encoding_and_offers_lossless_wav_save_as() {
         std::thread::sleep(std::time::Duration::from_millis(2));
         h.frame(vec![]);
     }
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
     let reverse = h.text_rect("Reverse").center();
     h.click(reverse);
-    let apply = h.text_rect("Apply").center();
-    h.click(apply);
     while !h.app.active_document().unwrap().dirty {
         assert!(std::time::Instant::now() < deadline);
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -2285,4 +2928,1122 @@ fn selection_keyboard_shortcuts_respect_text_focus_and_narrow_status_help() {
     );
     output.textures_delta.clear();
     assert_eq!(h.app.host.snapshot(), before);
+}
+
+#[test]
+fn compact_rows_emit_stable_bypass_open_and_drag_reorder_actions() {
+    use wavebob::processing::{Action, EffectKind, Instance, Processing};
+    let ctx = egui::Context::default();
+    let first = uuid::Uuid::new_v4().to_string();
+    let second = uuid::Uuid::new_v4().to_string();
+    let state = Processing {
+        effects: vec![
+            Instance {
+                id: first.clone(),
+                kind: EffectKind::SoftClipper,
+                bypassed: false,
+                parameters: Default::default(),
+            },
+            Instance {
+                id: second.clone(),
+                kind: EffectKind::Reverb,
+                bypassed: false,
+                parameters: Default::default(),
+            },
+        ],
+        ..Default::default()
+    };
+    let mut drag = None;
+    let mut time = 0.0;
+    let mut render = |events| {
+        time += 0.1;
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events,
+                time: Some(time),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(320.0, 240.0))),
+                ..Default::default()
+            },
+            |ui| actions = effects::stack_rows(ui, &state, &mut drag, &mut Help::default()),
+        );
+        output.textures_delta.clear();
+        (output, actions)
+    };
+    let (output, _) = render(Vec::new());
+    let texts = text_shapes(&output);
+    let first_label = texts
+        .iter()
+        .find(|(_, text)| text == "Soft Clipper")
+        .unwrap()
+        .0;
+    let grips: Vec<_> = texts
+        .iter()
+        .filter(|(_, text)| text == "Soft Clipper" || text == "Reverb")
+        .map(|(rect, _)| Pos2::new(rect.left() - 49.0, rect.center().y))
+        .collect();
+    let opens: Vec<_> = texts
+        .iter()
+        .filter(|(_, text)| text == "↗")
+        .map(|(rect, _)| rect.center())
+        .collect();
+    let checkbox = Pos2::new(first_label.left() - 18.0, first_label.center().y);
+    let pointer = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    render(vec![
+        egui::Event::PointerMoved(checkbox),
+        pointer(checkbox, true),
+    ]);
+    let (_, actions) = render(vec![pointer(checkbox, false)]);
+    assert!(actions.iter().any(|action|matches!(action,effects::StackEvent::Edit(Action::Bypass{effect_id,bypassed:true}) if effect_id == &first)),"{actions:?}");
+    render(vec![
+        egui::Event::PointerMoved(opens[0]),
+        pointer(opens[0], true),
+    ]);
+    let (_, actions) = render(vec![pointer(opens[0], false)]);
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action,effects::StackEvent::Open(id) if id == &first)),
+        "{actions:?}"
+    );
+    render(vec![
+        egui::Event::PointerMoved(grips[0]),
+        pointer(grips[0], true),
+    ]);
+    render(vec![egui::Event::PointerMoved(grips[1])]);
+    let (_, actions) = render(vec![pointer(grips[1], false)]);
+    assert!(actions.iter().any(|action|matches!(action,effects::StackEvent::Edit(Action::Move{effect_id,index:1}) if effect_id == &first)),"{actions:?}");
+}
+
+#[test]
+fn waveform_envelope_gain_preview_cancel_and_commit_preserve_source_navigation() {
+    use wavebob::processing::Owner;
+    let (mut h, _directory) = audio_harness();
+    let original = h.app.active_document().unwrap();
+    h.app.dispatch(Command::SetSelection(SelectionParams {
+        document_id: original.id.clone(),
+        start_frame: 400,
+        end_frame: 1200,
+    }));
+    let before = h.app.active_document().unwrap();
+    let owner = Owner::Document(before.id.clone());
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = Pos2::new(plot.center().x, plot.top() + 6.0);
+    let moved = point + Vec2::new(0.0, 40.0);
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    h.frame(vec![pointer_event(
+        point,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(moved)]);
+    let state = h.app.host.processing(owner.clone()).unwrap();
+    assert_eq!(state.committed.envelope.gain_db, Some(0.0));
+    assert_eq!(state.preview.unwrap().envelope.gain_db, Some(-10.0));
+    assert_eq!(h.app.host.history().undo_count, 0);
+    assert_eq!(h.app.active_document().unwrap().cursor, before.cursor);
+    assert_eq!(h.app.active_document().unwrap().selection, before.selection);
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    h.frame(vec![pointer_event(
+        moved,
+        egui::PointerButton::Primary,
+        false,
+    )]);
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview
+            .is_none()
+    );
+    assert_eq!(h.app.host.history().undo_count, 0);
+    h.drag(point, moved);
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(-10.0)
+    );
+    assert_eq!(h.app.host.history().undo_count, 1);
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        original.revision_id
+    );
+    assert_eq!(h.app.active_document().unwrap().selection, before.selection);
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(0.0)
+    );
+    h.app.dispatch(Command::Redo(EmptyParams {}));
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(-10.0)
+    );
+}
+
+#[test]
+fn waveform_fades_overlap_and_double_click_reset_without_selection_edits() {
+    use wavebob::processing::Owner;
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id.clone());
+    h.app.dispatch(Command::SetSelection(SelectionParams {
+        document_id: document.id.clone(),
+        start_frame: 1000,
+        end_frame: 2000,
+    }));
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let y = plot.top() + 6.0;
+    h.drag(
+        Pos2::new(plot.left() + 1.0, y),
+        Pos2::new(plot.left() + plot.width() * 0.75, y),
+    );
+    let first = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .envelope;
+    assert!((first.fade_in_frames as i64 - 3600).abs() <= 1, "{first:?}");
+    h.drag(
+        Pos2::new(plot.right() - 1.0, y),
+        Pos2::new(plot.left() + plot.width() * 0.25, y),
+    );
+    let state = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .envelope;
+    assert!(
+        (state.fade_out_frames as i64 - 3600).abs() <= 1,
+        "{state:?}"
+    );
+    assert_eq!(state.fade_in_frames, first.fade_in_frames);
+    assert!(state.fade_in_frames + state.fade_out_frames > document.frames);
+    assert_eq!(
+        h.app.active_document().unwrap().selection,
+        Some(FrameRange {
+            start: 1000,
+            end: 2000
+        })
+    );
+    let point = Pos2::new(
+        plot.left() + plot.width() * state.fade_in_frames as f32 / document.frames as f32,
+        y,
+    );
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    for _ in 0..2 {
+        h.frame(vec![pointer_event(
+            point,
+            egui::PointerButton::Primary,
+            true,
+        )]);
+        h.frame(vec![pointer_event(
+            point,
+            egui::PointerButton::Primary,
+            false,
+        )]);
+    }
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .fade_in_frames,
+        0
+    );
+    assert!(h.app.envelope_dialog.is_none());
+    assert_eq!(h.app.host.history().undo_count, 3);
+}
+
+#[test]
+fn offscreen_and_colliding_handles_have_exact_entry_without_false_source_edges() {
+    use wavebob::processing::Owner;
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id.clone());
+    h.app.dispatch(Command::SetViewport(SetViewportParams {
+        document_id: document.id.clone(),
+        start_frame: 1000,
+        end_frame: 1800,
+        expected_presentation_revision: None,
+    }));
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    h.click(Pos2::new(plot.left() + 2.0, plot.top() + 6.0));
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .envelope,
+        wavebob::processing::Envelope::unity()
+    );
+    assert!(h.app.envelope_dialog.is_none());
+    assert_eq!(h.app.host.history().undo_count, 0);
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
+    let exact = h.text_rect("Gain and Fades…").center();
+    h.click(exact);
+    assert!(h.app.envelope_dialog.is_some());
+    let mute = h.text_rect("Mute (−∞ dB)").center();
+    h.click(mute);
+    let apply = h.text_rect("Apply envelope").center();
+    h.click(apply);
+    assert!(h.app.envelope_dialog.is_none());
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        None
+    );
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        document.revision_id
+    );
+}
+
+#[test]
+fn clip_envelope_handles_win_over_move_trim_and_keep_source_bounds() {
+    use wavebob::arrangement::*;
+    use wavebob::processing::Owner;
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    h.app.dispatch(Command::AddTrack(AddTrackParams::default()));
+    let track = h.app.host.snapshot().arrangement.tracks[0].id.clone();
+    h.app.dispatch(Command::InsertClip(InsertClipParams {
+        track_id: track,
+        document_id: document.id.clone(),
+        revision_id: document.revision_id.clone(),
+        source_start: 0,
+        source_end: document.frames,
+        position: 0,
+    }));
+    h.app.set_mode(ViewMode::Multitrack);
+    h.app
+        .dispatch(Command::SetTimelineViewport(TimelineViewportParams {
+            start_frame: 0,
+            end_frame: document.frames * 2,
+            expected_presentation_revision: None,
+        }));
+    let output = h.frame(vec![]);
+    let text = text_shapes(&output)
+        .into_iter()
+        .find(|(rect, text)| text == "Gestures.wav" && rect.left() > 400.0 && rect.right() < 1240.0)
+        .unwrap()
+        .0;
+    let left = text.left() - 8.0;
+    let right = 1440.0 - h.app.host.presentation().layout.effective_widths(1440.0)[1] - 14.0;
+    let width = (right - left) / 2.0;
+    let point = Pos2::new(left + width / 2.0 - 0.5, text.top() + 23.0);
+    let before = h.app.host.snapshot().arrangement;
+    let clip = before.tracks[0].clips[0].clone();
+    let history = h.app.host.history().undo_count;
+    h.drag(point, point + Vec2::new(0.0, 24.0));
+    let after = h.app.host.snapshot().arrangement;
+    let edited = &after.tracks[0].clips[0];
+    assert_eq!(
+        edited.processing.envelope.gain_db,
+        Some(-6.0),
+        "{after:?}, {:?}",
+        h.app.error
+    );
+    assert_eq!(
+        (edited.position, edited.source_start, edited.source_end),
+        (clip.position, clip.source_start, clip.source_end)
+    );
+    assert_eq!(after.selected_clip_ids, before.selected_clip_ids);
+    assert_eq!(after.cursor, before.cursor);
+    assert_eq!(after.selection, before.selection);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    h.app.processing_action(
+        &Owner::Clip(clip.id.clone()),
+        wavebob::processing::Action::SetEnvelope {
+            envelope: wavebob::processing::Envelope {
+                gain_db: Some(-6.0),
+                fade_in_frames: 480,
+                fade_out_frames: 0,
+            },
+        },
+    );
+    h.frame(vec![]);
+    let fade = Pos2::new(left + 2.0 + (width - 5.0) * 0.1, text.top() + 47.0);
+    h.drag(fade, Pos2::new(left + 2.0 + (width - 5.0) * 0.35, fade.y));
+    let state = h.app.host.processing(Owner::Clip(clip.id)).unwrap();
+    assert!(
+        (state.committed.envelope.fade_in_frames as i64 - 1680).abs() <= 2,
+        "{state:?}, {:?}",
+        h.app.error
+    );
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        document.revision_id
+    );
+}
+
+#[test]
+fn envelope_drag_is_audible_in_manual_output_before_release_and_escape_restores_it() {
+    let (session, mut output) = wavebob::Session::with_manual_output(48000).unwrap();
+    let (mut h, _directory) = audio_harness_with_session(session);
+    let document = h.app.active_document().unwrap();
+    h.app.toggle_playback();
+    output.render_into(&mut [[0.0; 2]; 16]);
+    h.frame(vec![]);
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = Pos2::new(plot.center().x, plot.top() + 6.0);
+    let moved = point + Vec2::new(0.0, 64.0);
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    h.frame(vec![pointer_event(
+        point,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(moved)]);
+    assert_eq!(h.app.host.history().undo_count, 0);
+    let mut frames = [[0.0; 2]; 600];
+    output.render_into(&mut frames);
+    let source = -35.0_f64 * 400.0 / 32768.0;
+    assert!(
+        (frames[599][0] as f64 - source * 10.0_f64.powf(-16.0 / 20.0)).abs() < 1e-6,
+        "{:?}",
+        frames[599]
+    );
+    assert_eq!(frames[599][0], -frames[599][1]);
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    output.render_into(&mut frames);
+    assert!((frames[599][0] as f64 - source).abs() < 1e-6);
+    h.frame(vec![pointer_event(
+        moved,
+        egui::PointerButton::Primary,
+        false,
+    )]);
+    assert_eq!(h.app.host.history().undo_count, 0);
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        document.revision_id
+    );
+}
+
+#[test]
+fn exact_envelope_entry_accepts_gain_limits_and_collisions_use_the_inspector() {
+    use wavebob::processing::{Action, Envelope, Owner};
+    let (mut h, _directory) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id.clone());
+    for value in [60.0, -120.0] {
+        let edit = h.text_rect("Edit").center();
+        h.click(edit);
+        let exact = h.text_rect("Gain and Fades…").center();
+        h.click(exact);
+        let texts = text_shapes(&h.frame(vec![]));
+        let label = texts.iter().find(|(_, text)| text == "Gain").unwrap().0;
+        let gain = texts
+            .iter()
+            .find(|(rect, text)| {
+                text.parse::<f64>().is_ok()
+                    && (rect.center().y - label.center().y).abs() < 8.0
+                    && rect.left() > label.right()
+            })
+            .unwrap_or_else(|| panic!("Exact gain value missing: {texts:?}"))
+            .0
+            .center();
+        h.click(gain);
+        h.frame(vec![egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        }]);
+        h.frame(vec![egui::Event::Text(value.to_string())]);
+        h.frame(vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let apply = h.text_rect("Apply envelope").center();
+        h.click(apply);
+        assert_eq!(
+            h.app
+                .host
+                .processing(owner.clone())
+                .unwrap()
+                .committed
+                .envelope
+                .gain_db,
+            Some(value)
+        );
+    }
+    h.app.processing_action(
+        &owner,
+        Action::SetEnvelope {
+            envelope: Envelope {
+                gain_db: Some(0.0),
+                fade_in_frames: 2400,
+                fade_out_frames: 2400,
+            },
+        },
+    );
+    let history = h.app.host.history().undo_count;
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    h.click(Pos2::new(plot.center().x, plot.top() + 6.0));
+    for _ in 0..4 {
+        h.frame(vec![]);
+    }
+    assert!(h.app.envelope_dialog.is_none());
+    assert_eq!(h.app.host.history().undo_count, history);
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .fade_in_frames,
+        2400
+    );
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
+    let exact = h.text_rect("Gain and Fades…").center();
+    h.click(exact);
+    assert!(h.app.envelope_dialog.is_some());
+}
+
+#[test]
+fn a_fade_drag_crosses_a_colliding_gain_handle_and_still_commits_once() {
+    use wavebob::processing::Owner;
+    let (mut h, _dir) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id);
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let y = plot.top() + 6.0;
+    let start = Pos2::new(plot.left() + 1.0, y);
+    let halfway = Pos2::new(plot.center().x, y);
+    let end = Pos2::new(plot.left() + plot.width() * 0.75, y);
+    h.frame(vec![egui::Event::PointerMoved(start)]);
+    h.frame(vec![pointer_event(
+        start,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(halfway)]);
+    h.frame(vec![egui::Event::PointerMoved(end)]);
+    h.frame(vec![pointer_event(
+        end,
+        egui::PointerButton::Primary,
+        false,
+    )]);
+    assert!(
+        (h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .fade_in_frames as i64
+            - 3600)
+            .abs()
+            <= 1
+    );
+    assert!(h.app.envelope_drag.is_none());
+    assert_eq!(h.app.host.history().undo_count, 1);
+}
+
+#[test]
+fn fine_gain_drag_and_one_frame_clip_inspector_keep_envelope_rules() {
+    use wavebob::processing::Owner;
+    let (mut h, _dir) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let owner = Owner::Document(document.id.clone());
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = Pos2::new(plot.center().x, plot.top() + 6.0);
+    let end = point + Vec2::new(0.0, 40.0);
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    h.frame(vec![pointer_event(
+        point,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![
+        egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+        egui::Event::PointerMoved(end),
+    ]);
+    h.frame(vec![pointer_event(
+        end,
+        egui::PointerButton::Primary,
+        false,
+    )]);
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(-1.0)
+    );
+    h.app.dispatch(Command::AddTrack(
+        wavebob::arrangement::AddTrackParams::default(),
+    ));
+    let track = h.app.host.snapshot().arrangement.tracks[0].id.clone();
+    h.app.dispatch(Command::InsertClip(
+        wavebob::arrangement::InsertClipParams {
+            track_id: track,
+            document_id: document.id,
+            revision_id: document.revision_id,
+            source_start: 0,
+            source_end: 1,
+            position: 0,
+        },
+    ));
+    h.app.set_mode(ViewMode::Multitrack);
+    h.frame(vec![]);
+    let owner = Owner::Clip(
+        h.app.host.snapshot().arrangement.tracks[0].clips[0]
+            .id
+            .clone(),
+    );
+    let edit = h.text_rect("Edit").center();
+    h.click(edit);
+    let exact = h.text_rect("Gain and Fades…").center();
+    h.click(exact);
+    assert!(h.app.envelope_dialog.is_some());
+    let before = h.app.host.history().undo_count;
+    let apply = h.text_rect("Apply envelope").center();
+    h.click(apply);
+    assert_eq!(h.app.host.history().undo_count, before);
+    assert_eq!(h.app.host.processing(owner).unwrap().body_frames, 1);
+}
+
+#[test]
+fn losing_window_focus_cancels_an_unfinished_envelope_gesture() {
+    use wavebob::processing::Owner;
+    let (mut h, _dir) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    let plot = visuals::main_plot(canvas_rects(&mut h)[1]);
+    let point = Pos2::new(plot.center().x, plot.top() + 6.0);
+    h.frame(vec![egui::Event::PointerMoved(point)]);
+    h.frame(vec![pointer_event(
+        point,
+        egui::PointerButton::Primary,
+        true,
+    )]);
+    h.frame(vec![egui::Event::PointerMoved(
+        point + Vec2::new(0.0, 40.0),
+    )]);
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview
+            .is_some()
+    );
+    h.input_frame(egui::RawInput {
+        focused: false,
+        ..Default::default()
+    });
+    assert!(h.app.envelope_drag.is_none());
+    assert!(
+        h.app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .preview
+            .is_none()
+    );
+    assert_eq!(
+        h.app
+            .host
+            .processing(owner)
+            .unwrap()
+            .committed
+            .envelope
+            .gain_db,
+        Some(0.0)
+    );
+    assert_eq!(h.app.host.history().undo_count, 0);
+}
+
+#[test]
+fn synced_delay_exposes_shared_project_bpm_and_commits_exact_entry_once() {
+    use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
+    let (mut h, _directory) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::Delay,
+        },
+    );
+    let id = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .effects[0]
+        .id
+        .clone();
+    h.app.processing_action(
+        &owner,
+        Action::SetParameter {
+            effect_id: id.clone(),
+            parameter_id: "tempo_sync".into(),
+            value: ParameterValue::Boolean(true),
+        },
+    );
+    let window = EditorWindow {
+        id: "tempo-input-test".into(),
+        owner: owner.clone(),
+        instance_id: id,
+        focus_generation: 1,
+    };
+    let mut native = effects::NativeEditor::default();
+    native.tempo_text = Some("90".into());
+    let ctx = egui::Context::default();
+    theme(&ctx);
+    let mut time = 0.0;
+    let mut render = |app: &mut WaveBob, events| {
+        time += 0.05;
+        let instance = app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects[0]
+            .clone();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(850.0, 530.0))),
+                events,
+                time: Some(time),
+                ..Default::default()
+            },
+            |ui| app.native_parameters(ui, &window, &instance, &mut native),
+        );
+        output.textures_delta.clear();
+        output
+    };
+    let output = render(&mut h.app, vec![]);
+    let button = text_shapes(&output)
+        .into_iter()
+        .find(|(_, s)| s == "90")
+        .unwrap()
+        .0
+        .center();
+    let history = h.app.host.history().undo_count;
+    render(
+        &mut h.app,
+        vec![
+            egui::Event::PointerMoved(button),
+            egui::Event::PointerButton {
+                pos: button,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    render(
+        &mut h.app,
+        vec![egui::Event::PointerButton {
+            pos: button,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    render(
+        &mut h.app,
+        vec![
+            egui::Event::ModifiersChanged(egui::Modifiers::CTRL | egui::Modifiers::COMMAND),
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: (egui::Modifiers::CTRL | egui::Modifiers::COMMAND),
+            },
+            egui::Event::ModifiersChanged(egui::Modifiers::CTRL | egui::Modifiers::COMMAND),
+            egui::Event::Text("90".into()),
+        ],
+    );
+    render(
+        &mut h.app,
+        vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(h.app.host.snapshot().arrangement.effect_tempo, 90.0);
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert_eq!(h.app.host.snapshot().arrangement.effect_tempo, 120.0);
+}
+#[test]
+fn limiter_page_and_compare_controls_preserve_source_and_commit_flip_once() {
+    use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
+    let (mut h, _dir) = audio_harness();
+    let document = h.app.active_document().unwrap();
+    let source_revision = document.revision_id.clone();
+    let owner = Owner::Document(document.id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::Limiter,
+        },
+    );
+    let effect = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .effects[0]
+        .id
+        .clone();
+    let window = EditorWindow {
+        id: "limiter-ui-test".into(),
+        owner: owner.clone(),
+        instance_id: effect.clone(),
+        focus_generation: 1,
+    };
+    let mut native = effects::NativeEditor::default();
+    let ctx = egui::Context::default();
+    theme(&ctx);
+    let mut time = 0.0;
+    let mut render = |app: &mut WaveBob, events| {
+        time += 0.05;
+        let instance = app
+            .host
+            .processing(owner.clone())
+            .unwrap()
+            .committed
+            .effects[0]
+            .clone();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(850.0, 530.0))),
+                events,
+                time: Some(time),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| app.native_parameters(ui, &window, &instance, &mut native),
+        );
+        output.textures_delta.clear();
+        output
+    };
+    let mut click = |app: &mut WaveBob, label: &str| {
+        let frame = render(app, vec![]);
+        let point = text_shapes(&frame)
+            .into_iter()
+            .find(|(_, s)| s == label)
+            .unwrap()
+            .0
+            .center();
+        render(
+            app,
+            vec![
+                egui::Event::PointerMoved(point),
+                egui::Event::PointerButton {
+                    pos: point,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        render(
+            app,
+            vec![egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )
+    };
+    let history = h.app.host.history().undo_count;
+    let comp = click(&mut h.app, "Comp");
+    assert!(text_shapes(&comp).iter().any(|(_, s)| s == "Threshold"));
+    assert_eq!(h.app.host.history().undo_count, history);
+    click(&mut h.app, "Store");
+    assert_eq!(h.app.host.history().undo_count, history);
+    h.app.processing_action(
+        &owner,
+        Action::SetParameter {
+            effect_id: effect,
+            parameter_id: "gain".into(),
+            value: ParameterValue::Integer(1700),
+        },
+    );
+    click(&mut h.app, "Flip");
+    assert_eq!(h.app.host.history().undo_count, history + 2);
+    assert_eq!(
+        h.app.host.processing(owner).unwrap().committed.effects[0].parameters["gain"],
+        ParameterValue::Integer(1000)
+    );
+    assert_eq!(
+        h.app.active_document().unwrap().revision_id,
+        source_revision
+    );
+}
+
+fn settle_linked_mix(h: &mut Harness) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        h.frame(vec![]);
+        let mix = h.app.host.mix();
+        assert!(mix.preparation_error.is_none(), "{mix:?}");
+        if mix.prepared_render_identity.as_ref() == Some(&mix.required_render_identity) {
+            return;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+fn editable_tracks(tracks: &[wavebob::arrangement::Track]) -> Vec<wavebob::arrangement::Track> {
+    let mut tracks = tracks.to_vec();
+    for clip in tracks.iter_mut().flat_map(|t| &mut t.clips) {
+        // Cache publication may refresh a source token without another user edit.
+        clip.bounce = None;
+        clip.tail_frames = 0;
+        clip.tail_capped = false;
+        clip.edit_revision_id.clear();
+    }
+    tracks
+}
+
+#[test]
+fn compact_effect_actions_fit_the_minimum_panel_with_every_effect_name() {
+    use wavebob::processing::{Instance, Processing};
+    let ctx = egui::Context::default();
+    theme(&ctx);
+    for info in wavebob::processing::catalogue() {
+        let state = Processing {
+            effects: vec![Instance {
+                id: uuid::Uuid::new_v4().to_string(),
+                kind: info.kind,
+                bypassed: false,
+                parameters: Default::default(),
+            }],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(188.0, 120.0))),
+                ..Default::default()
+            },
+            |ui| {
+                effects::stack_rows(ui, &state, &mut None, &mut Help::default());
+            },
+        );
+        output.textures_delta.clear();
+        for text in ["↗", "…"] {
+            let rect = text_shapes(&output)
+                .into_iter()
+                .find(|(_, s)| s == text)
+                .unwrap()
+                .0;
+            assert!(
+                rect.right() <= 188.0,
+                "{:?} action {text} clipped at {}",
+                info.kind,
+                rect.right()
+            );
+        }
+    }
+}
+
+#[test]
+fn reverb_exact_predelay_entry_converts_sync_and_undo_restores_it() {
+    use wavebob::processing::{Action, EffectKind, Owner, ParameterValue};
+    let (mut h, _directory) = audio_harness();
+    let owner = Owner::Document(h.app.active_document().unwrap().id);
+    h.app.processing_action(
+        &owner,
+        Action::Add {
+            kind: EffectKind::Reverb,
+        },
+    );
+    let id = h
+        .app
+        .host
+        .processing(owner.clone())
+        .unwrap()
+        .committed
+        .effects[0]
+        .id
+        .clone();
+    for (parameter_id, value) in [
+        ("tempo_sync", ParameterValue::Boolean(true)),
+        ("predelay", ParameterValue::Integer(192)),
+    ] {
+        h.app.processing_action(
+            &owner,
+            Action::SetParameter {
+                effect_id: id.clone(),
+                parameter_id: parameter_id.into(),
+                value,
+            },
+        );
+    }
+    let before = h.app.host.processing(owner.clone()).unwrap().committed;
+    let history = h.app.host.history().undo_count;
+    let window = EditorWindow {
+        id: "reverb-exact".into(),
+        owner: owner.clone(),
+        instance_id: id,
+        focus_generation: 1,
+    };
+    let ctx = egui::Context::default();
+    theme(&ctx);
+    let mut native = effects::NativeEditor::default();
+    let mut time = 0.0;
+    let mut render = |app: &mut WaveBob, events| {
+        time += 0.1;
+        let state = app.host.processing(owner.clone()).unwrap();
+        let instance = &state.preview.as_ref().unwrap_or(&state.committed).effects[0];
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(850.0, 530.0))),
+                time: Some(time),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |ui| app.native_parameters(ui, &window, instance, &mut native),
+        );
+        output.textures_delta.clear();
+    };
+    let centre = Pos2::new(100.0, 194.0);
+    render(&mut h.app, vec![]);
+    render(&mut h.app, vec![egui::Event::PointerMoved(centre)]);
+    for pressed in [true, false] {
+        render(
+            &mut h.app,
+            vec![egui::Event::PointerButton {
+                pos: centre,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    let key = |key, modifiers| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    render(&mut h.app, vec![key(egui::Key::A, egui::Modifiers::CTRL)]);
+    render(&mut h.app, vec![egui::Event::Text("125".into())]);
+    render(
+        &mut h.app,
+        vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+    );
+    let after = h.app.host.processing(owner.clone()).unwrap().committed;
+    assert_eq!(
+        after.effects[0].parameters["predelay"],
+        ParameterValue::Integer(48)
+    );
+    assert_eq!(
+        after.effects[0].parameters["tempo_sync"],
+        ParameterValue::Boolean(false)
+    );
+    assert_eq!(h.app.host.history().undo_count, history + 1);
+    h.app.dispatch(Command::Undo(EmptyParams {}));
+    assert_eq!(
+        h.app.host.processing(owner).unwrap().committed.effects,
+        before.effects
+    );
+}
+
+#[test]
+fn reverb_width_and_mix_have_meaningful_endpoints() {
+    use reverb::Control;
+    use wavebob::processing::ParameterValue;
+    let expected = |id: &str, value| (id.to_owned(), ParameterValue::Integer(value), false);
+    assert_eq!(
+        Control::Width.changes(0.0),
+        vec![expected("separation", 64)]
+    );
+    assert_eq!(
+        Control::Width.changes(100.0),
+        vec![expected("separation", 0)]
+    );
+    assert_eq!(
+        Control::Width.changes(200.0),
+        vec![expected("separation", -64)]
+    );
+    assert_eq!(
+        Control::Mix.changes(0.0),
+        vec![
+            expected("dry", 128),
+            expected("early", 0),
+            expected("wet", 0)
+        ]
+    );
+    assert_eq!(
+        Control::Mix.changes(100.0),
+        vec![
+            expected("dry", 0),
+            expected("early", 128),
+            expected("wet", 128)
+        ]
+    );
 }

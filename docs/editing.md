@@ -15,7 +15,7 @@ Undo restores the audio revision and relevant cursor/selection. A new committed
 edit clears redo. Closing a document removes its history entries; no source file
 is written by an effect.
 
-`effects.apply` takes an explicit target and effect and returns a cancellable
+`edit.process` takes an explicit target and effect and returns a cancellable
 job. A whole target uses `scope: whole`, `document_id` and `revision_id`. A range
 target uses `scope: range` with those IDs plus `start_frame` and `end_frame`.
 Ranges are nonempty, half-open and span all channels. The supplied revision must
@@ -23,7 +23,7 @@ be the document's current immutable audio revision. A superseded background
 result fails with `stale_revision`, never replacing newer audio.
 
 ```json
-{"id":"fade","command":"effects.apply","params":{"target":{"scope":"range","document_id":"DOCUMENT_UUID","revision_id":"AUDIO_UUID","start_frame":48000,"end_frame":96000},"effect":{"kind":"fade_in"}}}
+{"id":"fade","command":"edit.process","params":{"target":{"scope":"range","document_id":"DOCUMENT_UUID","revision_id":"AUDIO_UUID","start_frame":48000,"end_frame":96000},"effect":{"kind":"fade_in"}}}
 ```
 
 Effect kinds are `gain` (finite `db` from -120 to +60), `fade_in`, `fade_out`,

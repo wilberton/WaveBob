@@ -14,23 +14,26 @@ returning a background job without requiring a window or audio device.
 
 Source resampling, instance processing, equal-power crossfades, mute-over-solo,
 mono pan/stereo balance and track/master gain use the same prepared mixer as live
-playback and `mix.samples`. Output is always stereo. The shared resampler converts
+playback and `mix.samples`. Output defaults to stereo; optional channels:1 averages the final L/R mix. The shared resampler converts
 the final project-clock mix to the requested file rate, without an intermediate
 waveform/peak cache. Mixed output is bounded to 512 MiB of PCM; choose a shorter
 range for larger output. Retained session/preparation/output PCM obeys the existing
 2 GiB budget.
 
-The selected interval ends exactly at end_frame. Reverb resets/ends within each
-clip; no tail extends beyond a clip or the export interval. Output duration rounds
+The selected interval ends exactly at end_frame. Set include_tail:true to extend
+the requested body end to the current contributing audible end after fresh bounce
+preparation; the GUI uses this for whole-arrangement export. Body geometry and loop
+bounds stay unchanged. Document tails feed clip processing and extend over later
+unmoved clips; a selected exact range truncates at its explicit end. Output duration rounds
 to the nearest output-rate frame, with a one-frame minimum for a nonempty range.
 Floating-point headroom is preserved by float WAV. Integer WAV/MP3 rejects overloads
 unless overload is explicitly `clip`. Open documents' backing paths are protected
 from plain sample/mix export; use document Save to replace a source intentionally.
 
 The job uses the shared atomic temporary-file publication/cancellation mechanism.
-Later arrangement edits do not alter the captured render and do not mark a newer
-arrangement saved. This snapshot-export policy differs from document Save, which
-rejects a stale source before publication. Cancellation before publication cleans
+Arrangement or linked-document sound changes before publication reject the stale
+output. Immutable captured audio never changes mid-render, and an export never
+marks the arrangement saved. Cancellation before publication cleans
 temporary output; once publication starts, cancellation reports busy. Existing
 destinations require overwrite true.
 
@@ -42,3 +45,9 @@ kHz. No external codec executable is needed by the application.
 
 See [sample output](export.md), [mixing](mixing.md), [crossfades](crossfades.md) and
 [encoder/build/license details](mp3-encoder.md).
+
+`render_identity` reports the captured audible dependency identity separately from
+source_revision_id (the arrangement edit revision). Explicit channels:2 is also
+supported. The worker shares the linked-bounce freshness barrier and all-tail/body
+voice admission with device-free mix preparation. See [linked bounces](verification/linked-bounces/README.md)
+and [processed persistence](verification/processed-persistence/README.md).

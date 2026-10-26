@@ -70,7 +70,7 @@ fn fixture() -> (Session, tempfile::TempDir, Value, Value) {
     let clip = &arr["tracks"][0]["clips"][1];
     let edited = ok(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"fade_out"}}),
     );
     succeeded(&mut session, edited);
@@ -154,7 +154,7 @@ fn device_free_mix_output_matches_offline_pcm_and_reports_exact_range() {
     }
 }
 #[test]
-fn mix_export_snapshot_survives_concurrent_arrangement_edits_without_marking_saved() {
+fn mix_export_rejects_concurrent_arrangement_edits_before_publication() {
     let (mut session, dir, arr, _) = fixture();
     let old = dir.path().join("Original.wav");
     let baseline = ok(
@@ -184,17 +184,16 @@ fn mix_export_snapshot_survives_concurrent_arrangement_edits_without_marking_sav
         "tracks.update",
         json!({"track_id":arr["tracks"][0]["id"],"mute":true}),
     );
-    let job = succeeded(&mut session, started);
-    assert_eq!(
-        job["output"]["details"]["source_revision_id"],
-        arr["revision_id"]
-    );
+    let job = finish(&mut session, started);
+    assert_eq!(job["status"], "failed");
+    assert_eq!(job["error"]["code"], "stale_revision");
     assert_ne!(
         session.snapshot().arrangement.revision_id,
         arr["revision_id"]
     );
     assert!(session.snapshot().arrangement.dirty);
-    assert_eq!(std::fs::read(path).unwrap(), std::fs::read(old).unwrap());
+    assert!(!path.exists());
+    assert!(old.exists());
 }
 #[test]
 fn failed_cancelled_and_protected_mix_outputs_preserve_destinations() {
@@ -303,7 +302,7 @@ fn independent_decoder_verifies_resampled_crossfaded_processed_mp3_mix() {
     let clip = &arr["tracks"][0]["clips"][1];
     let started = ok(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"reverb","room_size":0.4,"decay_seconds":0.7,"wet":0.2}}),
     );
     succeeded(&mut session, started);

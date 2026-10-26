@@ -11,6 +11,10 @@ default = ["gui"]
 gui = ["dep:eframe", "dep:png", "dep:rfd", "audio-output"]
 audio-output = ["dep:cpal"]
 
+[patch.crates-io]
+# Honour explicit hidden-paint requests when Win32 withholds a native redraw.
+eframe = { path = "vendor/eframe" }
+
 [[bin]]
 name = "wavebob"
 path = "src/main.rs"
@@ -29,6 +33,11 @@ name = "gui-review"
 required-features = ["gui"]
 test = false
 
+[[example]]
+name = "visualization-review"
+required-features = ["gui"]
+test = false
+
 [dependencies]
 eframe = { version = "=0.37.0", optional = true, default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 schemars = "1.2"
@@ -43,7 +52,7 @@ rmcp = { version = "=3.7.0", default-features = false, features = ["server", "tr
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
 base64 = "0.23"
 hound = "=3.5.1"
-symphonia = {version = "=0.6.1", default-features = false, features = ["mp3", "id3v1", "id3v2"]}
+symphonia = {version = "=0.6.1", default-features = false, features = ["mp3", "id3v1", "id3v2", "ogg", "vorbis"]}
 rfd = { version = "0.17", optional = true }
 cpal = {version="=0.18.2",optional=true}
 rtrb = "=0.4.0"
@@ -51,8 +60,17 @@ mp3lame-sys = {version="=0.1.11",default-features=false}
 sha2 = "=0.10.9"
 
 [dev-dependencies]
+wavebob-effect-reference = { path = "tools/effect-reference/reference-lib" }
+flate2 = "=1.1.10"
 tempfile = "3"
 rmcp = { version = "=3.7.0", default-features = false, features = ["client", "transport-child-process"] }
+
+# Keep source locations in backtraces without full type and variable debug data.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
 
 [profile.release]
 lto = "thin"

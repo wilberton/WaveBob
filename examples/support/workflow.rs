@@ -254,7 +254,7 @@ pub async fn run(a: &mut Adapter, output: &Path, audition: bool) -> Value {
     .await;
     wav = a
         .job(
-            "effects.apply",
+            "edit.process",
             json!({"target":target(&wav,144000,336000),"effect":{"kind":"gain","db":-3.0}}),
         )
         .await["result"]
@@ -266,7 +266,7 @@ pub async fn run(a: &mut Adapter, output: &Path, audition: bool) -> Value {
     let pasted = a.job("edit.paste", json!({"document_id":piano["id"],"revision_id":piano["revision_id"],"start_frame":32000,"end_frame":32000})).await["result"].clone();
     assert_eq!(pasted["frames"], 416000);
     a.ok("history.undo", json!({})).await;
-    let stale = a.raw("effects.apply", json!({"target":{"scope":"whole","document_id":wav["id"],"revision_id":"stale"},"effect":{"kind":"reverse"}})).await;
+    let stale = a.raw("edit.process", json!({"target":{"scope":"whole","document_id":wav["id"],"revision_id":"stale"},"effect":{"kind":"reverse"}})).await;
     assert_eq!(stale["status"], "error");
     let tracks = ["Ambience", "Footsteps", "Texture", "Track 4"];
     for name in tracks {
@@ -294,7 +294,7 @@ pub async fn run(a: &mut Adapter, output: &Path, audition: bool) -> Value {
     .await;
     let arr = a.ok("arrangement.get", json!({})).await;
     let clip = &arr["tracks"][2]["clips"][0];
-    a.job("clips.effects.apply", json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"reverb","room_size":0.4,"decay_seconds":0.8,"wet":0.2}})).await;
+    a.job("clips.pcm.process", json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"reverb","room_size":0.4,"decay_seconds":0.8,"wet":0.2}})).await;
     let arr = a.ok("arrangement.get", json!({})).await;
     assert_eq!(
         a.ok("arrangement.crossfades", json!({})).await["regions"]

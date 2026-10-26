@@ -1,5 +1,27 @@
 use super::*;
 impl Session {
+    #[cfg(feature = "gui")]
+    pub(crate) fn prepare_arrangement_view(&mut self, resolve_preview: bool) {
+        if resolve_preview {
+            self.editor.resolve_preview_for_arrangement();
+        }
+        let key = self.editor.required_mix_identity();
+        match self.editor.ensure_mix(resolve_preview) {
+            Ok(_) => {
+                if resolve_preview
+                    || self
+                        .mix_failure
+                        .as_ref()
+                        .is_some_and(|(old, _)| old != &key)
+                {
+                    self.mix_failure = None;
+                }
+            }
+            Err(error) if error.code != ErrorCode::Busy => self.mix_failure = Some((key, error)),
+            Err(_) => {}
+        }
+    }
+
     pub fn mix_snapshot(&self) -> mixing::MixState {
         let transport = self.playback.snapshot();
         let active =
@@ -9,7 +31,7 @@ impl Session {
             if active { transport.peak_level } else { 0.0 },
         );
         if let Some((revision, error)) = &self.mix_failure
-            && revision == &snapshot.revision_id
+            && revision == &snapshot.required_render_identity
         {
             snapshot.preparation_error = Some(error.clone());
         }
@@ -87,7 +109,7 @@ impl Session {
         if self
             .mix_failure
             .as_ref()
-            .is_some_and(|(revision, _)| revision == &arrangement.revision_id)
+            .is_some_and(|(revision, _)| revision == &self.editor.required_mix_identity())
         {
             return true;
         }
@@ -110,7 +132,7 @@ impl Session {
             if let Err(error) = self.editor.ensure_mix(false)
                 && error.code != ErrorCode::Busy
             {
-                self.mix_failure = Some((arrangement.revision_id, error));
+                self.mix_failure = Some((self.editor.required_mix_identity(), error));
                 self.pending_mix_play = false;
                 let _ = self.playback.pause();
             }
@@ -121,15 +143,12 @@ impl Session {
             || explicit.is_some()
             || self
                 .playback
-                .needs_refresh(&document, self.snapshot.loop_enabled)
+                .needs_refresh(&document, self.snapshot.loop_enabled, None)
         {
             let position = if self.pending_mix_play {
                 Some(document.cursor)
             } else {
-                explicit.or_else(|| {
-                    (transport.requested.audio_revision_id.as_ref() != Some(&document.revision_id))
-                        .then_some(transport.applied.frame)
-                })
+                explicit
             };
             match self.playback.request_mix(
                 &document,
@@ -143,7 +162,7 @@ impl Session {
                     self.pending_mix_seek = None;
                 }
                 Err(error) => {
-                    self.mix_failure = Some((arrangement.revision_id, error));
+                    self.mix_failure = Some((self.editor.required_mix_identity(), error));
                     self.pending_mix_play = false;
                 }
             }

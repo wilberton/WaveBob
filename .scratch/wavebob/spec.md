@@ -1,5 +1,53 @@
 # WaveBob editor specification
 
+Approved import extension, 26 October 2026: [ticket 62](issues/62-load-ogg-vorbis-audio.md)
+adds mono/stereo Ogg Vorbis (`.ogg`) loading and browser audition through the same
+GUI, headless and MCP workflows as WAV/MP3. Working audio and project assets stay
+lossless. Ogg sources use explicit WAV/MP3 Save As; Ogg export is outside scope.
+Single logical Vorbis streams are supported; chained/multiplexed Ogg and other
+Ogg codecs are rejected explicitly.
+
+Approved follow-up, 26 October 2026: [ticket 61](issues/61-unify-knob-dragging-and-compact-effect-windows.md)
+supersedes the original knob sizes and gestures across every effect. The whole
+knob uses vertical-only dragging with a shared approximately 180-point normalized
+sweep, including nonlinear controls; dials are 60% of the old default size and
+effect windows compact accordingly. Preserve typed entry, keyboard, reset,
+preview/undo/cancel, every parameter mapping and the shared GPU renderer.
+
+Approved rendering prerequisite, 25 October 2026:
+[shared effect visualization rendering](effect-visualization-rendering.md) is
+part of this specification. Execute tickets 56–59 before the nine effect-window
+refinements in 47–55. Pool all glowing shapes into one emission image per native
+window, GPU-blur that image and additively composite it before sharp foreground
+detail. Later ticket 60 adds/tunes multiple whole-image blur scales from the same
+pooled source; it does not assign blur radii to individual elements or block the
+first UI pass. Use one GPU implementation with no fallback rendering path. The
+renderer preserves all DSP, parameter and gesture contracts.
+
+Approved visual refinement, 25 October 2026: implement the nine remaining
+effect windows from the [mockup gallery](../../docs/design/effects-suite/README.md)
+under the [effect-window refinement contract](effect-window-refinements.md)
+and tickets 47–55. Reuse the Reverb/Distortion panel controls and luminous blue
+visual styling. Each ticket embeds its screenshot for close visual comparison.
+Keep the current graph-led EQ with selected-band controls: horizontal node
+dragging edits frequency, and Shift + vertical node dragging edits bandwidth.
+The proposed seven-column stacked-dial alternative was withdrawn. Preserve all
+existing DSP and parameter behavior.
+
+Naming update, 25 October 2026: the effect previously displayed as Fast
+Distortion is now **Distortion**. Its stable command/project kind remains
+`fast_distortion`. The requested [Distortion visual concept](../../docs/design/distortion/distortion-mockup-v1.png)
+is approved for implementation in [ticket 46](issues/46-refine-the-distortion-window.md).
+Reuse the Reverb panel controls and preserve the blue glow on the actual
+transfer curve. The DSP and reference parameter mappings remain unchanged.
+
+Approved refinement, 25 October 2026: Reverb's GUI follows the
+[six-dial mockup](../../docs/design/reverb/approved-six-dial.png) and
+[ticket 45](issues/45-refine-the-six-dial-reverb-window.md), superseding its older
+reference-room layout. The six controls are Size, Decay, Pre-delay, Damping,
+Width and Mix, plus Bypass. The underlying reference DSP and full command
+parameter set remain available.
+
 **Status:** ready-for-agent
 
 Approved and published to the local Markdown tracker on 23 October 2026. The
@@ -8,6 +56,14 @@ import and export. The generated WaveBob mockups are the visual reference;
 Artcraft remains architectural background rather than a styling target.
 
 [Accepted UI mockups](../../docs/ui-concept-01.png) | [Implementation tickets](README.md)
+
+Approved extension, 24 October 2026: [Live effect stacks, waveform envelopes and
+linked arrangement bounces](effects-and-clip-controls.md) is part of this canonical
+specification. It defines all eleven built-in effects, reference-based WaveBob
+implementations, separate egui control windows, clip envelopes and linked bounces.
+The [accepted effects mockup](effects-stack-mockup-v1.png) governs the changed
+panel/window layout. Tickets 27–44 implement this extension; older completed
+tickets retain their historical acceptance records.
 
 ## Problem Statement
 
@@ -27,6 +83,11 @@ files and a browser at left, effects at right, centered transport below the main
 view, and a persistent status bar at the very bottom. Both side panels resize
 by dragging, collapse independently using small edge arrows, and toggle together
 with the unmodified backtick key.
+
+Separate structural edits from nondestructive gain/fade envelopes and live effect
+stacks. The right panel holds compact effect rows; each effect opens a separate
+native egui control window. Render document processing into lossless bounces for
+all linked arrangement clips; preserve tails without moving later clips.
 
 Put editing, transport and project behavior behind a shared command interface.
 The egui frontend, headless runner and MCP adapter all use that interface. Add
@@ -60,9 +121,9 @@ and visually. Headless editing must run without a window or graphics device.
 22. As an editor, I want a click to place the cursor and a drag to select time across channels, so that editing and playback have precise targets.
 23. As an editor, I want exact selection start, end and duration readouts, so that I can verify an edit before applying it.
 24. As an editor, I want cut, copy, paste, delete and trim, so that I can perform basic waveform editing.
-25. As an editor, I want gain, fade in, fade out, reverse and reverb, so that common sound-shaping tasks are available in the editor.
-26. As an editor, I want effects to target the selection or otherwise the whole sample, so that I do not need to select everything manually.
-27. As an editor, I want the effects target and parameters to be visible before applying, so that I understand the scope of a change.
+25. As an editor, I want gain/fade handles on waveforms and clips, structural reverse, and eleven built-in effects, so that editing and sound shaping have appropriate controls.
+26. As an editor, I want a live effect stack for the whole document or one selected clip, so that I can hear parameter changes without Apply.
+27. As an editor, I want compact stack rows that open separate effect control windows, so that detailed controls remain accessible without filling the side panel.
 28. As an editor, I want undo and redo, so that I can experiment without losing previous work.
 29. As an editor, I want Space to play or pause from the current cursor, so that playback is quick to control.
 30. As an editor, I want Enter or comma to rewind to the start, so that I can restart playback consistently.
@@ -88,33 +149,40 @@ and visually. Headless editing must run without a window or graphics device.
 50. As a developer, I want deterministic audio fixtures and observable command results, so that correctness can be verified without relying on screenshots alone.
 51. As an editor, I want to import and audition MP3 files in version 1, so that I can edit and arrange existing compressed audio.
 52. As an editor, I want to export edited samples and arrangements as MP3 in version 1, so that I can share compressed audio directly from WaveBob.
+53. As an arranger, I want document changes bounced to all linked clips when returning to multitrack, so that the arrangement uses my current edited sound.
+54. As an arranger, I want preserved effect tails without moving later clips, so that decay remains natural and timing stays fixed.
+55. As an editor, I want projects to retain editable stacks and sources while exports contain rendered audio, so that I can revise my work later.
 
 ## Implementation Decisions
 
 ### Confirmed direction and version 1 defaults
 
 The two modes, side-panel contents, waveform overview interactions, transport
-shortcuts, selection-or-whole-sample effects, automatic crossfades, Rust/egui,
+shortcuts, structural editing, automatic crossfades, Rust/egui,
 desktop platforms, command-driven architecture, headless/MCP access, screenshots,
 status-bar help and panel controls come from the user. Match the generated
 WaveBob mockups, adding the requested status bar and panel arrows. Their layout,
 spacing, typography hierarchy, waveform/clip colors and control styling are the
-visual acceptance reference. MP3 import and export are required in version 1.
+visual acceptance reference. The accepted effect-stack/window mockup governs the
+updated right panel and separate editors. MP3 import and export remain required.
 
 The remaining decisions below define the first-release defaults. In particular:
-file support is mono/stereo WAV and MP3; edits are reversible; clips pin audio
-revisions; clip effects affect that instance; loop bounds follow the selection;
-and screenshots require a GUI renderer. Changes should be reflected explicitly
-in this specification and affected tickets.
+file support is mono/stereo WAV, MP3 and Ogg Vorbis; edits are reversible; new clips link to
+their source documents and retain immutable bounces; clip effects affect only
+that instance; loop bounds follow the body selection; and screenshots require a
+GUI renderer. The detailed effects contract defines parameters, limits and
+reference provenance. Pre-alpha project/command migration is not required.
 
 ### Domain and ownership
 
 - An **audio document** is an open sample with a stable identifier, metadata,
   immutable audio revisions, a working revision, an edit cursor and an optional
-  time selection. Opening a file does not overwrite it.
+  time selection, plus a nondestructive gain/fade envelope and effect stack.
+  Opening a file does not overwrite it.
 - An **audio revision** is immutable decoded audio plus its sample rate and
-  channel layout. Effects and structural edits produce a new revision. History
-  can retain older revisions without duplicating unchanged data eagerly.
+  channel layout. Structural edits and rendered bounces produce audio revisions;
+  envelope/stack edits change processing state and render identity without
+  replacing source PCM. History can share retained immutable revisions.
 - A **selection** is a half-open sample-frame interval within one document. It
   spans all channels in the initial release. Empty ranges resolve to no selection;
   nonempty ranges contain at least one frame. Cursor, selection and visible
@@ -126,9 +194,14 @@ in this specification and affected tickets.
   time selection. A **track** has a stable identifier, name, mute, solo, volume
   and pan. A **clip** refers to an audio revision, source interval, track and
   timeline position, plus instance-specific processing.
-- Clip source revisions are pinned at insertion. Later waveform edits do not
-  silently change existing arrangement clips. A future explicit source-update
-  operation can be added independently.
+- New clips retain an explicit document link and their last successful lossless
+  bounce. Returning to multitrack or rendering requires a current bounce and
+  refreshes all linked instances atomically, preserving placement/instance state.
+  Make independent retains a pinned source snapshot. Closing a waveform tab does
+  not delete a document source still referenced by linked clips.
+- Clip body/source intervals define trim and crossfade geometry; effect tails
+  extend audible duration separately. Render identities include source revision,
+  envelope, ordered stack/bypass, effect tempo, tail policy and DSP version.
 - Document coordinates use integer sample frames. The arrangement uses integer
   frames at its project rate, defaulting to 48 kHz; conversion and rounding rules
   are centralized. Mixed-rate sources are resampled for mixing without rewriting
@@ -170,19 +243,22 @@ in this specification and affected tickets.
   success or stable error codes, affected identifiers and the committed revision.
   Queries expose audio metadata, history availability and effective mix state as
   well as object and selection state.
-- Effects accept an explicit document/revision and range, or explicit whole-sample
-  target. The UI resolves selection-or-whole-sample into that request using the
-  current snapshot. External clients need not depend on hidden UI selection.
+- Stack/envelope commands accept explicit document/clip owners and expected edit
+  revisions; selection does not retarget them. Structural edits use explicit
+  ranges or whole-document targets. All clients share preview/update/commit/
+  cancel transactions, stable effect/parameter IDs and validated typed metadata.
 - Committed mutations are serialized and atomic. Invalid identifiers, stale
   revisions, out-of-range coordinates and invalid parameters fail without partial
   changes or new undo entries. Long operations return a job identifier, expose
   progress/completion/failure/cancellation, and publish results only at commit.
   A job based on a superseded revision fails as stale rather than overwriting a
   newer edit. Cancellation preserves the pre-operation state.
-- Filesystem work, DSP and peak generation run away from UI rendering. The audio
-  callback consumes prepared immutable render state through bounded handoff; it
-  does not perform file access, heap allocation or blocking locks. State queries
-  distinguish a requested transport change from its applied audio position.
+- Filesystem work, graph/kernel preparation, offline DSP and peak generation run
+  away from UI rendering. The audio callback executes bounded streaming DSP using
+  prepared state and preallocated buffers; it performs no file access, allocation,
+  buffer destruction or blocking locks. Queries distinguish requested/applied
+  transport and processing generations. Compensate processor latency, including
+  dry/bypassed paths; preserve intentional predelay/echo timing.
 
 ### Headless, MCP and screenshots
 
@@ -201,6 +277,9 @@ in this specification and affected tickets.
   sizes/visibility and report layout state. Commands can request a render barrier
   after relevant jobs complete. Pure headless sessions still report unavailable
   rendering rather than fabricating an image.
+- Presentation commands also open/focus/close effect control viewports and capture
+  each viewport's actual pixels with owner/effect identity and state revision.
+  Capturing the main window alone does not capture separate native windows.
 - Capture waits for a GUI frame reflecting at least the requested committed
   revision and presentation state; the result reports the revision actually
   rendered. Pending resources/jobs are reported. A timeout produces an explicit
@@ -244,7 +323,9 @@ in this specification and affected tickets.
   hover, or keyboard focus when nothing is hovered. Clear stale help immediately
   when the target disappears or the pointer leaves. Disabled controls explain why
   they are unavailable. Waveform and timeline regions describe their gestures.
-  Do not create floating tooltip popups for app controls.
+  General help stays in the status bar. Gain/fade handles additionally show a
+  compact local numeric value label on hover/focus/drag; explanatory tooltips
+  remain excluded. Effect windows provide their own local status/value help.
 - Progress and persistent errors have their own visible treatment and remain
   available when hover help changes. At narrow widths preserve selection state
   and truncate help first. Keyboard shortcuts are suppressed while typing, in
@@ -314,19 +395,34 @@ in this specification and affected tickets.
   Paste converts to the destination rate; initial channel conversion supports
   mono/stereo with documented duplication/downmix rules. Invalid/empty targets
   have explicit behavior. Copy and navigation do not dirty audio.
-- Gain uses dB, fade in/out use linear amplitude across the target, and reverse
-  reverses frame order per channel. Edits leave frames outside the target
-  unchanged. Single-frame fades use unity gain to avoid undefined interpolation.
-- Reverb provides bounded room size, decay and wet/dry controls, with deterministic
-  offline processing. Process a selection independently with reset effect state;
-  initial tail policy is to truncate at the target end, retaining sample
-  length and leaving outside frames untouched. Show that policy beside the effect.
-  Clip reverb uses the same policy within its source interval.
-- Effects require explicit Apply; changing controls alone does not mutate audio.
-  Successful Apply creates one undoable edit. Document edits create revisions;
-  clip effects update an instance-specific processing chain. Resolve a document
-  range in waveform mode and one selected clip in arrangement mode; disable Apply
-  for no clip or multiple clips in the first release.
+- Structural reverse remains an Edit action with an explicit editing target.
+  Copy/cut use source PCM without baking the live envelope/stack; range export
+  provides processed audio. Paste does not import source processing state.
+- Document and clip gain/fades are nondestructive envelopes, adjusted by the
+  top-left/right fade triangles and top-center gain square. Fades use linear
+  amplitude and source-frame durations; overlapping ramps multiply, and the
+  single-frame convention is unity. Handles ignore the current selection and
+  refer to true body edges, with exact numeric/keyboard access when offscreen.
+- Compact stack rows open separate modeless native egui editors. All eleven
+  effects are required: Parametric EQ, Limiter, Reverb, Delay, Chorus, Fast
+  Distortion, Soft Clipper, Balance, Stereo Enhancer, Stereo Shaper and Transient
+  Processor. Use the reference algorithms in WaveBob-owned code and reproduce
+  useful source UI layouts. Advanced EQ quality modes, external sidechains and
+  Stereo Shaper difference-output routing are deferred. Plugin hosting and
+  upstream binary/project-state compatibility are excluded.
+- Stacks process their entire owner: active document or exactly one selected
+  arrangement clip. Parameters preview live without Apply; one completed gesture
+  is one undo step and Escape reverts it. Open editors stay attached to stable
+  owner/effect IDs when selection changes; closing the window leaves sound active.
+- Document order is source -> envelope -> stack -> bounce. Arrangement order is
+  bounce interval -> clip envelope -> clip stack -> crossfade -> track -> master.
+  Bake document processing once. Preserve tails with the detailed contract's
+  threshold/hold and 60-second cap, recording capped-tail truncation explicitly.
+  Mono sources may produce stereo processed audio; mono export downmix is explicit.
+  Tempo sync uses a visible project Effect tempo (initially 120 BPM), shared by
+  live/offline rendering; free time remains the default and no beat grid is added.
+- The [detailed effects contract](effects-and-clip-controls.md) is authoritative
+  for effect scope, gestures, smoothing, tails, reference validation and limits.
 - Keep internal processing in floating point. Report overloads; clamp or quantize
   only as specified by export encoding. Undo restores audio and relevant edit
   selection/cursor; redo reapplies the same result. Length-changing edits remap
@@ -340,14 +436,17 @@ in this specification and affected tickets.
   looping without changing the selection.
 - With loop enabled, loop the nonempty selection, otherwise the entire active
   document/arrangement. Starting outside an active loop begins at its start.
-  Empty arrangements do not play. Without looping, playback stops at the end and
-  leaves the cursor there; another play from the end starts at the beginning.
+  Empty arrangements do not play. Without looping, playback drains contributing
+  effect tails and stops at the audible end; playing again starts at the beginning.
   Selection controls loop bounds but does not limit ordinary non-looped playback.
-- A seek, active-document change or committed edit swaps prepared audio state at
-  a safe audio-block handoff; old buffers remain valid while in use. Mode/document
-  switches pause playback. Track/device failures produce recoverable status.
+- Prepared graph changes use safe block handoffs and smooth transitions while
+  preserving transport position. Seek resets effects with prepared context;
+  pause retains state and loop wraps preserve it. Mode/document switches pause.
+  Entering multitrack prepares stale linked bounces before playback/export;
+  progress/cancellation and failures remain visible. Track/device failures recover.
 - Create, rename, reorder and delete tracks. Place an open document onto a track
-  by dragging; the clip initially spans the document's current revision. Display
+  by dragging; the clip initially links to the document and spans its source body.
+  Its rendered tail extends separately. Display
   a drop preview and commit once on release. Drag existing clips to reposition or
   change track, preserving their source interval. Off-track drops cancel.
 - First-release arrangement timing uses seconds and sample frames, with no
@@ -366,6 +465,10 @@ in this specification and affected tickets.
   clips use insertion order. The handle takes precedence over clip bodies,
   shows a resize cursor and status help, and uses source-bounded trim preview,
   one undoable commit on release and Escape cancellation.
+- Crossfade geometry uses bodies, not tails. Tail overlap does not move later clips
+  or create crossfades. Apply crossfade envelopes to processed output and hold the
+  boundary value into a tail. Tail voices may overlap more than two bodies' voices
+  within explicit resource limits; the two-body placement restriction remains.
 - The bounded first release supports at most two simultaneous clips on one
   track. Reject a third simultaneous overlap atomically, with a visible placement
   explanation. For equal-start clips use stable insertion order for transition
@@ -377,9 +480,10 @@ in this specification and affected tickets.
   coincident clips use stable insertion ordering for the ordinary transition.
   Containment of one/two project frames shares both voices at 1/√2. Longer
   containment uses sin(πt) for the inner voice and |cos(πt)| for the outer voice.
-- Offline arrangement export and live playback consume the same prepared mixing
-  semantics: source interval, resampling, clip effects, crossfade, track gain/pan,
-  mute/solo and master output. Export does not require a physical output device.
+- Offline export and live playback share source interval, document bounce, clip
+  envelope/stack, latency compensation, resampling, crossfade, track gain/pan,
+  mute/solo and master semantics. Arrangement end includes contributing tails.
+  Export is device-free and waits for coherent current linked bounces.
 
 ### Persistence, errors and platform completion
 
@@ -392,6 +496,9 @@ in this specification and affected tickets.
   lossless working revision and marks that revision saved only for a document
   save, rather than replacing it with a re-decoded lossy result. Save writes
   atomically and never marks a newer revision saved when an older job completes.
+- Save/export renders the current envelope/stack and tails, while retaining the
+  editable source/processing in session. Saved render identities are separate
+  from source revisions; envelope-only edits dirty the sample and project.
 - Save projects as a versioned manifest with a managed asset directory containing
   referenced immutable audio revisions, arrangement state and clip processing.
   Source paths are provenance, not a requirement for reopening a saved project.
@@ -400,6 +507,11 @@ in this specification and affected tickets.
   Reopen restores editable audio and arrangement state; undo history need not
   survive restart. Detect missing assets and unsupported schema versions without
   silently discarding state. UI layout preferences are stored separately.
+- Persist envelopes, all eleven effect types/parameters/order/bypass, explicit
+  links, effect tempo, render identities, tail policy and lossless bounce assets.
+  Reopen must work without original sources or an external cache. Replace/version
+  the pre-alpha schema as needed; old projects/presets/commands need no migration.
+  Record reference provenance and applicable notices with distribution sources.
 - Project save/export jobs report progress, clean temporary output after failure
   or cancellation, and replace an existing destination only with explicit intent.
   The GUI prompts before discarding dirty work. External commands specify policy
@@ -417,9 +529,8 @@ in this specification and affected tickets.
   history, saved/reloaded state and rendered audio. The headless adapter is the
   simplest harness; assertions do not inspect private fields or module structure.
   The user has confirmed that this seam matches their expectation.
-- There is no existing test suite or domain command interface to preserve. The
-  current code is a demo-data egui shell with CI configuration and no real audio
-  implementation. Existing mode-selection widgets provide layout context only.
+- Extend the existing command/query and adapter tests, replacing obsolete
+  destructive-effect assumptions with live state/envelope/stack behavior.
 - Use generated impulses, ramps, known stereo frames, sines and silent intervals
   as deterministic audio fixtures. Check exact frame counts and unchanged regions;
   use documented numerical tolerances for resampling, reverb and mixing. Verify
@@ -442,6 +553,11 @@ in this specification and affected tickets.
   click-versus-drag, overview move/resize, zoom anchoring, clip drop, panel drags,
   chevrons, backtick, focus guards and status-bar help without tooltip popups.
   These tests verify commands and visible outcomes rather than widget internals.
+- Verify all eleven same-algorithm implementations against pinned reference
+  renders, with declared numerical tolerances and documented intentional
+  differences. Verify callback allocation/load, parameter smoothing, latency,
+  tail termination, channel policy, tempo and seeded modulation. Each effect
+  ticket includes DSP, its egui editor and public-seam validation.
 - Capture actual rendered PNGs after a state/render barrier for both modes, panels
   hidden/restored, narrow/high-DPI layouts and status help. Assert dimensions,
   revision metadata and representative visible content; inspect representative
@@ -452,10 +568,11 @@ in this specification and affected tickets.
 - Test playback timing and looping against a controllable output adapter, and
   compare its mixed frames with offline export. Hardware smoke tests verify audio
   initialization, pause/seek, device failure and callback operation on each OS.
-- Include an end-to-end AI workflow: import a fixture, select frames, apply gain,
-  undo/redo, arrange two overlapping clips, inspect/query, export, switch view and
-  capture. Run equivalent domain operations headlessly; request capture without a
-  renderer and assert an explicit capability error.
+- Include an end-to-end AI workflow: import a fixture, set waveform handles,
+  change/reorder live effects in separate windows, undo/redo, switch to multitrack
+  and refresh all linked clips, edit one instance, inspect tails/crossfades, save/
+  reopen, export WAV/MP3 and capture both main/effect windows. Repeat the domain
+  operations headlessly and through MCP; unsupported capture fails explicitly.
 - Keep a separate large-file responsiveness check: background import, peak build,
   effect and export jobs must leave UI interaction responsive and must not perform
   blocking work in the callback. Establish measured memory/latency baselines during
@@ -466,9 +583,12 @@ in this specification and affected tickets.
 - Recording audio, MIDI, virtual instruments, tempo/beat grids, automation lanes,
   time stretching, pitch correction and third-party effect plug-in hosting.
 - More than stereo output, per-channel editing, surround workflows and initial
-  import/export codecs beyond the explicitly listed WAV variants and MP3.
-- More than two simultaneous clips per track, arbitrary overlap graphs and a
+  import/export codecs beyond the explicitly listed WAV variants, MP3 and Ogg Vorbis import.
+- More than two simultaneous clip bodies per track, arbitrary overlap graphs and a
   user-editable crossfade-curve editor in the first release.
+- Selection-only live effects, track/master stacks, external sidechain routing,
+  Stereo Shaper extra outputs, advanced EQ linear-phase/HQ modes and old pre-alpha
+  project/preset/command compatibility. Effect BPM is not a tempo/beat-grid feature.
 - Cloud storage, collaboration, remote MCP servers, autonomous AI planning inside
   WaveBob, and natural-language commands interpreted by the editing core.
 - GPU-free raster capture, recording the desktop, and capture of native dialogs.
@@ -486,9 +606,9 @@ gated on this pass. Native macOS/Linux CI is deferred until a remote exists.
 This specification supersedes unresolved behavior notes in the earlier concept
 brief. The concept image remains a visual reference; it does not accurately show
 the zoomed ruler relationship and predates the requested status bar and chevrons.
-The current application is a scaffold, so none of the planned capabilities should
-be described as implemented. Rust was unavailable during scaffold creation;
-compilation, formatting and platform checks must be established in the first slice.
+The original publication began from a scaffold. Ticket verification records now
+describe delivered baseline capabilities; the effects extension remains work to
+implement. Publication alone is never evidence of runtime support.
 
 The user approved the command seam and numbered ticket breakdown, chose a local
 Markdown tracker, required MP3 import/export in version 1 and clarified that the

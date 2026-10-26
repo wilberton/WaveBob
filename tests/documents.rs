@@ -217,19 +217,25 @@ fn cancellation_before_publication_never_creates_partial_documents() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("cancel.wav");
     fixture(&path, 1, &[0, 100, -100]);
-    let mut session = Session::default();
-    let job = success(send(&mut session, "documents.open", json!({"path":path})));
-    let cancelled = success(send(
-        &mut session,
-        "jobs.cancel",
-        json!({"job_id":job["id"]}),
-    ));
-    assert_eq!(cancelled["status"], "cancelled");
-    std::thread::sleep(std::time::Duration::from_millis(10));
-    let job = wait(&mut session, job["id"].as_str().unwrap());
-    assert_eq!(job["status"], "cancelled");
-    assert!(session.snapshot().documents.is_empty());
-    assert_eq!(session.snapshot().revision, 0);
+    for path in [
+        path,
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/vorbis-2ch-48000.ogg"),
+    ] {
+        let mut session = Session::default();
+        let job = success(send(&mut session, "documents.open", json!({"path":path})));
+        let cancelled = success(send(
+            &mut session,
+            "jobs.cancel",
+            json!({"job_id":job["id"]}),
+        ));
+        assert_eq!(cancelled["status"], "cancelled");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let job = wait(&mut session, job["id"].as_str().unwrap());
+        assert_eq!(job["status"], "cancelled");
+        assert!(session.snapshot().documents.is_empty());
+        assert_eq!(session.snapshot().revision, 0);
+    }
 }
 
 #[test]
@@ -418,6 +424,150 @@ fn malformed_and_truncated_mp3s_never_publish_partial_audio() {
         let job = open(&mut session, &path);
         assert_eq!(job["status"], "failed", "{job}");
         assert_eq!(job["error"]["code"], "decode_failed");
+        assert!(session.snapshot().documents.is_empty());
+    }
+}
+
+#[test]
+fn ogg_vorbis_matches_independent_pcm_and_saves_losslessly() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audio");
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(root.join("ogg-manifest.json")).unwrap()).unwrap();
+    for fixture in manifest["fixtures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["channels"].as_u64().unwrap() <= 2)
+    {
+        let name = fixture["name"].as_str().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("音色.OGG");
+        std::fs::copy(root.join(format!("{name}.ogg")), &path).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let mut session = Session::default();
+        let job = open(&mut session, &path);
+        assert_eq!(job["status"], "succeeded", "{name}: {job}");
+        let doc = &job["result"];
+        assert_eq!(doc["encoding"], "ogg_vorbis");
+        assert_eq!(doc["sample_rate"], fixture["sample_rate"]);
+        assert_eq!(doc["channels"], fixture["channels"]);
+        assert_eq!(doc["frames"], fixture["source_frames"], "{name}");
+        let reference = std::fs::read(root.join(format!("{name}.f32"))).unwrap();
+        let reference: Vec<f64> = reference
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b) as f64)
+            .collect();
+        let frames = doc["frames"].as_u64().unwrap();
+        let channels = doc["channels"].as_u64().unwrap() as usize;
+        let mut max = 0.0_f64;
+        assert_eq!(doc["frames"], fixture["decoded_frames"]);
+        for start in (0..frames).step_by(4096) {
+            let count = (frames - start).min(4096);
+            let pcm = success(send(
+                &mut session,
+                "documents.samples",
+                json!({"document_id":doc["id"],"start_frame":start,"frames":count}),
+            ));
+            for frame in 0..count as usize {
+                for ch in 0..channels {
+                    max = max.max(
+                        (pcm["channels"][ch][frame].as_f64().unwrap()
+                            - reference[(start as usize + frame) * channels + ch])
+                            .abs(),
+                    );
+                }
+            }
+        }
+        assert!(max < 0.0001, "{name}: PCM max error {max}");
+        let wave = success(send(
+            &mut session,
+            "documents.waveform",
+            json!({"document_id":doc["id"],"bins":32}),
+        ));
+        assert_eq!(wave["channels"].as_array().unwrap().len(), channels);
+        let save = json!({"document_id":doc["id"],"revision_id":doc["revision_id"],"format":{"kind":"wav","encoding":"float32"},"overwrite":true});
+        assert_eq!(
+            send(&mut session, "documents.save", save.clone())["error"]["code"],
+            "invalid_params"
+        );
+        let mut save = save;
+        let output = dir.path().join("saved.wav");
+        save["path"] = json!(output);
+        let started = success(send(&mut session, "documents.save", save));
+        let saved = wait(&mut session, started["id"].as_str().unwrap());
+        assert_eq!(saved["status"], "succeeded", "{saved}");
+        let reopened = open(&mut session, &output);
+        assert_eq!(reopened["result"]["frames"], doc["frames"]);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+}
+
+#[test]
+fn invalid_ogg_imports_never_publish_partial_documents() {
+    use symphonia::core::{checksum::Crc32, io::Monitor};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audio");
+    let bytes = std::fs::read(root.join("vorbis-2ch-48000.ogg")).unwrap();
+    let mut corrupt = bytes.clone();
+    *corrupt.last_mut().unwrap() ^= 1;
+    let end_page = bytes.windows(4).rposition(|b| b == b"OggS").unwrap();
+    let mut chained = bytes.clone();
+    chained.extend_from_slice(&bytes);
+    let repage = |data: &mut [u8]| {
+        let segments = data[26] as usize;
+        let size = 27
+            + segments
+            + data[27..27 + segments]
+                .iter()
+                .map(|n| *n as usize)
+                .sum::<usize>();
+        data[22..26].fill(0);
+        let mut crc = Crc32::new(0);
+        crc.process_buf_bytes(&data[..size]);
+        data[22..26].copy_from_slice(&crc.crc().to_le_bytes());
+    };
+    let mut unsupported = bytes.clone();
+    let packet = 27 + unsupported[26] as usize;
+    unsupported[packet..packet + 8].copy_from_slice(b"OpusHead");
+    repage(&mut unsupported);
+    let mut missing_page = bytes.clone();
+    missing_page[end_page + 18..end_page + 22].copy_from_slice(&99_u32.to_le_bytes());
+    repage(&mut missing_page[end_page..]);
+    let mut multiplexed = bytes.clone();
+    multiplexed[end_page + 14] ^= 1;
+    repage(&mut multiplexed[end_page..]);
+    let dir = tempfile::tempdir().unwrap();
+    for (name, data, code) in [
+        ("empty", vec![], "decode_failed"),
+        ("garbage", b"not Ogg".to_vec(), "decode_failed"),
+        (
+            "truncated",
+            bytes[..bytes.len() - 1].to_vec(),
+            "decode_failed",
+        ),
+        (
+            "missing-final-page",
+            bytes[..end_page].to_vec(),
+            "decode_failed",
+        ),
+        ("checksum", corrupt, "decode_failed"),
+        ("chained", chained, "unsupported_format"),
+        ("other-codec", unsupported, "unsupported_format"),
+        ("missing-page", missing_page, "decode_failed"),
+        ("multiplexed", multiplexed, "unsupported_format"),
+        (
+            "surround",
+            std::fs::read(root.join("vorbis-6ch-48000.ogg")).unwrap(),
+            "unsupported_format",
+        ),
+    ] {
+        let path = dir.path().join(format!("{name}.ogg"));
+        std::fs::write(&path, data).unwrap();
+        let mut session = Session::default();
+        let job = open(&mut session, &path);
+        assert_eq!(job["status"], "failed", "{name}: {job}");
+        assert_eq!(job["error"]["code"], code, "{name}: {job}");
         assert!(session.snapshot().documents.is_empty());
     }
 }

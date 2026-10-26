@@ -145,6 +145,7 @@ fn staggered_crossfade_audio_endpoints_and_move_trim_history_follow_geometry() {
             .is_empty()
     );
     call(&mut session, "history.undo", json!({}));
+    let first = call(&mut session, "arrangement.get", json!({}))["tracks"][0]["clips"][0].clone();
     let started = call(
         &mut session,
         "clips.trim",
@@ -426,7 +427,7 @@ fn timeline_loops_silence_and_processed_clips_share_live_mixing() {
     let clip = &arr["tracks"][0]["clips"][0];
     let started = call(
         &mut session,
-        "clips.effects.apply",
+        "clips.pcm.process",
         json!({"clip_id":clip["id"],"edit_revision_id":clip["edit_revision_id"],"effect":{"kind":"gain","db":6.020599913279624}}),
     );
     job(&mut session, started);
@@ -513,4 +514,105 @@ fn preparing_play_can_be_paused_and_stale_inspection_is_rejected() {
         json!({"revision_id":before.arrangement.revision_id}),
     );
     assert_eq!(prepared["status"], "succeeded");
+}
+
+#[test]
+fn live_clip_envelopes_match_mix_reads_at_multiple_rates_and_block_sizes() {
+    for rate in [44100, 48000, 96000] {
+        for block in [1, 7, 64] {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut session, mut output) = Session::with_manual_output(48000).unwrap();
+            let pcm: Vec<f32> = (0..160).map(|n| n as f32 / 320.0).collect();
+            let doc = source(&mut session, dir.path(), "range.wav", rate, 1, &pcm);
+            let arr = call(&mut session, "tracks.add", json!({}));
+            let arr = call(
+                &mut session,
+                "clips.insert",
+                json!({"track_id":arr["tracks"][0]["id"],"document_id":doc["id"],"revision_id":doc["revision_id"],"source_start":16,"source_end":144,"position":3}),
+            );
+            let clip = &arr["tracks"][0]["clips"][0];
+            let owner = json!({"kind":"clip","id":clip["id"]});
+            let state = call(&mut session, "processing.get", json!({"owner":owner}));
+            call(
+                &mut session,
+                "processing.edit",
+                json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"],"change":{"action":"set_envelope","envelope":{"gain_db":-6.020599913279624,"fade_in_frames":8,"fade_out_frames":12}}}),
+            );
+            prepare(&mut session);
+            let frames = session.snapshot().arrangement.tracks[0].clips[0].frames as usize + 3;
+            let expected = samples(&mut session, 0, frames as u32);
+            call(&mut session, "mix.play", json!({}));
+            let mut actual = vec![[0.0; 2]; frames];
+            for chunk in actual.chunks_mut(block) {
+                output.render_into(chunk);
+            }
+            for (n, frame) in actual.iter().enumerate() {
+                assert_eq!(
+                    frame[0] as f64,
+                    expected["channels"][0][n].as_f64().unwrap(),
+                    "rate {rate} block {block} frame {n}"
+                );
+                assert_eq!(frame[0], frame[1]);
+            }
+            let local = 20u64;
+            let position = local as f64 * rate as f64 / 48000.0;
+            let expected_level =
+                ((16.0 + position) / 320.0) * 0.5 * std::f64::consts::FRAC_1_SQRT_2;
+            near(actual[local as usize + 3][0] as f64, expected_level);
+            assert_eq!(
+                call(
+                    &mut session,
+                    "documents.samples",
+                    json!({"document_id":doc["id"],"start_frame":16,"frames":1})
+                )["channels"][0][0],
+                pcm[16] as f64
+            );
+        }
+    }
+}
+
+#[test]
+fn clip_preview_preparation_is_audible_cancelable_and_does_not_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut session, mut output) = Session::with_manual_output(48000).unwrap();
+    let doc = source(
+        &mut session,
+        dir.path(),
+        "preview.wav",
+        48000,
+        2,
+        &vec![0.5; 16384],
+    );
+    let arr = call(&mut session, "tracks.add", json!({}));
+    let arr = insert(&mut session, &doc, &arr["tracks"][0]["id"], 0);
+    let owner = json!({"kind":"clip","id":arr["tracks"][0]["clips"][0]["id"]});
+    prepare(&mut session);
+    call(&mut session, "mix.play", json!({}));
+    output.render_into(&mut [[0.0; 2]; 64]);
+    let revision = session.snapshot().arrangement.revision_id;
+    let state = call(&mut session, "processing.get", json!({"owner":owner}));
+    let preview = call(
+        &mut session,
+        "processing.preview.begin",
+        json!({"owner":owner,"expected_edit_revision":state["committed"]["edit_revision_id"]}),
+    );
+    call(
+        &mut session,
+        "processing.preview.update",
+        json!({"preview_id":preview["preview_id"],"change":{"action":"set_envelope","envelope":{"gain_db":-6.020599913279624,"fade_in_frames":0,"fade_out_frames":0}}}),
+    );
+    prepare(&mut session);
+    let mut frames = [[0.0; 2]; 600];
+    output.render_into(&mut frames);
+    near(frames[599][0] as f64, 0.25);
+    assert_eq!(session.snapshot().arrangement.revision_id, revision);
+    call(
+        &mut session,
+        "processing.preview.cancel",
+        json!({"preview_id":preview["preview_id"]}),
+    );
+    prepare(&mut session);
+    output.render_into(&mut frames);
+    near(frames[599][0] as f64, 0.5);
+    assert_eq!(session.snapshot().arrangement.revision_id, revision);
 }

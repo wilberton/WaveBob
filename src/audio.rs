@@ -12,6 +12,7 @@ const BLOCK: usize = 256;
 const MAX_VALUES: usize = 128 * 1024 * 1024;
 pub(crate) mod mix;
 mod mp3;
+mod ogg;
 pub(crate) mod resample;
 
 #[derive(Debug)]
@@ -82,6 +83,12 @@ pub(crate) fn decode(
     cancel: &AtomicBool,
     progress: impl Fn(u8),
 ) -> Result<Audio, CommandError> {
+    if path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("ogg"))
+    {
+        return ogg::decode(path, cancel, &progress);
+    }
     if path
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("mp3"))
